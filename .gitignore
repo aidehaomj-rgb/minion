@@ -1,0 +1,11 @@
+target/
+skills/
+.idea/
+.claude/worktrees/
+*.iml
+.minion/
+claudeinit.txt
+dependency-reduced-pom.xml
+src/resource/config.properties
+/bak
+/run/
