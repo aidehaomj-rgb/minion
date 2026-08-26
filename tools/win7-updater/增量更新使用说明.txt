@@ -1,0 +1,39 @@
+Minion 增量更新包使用说明
+===========================
+
+一、第一次使用更新器
+
+1. 把整个增量更新包带入内网电脑并解压。
+2. 完全关闭 Minion。
+3. 双击 Update-Minion.cmd。
+4. 如果更新器没有自动找到 Minion，请输入安装目录，例如：
+   D:\tools\minion-win7-offline-0.1.0
+5. 确认后更新器会记住该目录，以后通常不需要再次输入。
+
+也可以把整个更新包文件夹直接放进 Minion 安装目录，更新器会自动识别父目录。
+
+二、更新器会做什么
+
+1. 校验新版 JAR 的 SHA-256。
+2. 将旧 JAR 备份到：backup\minion-0.1.0.jar.bak
+3. 校验复制后的新 JAR。
+4. 替换 minion-0.1.0.jar。
+5. 替换失败时自动恢复旧 JAR。
+
+三、不会修改的内容
+
+jdk8\
+model.json
+workspace.json
+config.properties
+mcp.json
+session\
+skills\
+
+四、回退
+
+如果新版本启动后有问题：
+
+1. 关闭 Minion。
+2. 将 backup\minion-0.1.0.jar.bak 复制回安装目录。
+3. 改名为 minion-0.1.0.jar 并覆盖新版文件。
