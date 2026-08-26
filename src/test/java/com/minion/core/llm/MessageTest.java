@@ -144,6 +144,13 @@ public class MessageTest {
         assertFalse(sup.toApiJson().has("supplement"));
     }
 
+    @Test
+    public void attachmentContent_isCollapsedInChatDisplayOnly() {
+        String raw = "<user_attachment name=\"数据&amp;统计.xlsx\" type=\"xlsx\">\n大量正文\n</user_attachment> 请汇总";
+        assertEquals("文件：数据&统计.xlsx 请汇总", ImagePart.displayText(null, raw));
+        assertEquals(raw, Message.user(raw).toApiJson().get("content").getAsString());
+    }
+
     /** 技能加载消息：USER 角色 + pinned 标记（上下文压缩豁免）；toApiJson 不输出 pinned（本地标记，与 supplement 同理） */
     @Test
     public void skillMessage_isUserRoleAndPinned() {

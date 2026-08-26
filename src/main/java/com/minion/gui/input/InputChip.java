@@ -47,6 +47,11 @@ public final class InputChip {
         return new InputChip(Type.IMAGE, "data:" + mime + ";base64," + base64, "图片：" + name, null);
     }
 
+    /** 上传的非图片附件：content 为已在本地安全提取并包裹的文本，不包含原始二进制。 */
+    public static InputChip attachmentChip(String content, String name) {
+        return new InputChip(Type.FILE, content, "文件：" + name, null);
+    }
+
     /** 弹层模式 → 块类型（NONE 不进确认路径，兜底 COMMAND） */
     public static Type modeToType(CompletionParser.Mode mode) {
         switch (mode) {

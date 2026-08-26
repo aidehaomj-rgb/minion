@@ -87,6 +87,14 @@ public class InputChipTest {
         assertEquals("/help 文字", InputChip.compose(listOf(cmd("/help"), img), "文字"));
     }
 
+    @Test public void attachmentChip_isIncludedAsContext() {
+        InputChip file = InputChip.attachmentChip("<user_attachment>内容</user_attachment>", "数据.csv");
+        assertEquals(InputChip.Type.FILE, file.type);
+        assertEquals("文件：数据.csv", file.display);
+        assertEquals("<user_attachment>内容</user_attachment> 请分析",
+                InputChip.compose(listOf(file), "请分析"));
+    }
+
     private static InputChip paste(String content, String placeholder) {
         return InputChip.pasteChip(content, placeholder);
     }

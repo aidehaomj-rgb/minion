@@ -37,7 +37,7 @@ import java.util.Map;
 
 /** 底部输入区：4/9 宽居中大框（上=块行+输入框，下=底部操作行：上传按钮左 + 发送按钮右）+ /命令与 @文件补全弹层。
  *  按钮语义：上箭头=发送/补充/回答、变淡箭头=空输入或等待回答、方块=终止（提问挂起时改 Esc 终止）；
- *  背景按状态取色（btn-send-empty #f48771 / btn-send-full #ff947c）。上传按钮（回形针）→ FileChooser 选图建 IMAGE 块。
+ *  背景按状态取色（btn-send-empty #f48771 / btn-send-full #ff947c）。上传按钮（回形针）支持图片和常用文档。
  *  运行中 + 有内容 → 补充；等待回答 + 有内容 → 回答；运行中 + 空 → 终止。 */
 public class InputView extends VBox {
 
@@ -102,8 +102,8 @@ public class InputView extends VBox {
         uploadButton.setMinSize(30, 30);
         uploadButton.setPrefSize(30, 30);
         uploadButton.getStyleClass().add("btn-upload");
-        uploadButton.setTooltip(new Tooltip("上传图片 (最多" + ImagePart.MAX_IMAGES + "张, 每张≤" + (ImagePart.MAX_FILE_BYTES / 1024 / 1024) + "MB)"));
-        uploadButton.setOnAction(e -> chooseImages());
+        uploadButton.setTooltip(new Tooltip("添加附件（图片、PDF、Word、Excel、PPT、文本/代码）"));
+        uploadButton.setOnAction(e -> chooseAttachments());
 
         sendButton.setMinSize(36, 36);
         sendButton.setPrefSize(36, 36);
@@ -638,31 +638,62 @@ public class InputView extends VBox {
         return out;
     }
 
-    /** 上传图片：FileChooser 选图 → 大小/数量校验 → 转 base64 建 IMAGE 块 */
-    private void chooseImages() {
+    /** 添加附件：图片走视觉通道，其他受支持文件在本地提取文本后加入当前消息。 */
+    private void chooseAttachments() {
         FileChooser chooser = new FileChooser();
-        chooser.setTitle("上传图片");
+        chooser.setTitle("添加附件");
+        chooser.getExtensionFilters().add(new ExtensionFilter("支持的文件",
+                "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp", "*.webp",
+                "*.pdf", "*.docx", "*.xlsx", "*.pptx", "*.txt", "*.md", "*.csv", "*.tsv",
+                "*.json", "*.xml", "*.yaml", "*.yml", "*.log", "*.java", "*.py", "*.js", "*.ts",
+                "*.html", "*.css", "*.sql", "*.sh", "*.ps1", "*.bat", "*.properties", "*.ini", "*.conf"));
         chooser.getExtensionFilters().add(new ExtensionFilter("图片文件",
                 "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp", "*.webp"));
-        File f = chooser.showOpenDialog(getScene().getWindow());
-        if (f == null) return;
-        if (f.length() > ImagePart.MAX_FILE_BYTES) {
-            notifyChat("图片超过 " + (ImagePart.MAX_FILE_BYTES / 1024 / 1024) + "MB，拒绝上传: " + f.getName());
-            return;
-        }
+        chooser.getExtensionFilters().add(new ExtensionFilter("文档和文本",
+                "*.pdf", "*.docx", "*.xlsx", "*.pptx", "*.txt", "*.md", "*.csv", "*.tsv",
+                "*.json", "*.xml", "*.yaml", "*.yml", "*.log", "*.java", "*.py", "*.js", "*.ts",
+                "*.html", "*.css", "*.sql", "*.sh", "*.ps1", "*.bat", "*.properties", "*.ini", "*.conf"));
+        List<File> selected = chooser.showOpenMultipleDialog(getScene().getWindow());
+        if (selected == null || selected.isEmpty()) return;
+
         int have = 0;
         for (InputChip c : chips) if (c.type == InputChip.Type.IMAGE) have++;
-        if (have >= ImagePart.MAX_IMAGES) {
-            notifyChat("最多上传 " + ImagePart.MAX_IMAGES + " 张图片");
-            return;
+        int documents = 0;
+        for (InputChip c : chips) if (c.type == InputChip.Type.FILE && c.display.startsWith("文件：")) documents++;
+        for (File f : selected) {
+            try {
+                if (isImage(f.getName())) {
+                    if (have >= ImagePart.MAX_IMAGES) {
+                        notifyChat("最多上传 " + ImagePart.MAX_IMAGES + " 张图片，已跳过: " + f.getName());
+                        continue;
+                    }
+                    if (f.length() > ImagePart.MAX_FILE_BYTES) {
+                        notifyChat("图片超过 " + (ImagePart.MAX_FILE_BYTES / 1024 / 1024) + "MB，已跳过: " + f.getName());
+                        continue;
+                    }
+                    byte[] bytes = Files.readAllBytes(f.toPath());
+                    addChip(InputChip.imageChip(mimeFor(f.getName()), Base64.getEncoder().encodeToString(bytes), f.getName()));
+                    have++;
+                } else {
+                    if (documents >= AttachmentReader.MAX_ATTACHMENTS) {
+                        notifyChat("最多添加 " + AttachmentReader.MAX_ATTACHMENTS + " 个文档，已跳过: " + f.getName());
+                        continue;
+                    }
+                    AttachmentReader.Result result = AttachmentReader.read(f.toPath());
+                    addChip(InputChip.attachmentChip(result.promptText, result.displayName));
+                    documents++;
+                    if (result.truncated) notifyChat("附件内容较长，已截取前 " + AttachmentReader.MAX_EXTRACTED_CHARS + " 个字符: " + f.getName());
+                }
+            } catch (Exception ex) {
+                notifyChat("读取附件失败（" + f.getName() + "）: " + ex.getMessage());
+            }
         }
-        try {
-            byte[] bytes = Files.readAllBytes(f.toPath());
-            String b64 = Base64.getEncoder().encodeToString(bytes);
-            addChip(InputChip.imageChip(mimeFor(f.getName()), b64, f.getName()));
-        } catch (Exception ex) {
-            notifyChat("读取图片失败: " + ex.getMessage());
-        }
+    }
+
+    private static boolean isImage(String name) {
+        String n = name == null ? "" : name.toLowerCase();
+        return n.endsWith(".png") || n.endsWith(".jpg") || n.endsWith(".jpeg")
+                || n.endsWith(".gif") || n.endsWith(".bmp") || n.endsWith(".webp");
     }
 
     /** 文件名后缀 → mime；未知后缀兜底 png */
