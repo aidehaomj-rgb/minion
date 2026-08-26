@@ -1,17 +1,32 @@
-Minion custom.1 增量更新
+Minion custom.2 增量更新
 ========================
 
-发布日期：2026-08-26
-上游基线：ce92ec3943d63dab7e845f714544ce24501d5144
+发布日期：2026-08-27
+包含提交：95117e8、58b364c
 
-本包用于验证一键增量更新流程，应用 JAR 与当前 0.1.0 上游基线一致。
+本包合并最近两次功能更新，供已安装并能正常运行的 Win7 版 Minion 直接增量升级。
 
 新增：
 
-1. Win7 一键更新程序。
-2. 自动记忆 Minion 安装目录。
-3. 更新包 SHA-256 校验。
-4. 更新前自动备份旧 JAR。
-5. 更新失败自动回滚。
+1. 通用文件附件：支持 PDF、DOCX、XLSX、PPTX、TXT、CSV、Markdown 和常见代码文件；图片仍按视觉输入处理。
+2. Python/Anaconda：可自动识别 Win7 上的 Python 3.7.6、Anaconda3/Miniconda，并支持手动指定解释器路径。
+3. Excel 数据分析：可检查、读取 XLSX、XLS、XLSM、CSV、TSV，调用 pandas/openpyxl/xlrd 分析数据。
+4. SQL 数据库：新增 SQLite 表结构查看、查询和经确认后执行写入语句。
+5. 本地知识库：支持 Markdown 知识的添加、搜索、列表、读取和删除。
+6. 浏览器操作：新增点击、输入、选择、取文本、取表格、取链接、滚动和等待等语义化动作。
+7. 内置能力：新增数据分析、SQL、知识库、浏览器自动化、网页开发、Windows 打包、App 开发等 Skills。
+8. 能力检查：新增 /capabilities 命令，并在设置中增加 Python 路径选择。
 
-本次更新不会覆盖模型配置、工作空间、会话、Skills 或 JDK。
+附件说明：
+
+- 单个文档最大 10 MB，最多同时附加 8 个文档。
+- 老式 DOC、XLS、PPT 请先另存为 DOCX、XLSX、PPTX。
+- 扫描版 PDF 仍需先进行 OCR。
+
+更新安全：
+
+- 更新前自动校验 SHA-256 并备份旧 JAR。
+- 更新失败会自动回滚。
+- 不覆盖模型配置、工作空间、会话、Skills、知识库、Python/Anaconda 或 JDK。
+
+如果升级后需要指定 Anaconda，请在设置中选择类似 C:\Anaconda3\python.exe 的解释器。
