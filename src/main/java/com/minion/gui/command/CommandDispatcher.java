@@ -23,6 +23,7 @@ public class CommandDispatcher {
         if ("/skill".equals(cmd)) return dispatchSkill(h, parts);
         if ("/tokens".equals(cmd)) return tokensText(h);
         if ("/compact".equals(cmd)) return dispatchCompact(h);
+        if ("/capabilities".equals(cmd) || "/能力".equals(cmd)) return capabilitiesText();
         return "未知命令 " + parts[0] + "（/help 查看）";
     }
 
@@ -32,7 +33,20 @@ public class CommandDispatcher {
                 + "/skills          列出可用技能\n"
                 + "/skill <名> [参数]  加载技能到当前会话（可附参数，下一轮请求生效）\n"
                 + "/compact         立即压缩上下文\n"
+                + "/capabilities    显示本机 Agent 能力与使用入口\n"
                 + "/tokens          显示 token 用量统计";
+    }
+
+    private String capabilitiesText() {
+        return "本机能力：\n"
+                + "- Python/Anaconda：Python 工具（status/run_code/run_file）\n"
+                + "- Excel/CSV：Excel 工具（inspect/read），复杂分析使用 Python+pandas\n"
+                + "- SQLite：SQLite 工具（schema/query/execute）\n"
+                + "- 本地知识库：Knowledge 工具（add/search/list/read/delete）\n"
+                + "- 浏览器：Browser/BrowserEval/BrowserScreenshot/BrowserDebug\n"
+                + "- 开发构建：Read/Write/Edit/Glob/Grep/Bash、Git 与编译器命令\n"
+                + "- 扩展：Skills、MCP、子 Agent\n"
+                + "可发送“检查 Python 环境”，Agent 会调用 Python status。";
     }
 
     private String skillsText() {

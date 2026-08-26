@@ -73,6 +73,7 @@ public class CommandDispatcherTest {
         assertTrue(r.contains("/skill"));
         assertTrue(r.contains("/compact"));
         assertTrue(r.contains("/tokens"));
+        assertTrue(r.contains("/capabilities"));
     }
 
     @Test public void skills_listsSkillNames() {
@@ -130,6 +131,14 @@ public class CommandDispatcherTest {
     @Test public void tokens_showsUsageStats() {
         String r = dispatcher.dispatch(h, "/tokens");
         assertTrue(r.startsWith("会话统计"));
+    }
+
+    @Test public void capabilities_listsOfflineDataTools() {
+        String r = dispatcher.dispatch(h, "/capabilities");
+        assertTrue(r.contains("Python/Anaconda"));
+        assertTrue(r.contains("Excel"));
+        assertTrue(r.contains("SQLite"));
+        assertTrue(r.contains("Knowledge"));
     }
 
     /** /compact 在会话工作线程执行（阻塞 LLM 调用不进 FX 线程）；无压缩管理器时走 onWarning */

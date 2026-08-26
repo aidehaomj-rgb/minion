@@ -37,7 +37,7 @@ public class Main {
         // 全局技能目录（所有工作空间/模型共用）
         String skillsDir = Paths.get(config.skillsDir()).toAbsolutePath().normalize().toString();
         SkillManager skillManager = new SkillManager(skillsDir);
-        List<Skill> skills = skillManager.scan();
+        List<Skill> skills = skillManager.scanWithBuiltins();
 
         // MCP 服务器管理（mcp.json；惰性连接，退出钩子关停子进程）
         McpManager mcpManager = new McpManager(McpStore.load(jarDir));

@@ -10,14 +10,15 @@ import static org.junit.Assert.*;
 
 public class SlashSuggesterTest {
 
-    @Test public void builtins_coverAllFiveCommands() {
+    @Test public void builtins_coverAllCommands() {
         List<Suggestion> all = SlashSuggester.all(Arrays.<Skill>asList());
-        assertEquals(5, all.size());
+        assertEquals(6, all.size());
         assertEquals("/help", all.get(0).insertText);
         assertEquals("/skills", all.get(1).insertText);
         assertEquals("/skill", all.get(2).insertText);
         assertEquals("/compact", all.get(3).insertText);
-        assertEquals("/tokens", all.get(4).insertText);
+        assertEquals("/capabilities", all.get(4).insertText);
+        assertEquals("/tokens", all.get(5).insertText);
     }
 
     @Test public void skillEntries_insertFullSkillCommand() {

@@ -15,6 +15,7 @@ public final class SlashSuggester {
         out.add(new Suggestion("/skills", "/skills", "列出可用技能", Suggestion.Type.COMMAND));
         out.add(new Suggestion("/skill", "/skill", "加载技能到当前会话", Suggestion.Type.COMMAND));
         out.add(new Suggestion("/compact", "/compact", "立即压缩上下文", Suggestion.Type.COMMAND));
+        out.add(new Suggestion("/capabilities", "/capabilities", "显示本机 Agent 能力", Suggestion.Type.COMMAND));
         out.add(new Suggestion("/tokens", "/tokens", "显示 token 用量统计", Suggestion.Type.COMMAND));
         return out;
     }

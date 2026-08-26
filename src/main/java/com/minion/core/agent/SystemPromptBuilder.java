@@ -54,7 +54,7 @@ public class SystemPromptBuilder {
             sb.append("当任务与某技能描述匹配时，调用 Skill 工具加载（正文将作为一条用户消息注入，立即生效）。")
               .append("技能描述是路由条件——先看\"何时用/何时不用\"，匹配才加载，不匹配不要加载。")
               .append("同一技能不要重复加载；技能正文中引用的 Claude Code 专属机制（plan mode、ExitPlanMode、/loop 等）在本环境中不可用，相关审查确认用 AskUserQuestion 代替。\n");
-            sb.append("技能源文件可能在工作路径之外，如需读取技能参考文档，可直接用 Read 工具读取其绝对路径：\n");
+            sb.append("技能源文件可能在工作路径之外；内置技能直接用 Skill 加载，外部技能的参考文档可用 Read 读取：\n");
             for (Skill s : allSkills) sb.append("- ").append(s.hint()).append("（").append(s.file).append("）\n");
         }
         return sb.toString();

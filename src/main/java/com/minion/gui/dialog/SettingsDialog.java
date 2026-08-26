@@ -84,7 +84,7 @@ public class SettingsDialog {
         HBox box = new HBox(0);
         box.getChildren().addAll(nav, content);
         HBox.setHgrow(content, Priority.ALWAYS);
-        box.setPrefSize(620, 500);
+        box.setPrefSize(620, 540);
         d.getDialogPane().setContent(box);
         d.showAndWait();
     }
@@ -507,6 +507,7 @@ public class SettingsDialog {
         final Node root;
         private final Config config;
         private final TextField skillsDir;
+        private final TextField pythonPath;
         private final TextArea toolWhitelist;
         private final TextArea cmdWhitelist;
         private final CheckBox allowOutside;
@@ -536,6 +537,21 @@ public class SettingsDialog {
                 if (dir != null) skillsDir.setText(dir.getAbsolutePath());
             });
             skillsBox.getChildren().addAll(skillsDir, browse);
+            pythonPath = new TextField(config.pythonPath());
+            HBox pythonBox = new HBox(6);
+            HBox.setHgrow(pythonPath, Priority.ALWAYS);
+            Button browsePython = new Button("浏览…");
+            browsePython.getStyleClass().add("btn-ghost");
+            browsePython.setOnAction(e -> {
+                javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
+                fc.setTitle("选择 Python/Anaconda 解释器");
+                fc.getExtensionFilters().add(new javafx.stage.FileChooser.ExtensionFilter("python.exe", "*.exe"));
+                java.io.File current = new java.io.File(pythonPath.getText().trim());
+                if (current.isFile() && current.getParentFile() != null) fc.setInitialDirectory(current.getParentFile());
+                java.io.File file = fc.showOpenDialog(owner);
+                if (file != null) pythonPath.setText(file.getAbsolutePath());
+            });
+            pythonBox.getChildren().addAll(pythonPath, browsePython);
             toolWhitelist = new TextArea(config.get("confirm.whitelist.tools", ""));
             toolWhitelist.setPrefRowCount(2);
             toolWhitelist.setPrefColumnCount(20); // 默认 40 列偏好宽 ≈624px 把基础页撑到 794，触发 HBox 压缩导航列；20 列后偏好宽 ~500 与内容区匹配
@@ -583,6 +599,7 @@ public class SettingsDialog {
             VBox rows = new VBox(10);
             rows.getChildren().addAll(
                     row("技能目录 skills.dir:", skillsBox),
+                    row("Python/Anaconda:", pythonBox),
                     row("确认白名单\n(工具, 逗号分隔):", toolWhitelist),
                     row("确认白名单\n(命令, 逗号分隔):", cmdWhitelist),
                     row("读逃逸:", allowOutside),
@@ -606,6 +623,7 @@ public class SettingsDialog {
         /** 「应用」按钮：全部配置项写入，窗口不关闭；port/timeoutMs 非法弹错且该项不写 */
         void apply() {
             config.set("skills.dir", skillsDir.getText().trim());
+            config.set("python.path", pythonPath.getText().trim());
             // 白名单是逗号分隔的单行配置：多行粘贴的换行替换为空格，否则落盘后重载会静默丢内容
             config.set("confirm.whitelist.tools",
                     toolWhitelist.getText().trim().replace('\n', ' ').replace('\r', ' '));

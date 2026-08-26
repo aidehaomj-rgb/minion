@@ -92,6 +92,8 @@ public class Config {
     }
 
     public String skillsDir()    { return get("skills.dir", "./skills"); }
+    /** Python/Anaconda 解释器；留空时自动探测 MINION_PYTHON、Conda 和常见安装目录。 */
+    public String pythonPath()   { return get("python.path", ""); }
 
     /** 读逃逸：true 时 Read/Grep/Glob 可读取工作区外文件（写入类工具不受影响，仍受限） */
     public boolean readAllowOutside() { return Boolean.parseBoolean(get("paths.read.allowOutside", "false")); }

@@ -111,6 +111,13 @@ public class BrowserToolsTest {
         assertTrue(r.output, r.output.contains("启动失败"));
     }
 
+    @Test public void browserActionValidatesSelectorAndAction() {
+        ToolResult missing = new BrowserActionTool(session()).execute(json("action", "click"));
+        assertFalse(missing.ok); assertTrue(missing.output.contains("selector"));
+        ToolResult unknown = new BrowserActionTool(session()).execute(json("action", "fly"));
+        assertFalse(unknown.ok); assertTrue(unknown.output.contains("selector") || unknown.output.contains("未知 action"));
+    }
+
     @Test
     public void browserScreenshotMissingPath() {
         ToolResult r = new BrowserScreenshotTool(session(), new Workspace("."), null)

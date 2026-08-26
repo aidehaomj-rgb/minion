@@ -30,12 +30,18 @@ import com.minion.core.tools.WebFetchTool;
 import com.minion.core.tools.Workspace;
 import com.minion.core.tools.WriteTool;
 import com.minion.core.tools.browser.BrowserDebugTool;
+import com.minion.core.tools.browser.BrowserActionTool;
 import com.minion.core.tools.browser.BrowserEvalTool;
 import com.minion.core.tools.browser.BrowserScreenshotTool;
 import com.minion.core.tools.browser.BrowserSession;
 import com.minion.core.tools.browser.BrowserTool;
 import com.minion.core.tools.confirm.ConfirmGate;
 import com.minion.core.tools.confirm.ConfirmUi;
+import com.minion.core.tools.data.ExcelTool;
+import com.minion.core.tools.data.SqliteTool;
+import com.minion.core.tools.knowledge.KnowledgeTool;
+import com.minion.core.tools.python.PythonRuntime;
+import com.minion.core.tools.python.PythonTool;
 import com.minion.gui.command.CommandDispatcher;
 
 import java.nio.file.Path;
@@ -274,9 +280,15 @@ public class SessionManager {
         registry.register(new GlobTool(workspace, skillsDir, gate));
         registry.register(new GrepTool(workspace, skillsDir, gate));
         registry.register(new BashTool(workspace));
+        PythonRuntime python = new PythonRuntime(config.pythonPath());
+        registry.register(new PythonTool(workspace, python));
+        registry.register(new ExcelTool(workspace, python));
+        registry.register(new SqliteTool(workspace, python));
+        registry.register(new KnowledgeTool(workspace));
         registry.register(new WebFetchTool());
         if (browserSession != null) {
             registry.register(new BrowserTool(browserSession));
+            registry.register(new BrowserActionTool(browserSession));
             registry.register(new BrowserEvalTool(browserSession));
             registry.register(new BrowserScreenshotTool(browserSession, workspace, skillsDir, gate));
             registry.register(new BrowserDebugTool(browserSession));
