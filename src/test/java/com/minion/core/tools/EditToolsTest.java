@@ -169,6 +169,25 @@ public class EditToolsTest {
         assertFalse(Files.exists(outside));
     }
 
+    /** 会话临时目录尚未创建（会话首次写入/Bash/Grep 不超限执行后目录被清空）时，
+     *  tmpDir 内新文件写入应放行（词法兜底），并自动创建目录 */
+    @Test
+    public void write_tmpDirNotExists_newFileAllowed() throws Exception {
+        Path workDir = tmp.newFolder("work-write").toPath();
+        Path jar = tmp.newFolder("jar-write").toPath();
+        String tmpDirStr = jar.resolve(".session").resolve("tmp").resolve("s1").toString();
+        assertFalse("前置：tmpDir 不存在（词法兜底场景）", Files.exists(Paths.get(tmpDirStr)));
+        WriteTool w = new WriteTool(new Workspace(workDir.toString()), null, tmpDirStr);
+        Path target = Paths.get(tmpDirStr, "new.txt");
+        ToolResult r = w.execute(args("{\"path\":\"" + target.toString().replace("\\", "\\\\")
+                + "\",\"content\":\"hello\"}"));
+        assertTrue(r.output, r.ok);
+        assertTrue("应提示已写入: " + r.output, r.output.contains("已写入"));
+        assertFalse("不应被拒绝: " + r.output, r.output.contains("已拒绝"));
+        assertTrue("tmpDir 应被自动创建", Files.isDirectory(Paths.get(tmpDirStr)));
+        assertEquals("hello", new String(Files.readAllBytes(target), StandardCharsets.UTF_8));
+    }
+
     // ---- Round 1 review regression tests ----
 
     @Test
@@ -207,6 +226,64 @@ public class EditToolsTest {
             assertFalse(r.ok);
             assertTrue(r.output.contains("工作路径之外"));
             assertFalse(Files.exists(target));
+        }
+    }
+
+    // ---- Round 2 review regression tests ----
+
+    /** Round 2 回归：tmpDir 内符号链接目录指向外部时，新建文件不得经符号链接落盘到外部。
+     *  b1dd803 词法兜底过宽：probe 为 tmpDir 内符号链接时真实路径在外部，但 p 词法在 tmpDir
+     *  内使兜底条件不成立即放行（逃逸）；修复后 probe 词法在 tmpDir 内时以真实路径校验为准。
+     *  链接构造三级降级：真实符号链接（Linux/macOS/管理员 Windows）→ mklink /J 联结
+     * （无需管理员权限，toRealPath 同样跟随）→ 已存在的外部父目录 + 不存在的子文件
+     * （等价构造，同样走"最深已存在祖先"真实路径校验）。 */
+    @Test
+    public void write_symlinkInsideTmpDir_rejected() throws Exception {
+        Path workDir = tmp.newFolder("work-symtmp-").toPath();
+        Path sessionTmp = tmp.newFolder("session-tmp-").toPath();
+        WriteTool w = new WriteTool(new Workspace(workDir.toString()), null, sessionTmp.toString());
+        Path outsideDir = java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"),
+                "minion-out-junc-" + System.nanoTime());
+        Files.createDirectories(outsideDir);
+        outsideDir.toFile().deleteOnExit();
+        String name = "minion-out-new-" + System.nanoTime() + ".txt";
+        Path link = sessionTmp.resolve("link");
+        boolean linked = false;
+        try {
+            Files.createSymbolicLink(link, outsideDir);
+            linked = true;
+        } catch (Exception e) {
+            linked = createJunction(link, outsideDir);
+        }
+        if (linked) {
+            Path target = sessionTmp.resolve("link/" + name);
+            target.toFile().deleteOnExit();
+            ToolResult r = w.execute(args("{\"path\":\"" + target.toString().replace("\\", "\\\\")
+                    + "\",\"content\":\"x\"}"));
+            assertFalse(r.output, r.ok);
+            assertTrue(r.output.contains("工作路径之外"));
+            assertFalse(Files.exists(target));
+        } else {
+            Path target = outsideDir.resolve(name);
+            ToolResult r = w.execute(args("{\"path\":\"" + target.toString().replace("\\", "\\\\")
+                    + "\",\"content\":\"x\"}"));
+            assertFalse(r.output, r.ok);
+            assertTrue(r.output.contains("工作路径之外"));
+            assertFalse(Files.exists(target));
+        }
+    }
+
+    /** Windows 目录联结（cmd mklink /J）：无需管理员权限/开发者模式即可创建，
+     *  toRealPath 与符号链接一样跟随目标，可用于复现符号链接逃逸 */
+    private static boolean createJunction(Path link, Path target) {
+        try {
+            Process p = new ProcessBuilder("cmd", "/c", "mklink", "/J",
+                    "\"" + link.toString() + "\"", "\"" + target.toString() + "\"")
+                    .redirectErrorStream(true).start();
+            p.waitFor();
+            return Files.exists(link);
+        } catch (Exception e) {
+            return false;
         }
     }
 

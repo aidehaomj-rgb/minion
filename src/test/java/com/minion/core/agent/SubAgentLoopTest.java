@@ -301,12 +301,12 @@ public class SubAgentLoopTest {
 
         SubAgentLoop sub = new SubAgentLoop("主系统提示", "调研一下",
                 tmp.getRoot().getPath(), llm, registry, confirm, ui);
-        sub.retryPolicy429 = new RetryPolicy(10, 10, 100, 60000); // 测试短退避
+        sub.retryPolicy = new RetryPolicy(10, 10, 100, 60000); // 测试短退避
         String result = sub.run();
         assertEquals("子任务结果：完成", result);
         assertEquals(2, llm.requests.size()); // 原始请求 + 1 次重试
         assertTrue(ui.warnings.isEmpty());    // 成功后静默恢复；重试提示在指示器不进消息区
-        assertEquals(Arrays.asList(1, 0), ui.retryProgress);
+        assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
         assertTrue(ui.errors.isEmpty());
     }
 
@@ -325,7 +325,7 @@ public class SubAgentLoopTest {
 
         SubAgentLoop sub = new SubAgentLoop("主系统提示", "调研一下",
                 tmp.getRoot().getPath(), llm, registry, confirm, ui);
-        sub.retryPolicy429 = new RetryPolicy(10, 10, 20, 50); // 快速耗尽
+        sub.retryPolicy = new RetryPolicy(10, 10, 20, 50); // 快速耗尽
         long start = System.currentTimeMillis();
         String result = sub.run();
         assertTrue("应在数百毫秒内停止", System.currentTimeMillis() - start < 5000);
@@ -334,8 +334,8 @@ public class SubAgentLoopTest {
         assertTrue(ui.errors.get(0).contains("重试了"));
         assertTrue(ui.errors.get(0).contains("仍失败"));
         assertTrue(llm.requests.size() >= 2 && llm.requests.size() <= 5);
-        assertTrue(!ui.retryProgress.isEmpty());
-        assertEquals(Integer.valueOf(0), ui.retryProgress.get(ui.retryProgress.size() - 1));
+        assertTrue(!ui.retryAttempts().isEmpty());
+        assertEquals(Integer.valueOf(0), ui.retryAttempts().get(ui.retryAttempts().size() - 1));
     }
 
     /** 子 agent 429 长重试中遇非 429 错误（网络/超时）：退出重试并复位指示器，不残留"正在重试中" */
@@ -354,7 +354,7 @@ public class SubAgentLoopTest {
 
         SubAgentLoop sub = new SubAgentLoop("主系统提示", "调研一下",
                 tmp.getRoot().getPath(), llm, registry, confirm, ui);
-        sub.retryPolicy429 = new RetryPolicy(10, 10, 20, 60000); // 测试短退避，总时长充裕
+        sub.retryPolicy = new RetryPolicy(10, 10, 20, 60000); // 测试短退避，总时长充裕
         String result = sub.run();
         // 非 429 错误：不继续退避，立即失败返回，错误文案准确（非"429 重试超时"）
         assertTrue(result.contains("失败"));
@@ -363,7 +363,7 @@ public class SubAgentLoopTest {
         assertEquals(1, ui.errors.size());
         assertTrue(ui.errors.get(0).contains("连接超时"));
         // 指示器复位：末位必须为 0，不残留"429限流，正在重试中...N次"
-        assertEquals(Arrays.asList(1, 0), ui.retryProgress);
+        assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
         assertTrue(ui.warnings.isEmpty());
     }
 
@@ -383,7 +383,7 @@ public class SubAgentLoopTest {
 
         SubAgentLoop sub = new SubAgentLoop("主系统提示", "调研一下",
                 tmp.getRoot().getPath(), llm, registry, confirm, ui);
-        sub.retryPolicy429 = new RetryPolicy(10, 10, 100, 60000); // 测试短退避
+        sub.retryPolicy = new RetryPolicy(10, 10, 100, 60000); // 测试短退避
         String result = sub.run();
         assertEquals(2, llm.requests.size()); // 原始请求 + 1 次重试
         // 成功路径静默恢复（无警告），onError 回调已提示错误
@@ -391,6 +391,65 @@ public class SubAgentLoopTest {
         assertEquals(1, ui.errors.size());
         assertTrue(ui.errors.get(0).contains("连接中断"));
         // 指示器复位：进入重试（1）→ 退出（0）
-        assertEquals(Arrays.asList(1, 0), ui.retryProgress);
+        assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
+    }
+
+    /** 子 agent 500 服务端报错：进长重试，成功后静默恢复（与主循环一致） */
+    @Test
+    public void subAgent_serverError500_retryThenSuccess() throws Exception {
+        com.minion.core.config.Config config = Config.load(tmp.getRoot().toPath());
+        FakeLlmClient llm = new FakeLlmClient();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new com.minion.core.tools.example.ExampleTool());
+        ConfirmGate confirm = new ConfirmGate(config,
+                new FakeConfirmUi(ConfirmUi.Decision.APPROVE));
+        RecordingUi ui = new RecordingUi();
+
+        llm.addTurnThrow(LlmException.of(500, "{\"error\":\"internal\"}"));
+        llm.addTurn("子任务结果：完成");
+
+        SubAgentLoop sub = new SubAgentLoop("主系统提示", "调研一下",
+                tmp.getRoot().getPath(), llm, registry, confirm, ui);
+        sub.retryPolicy = new RetryPolicy(10, 0, 10, 60000); // 测试短固定间隔
+        String result = sub.run();
+        assertEquals("子任务结果：完成", result);
+        assertEquals(2, llm.requests.size());
+        assertTrue(ui.warnings.isEmpty());
+        assertTrue(ui.errors.isEmpty());
+        assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
+    }
+
+    /** 子 agent 重试循环内错误码切换（429 → 502）：进度携带最近一次错误码/响应体 */
+    @Test
+    public void subAgent_retry_codeSwitches_suffixFollowsLatestError() throws Exception {
+        com.minion.core.config.Config config = Config.load(tmp.getRoot().toPath());
+        FakeLlmClient llm = new FakeLlmClient();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new com.minion.core.tools.example.ExampleTool());
+        ConfirmGate confirm = new ConfirmGate(config,
+                new FakeConfirmUi(ConfirmUi.Decision.APPROVE));
+        RecordingUi ui = new RecordingUi();
+
+        llm.addTurnThrow(LlmException.of(429, null));
+        llm.addTurnThrow(LlmException.of(429, null));
+        llm.addTurnThrow(LlmException.of(502, "{\"message\":\"bad gateway\"}"));
+        llm.addTurn("子任务结果：完成");
+
+        SubAgentLoop sub = new SubAgentLoop("主系统提示", "调研一下",
+                tmp.getRoot().getPath(), llm, registry, confirm, ui);
+        sub.retryPolicy = new RetryPolicy(10, 0, 10, 60000);
+        String result = sub.run();
+        assertEquals("子任务结果：完成", result);
+        // 请求序列：原始 429 → 重试1 429 → 重试2 502 → 重试3 成功（FakeLlmClient 每 streamChat 消耗一回合）
+        assertEquals(4, llm.requests.size());
+        assertEquals(4, ui.retryProgress.size());
+        assertEquals(1, ui.retryProgress.get(0).attempt);
+        assertEquals(429, ui.retryProgress.get(0).httpCode);
+        assertEquals(2, ui.retryProgress.get(1).attempt);
+        assertEquals(429, ui.retryProgress.get(1).httpCode);
+        assertEquals(3, ui.retryProgress.get(2).attempt);
+        assertEquals(502, ui.retryProgress.get(2).httpCode);
+        assertEquals("{\"message\":\"bad gateway\"}", ui.retryProgress.get(2).body);
+        assertEquals(0, ui.retryAttempts().get(ui.retryAttempts().size() - 1).intValue()); // 末位复位
     }
 }

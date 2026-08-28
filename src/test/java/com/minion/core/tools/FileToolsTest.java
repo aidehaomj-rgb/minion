@@ -26,14 +26,16 @@ public class FileToolsTest {
     private ReadTool read;
     private GlobTool glob;
     private GrepTool grep;
+    private Path tmpDir;
 
     @org.junit.Before
     public void setup() throws Exception {
         work = tmp.getRoot().getAbsolutePath();
         ws = new Workspace(work);
+        tmpDir = tmp.newFolder("jar", ".session", "tmp", "s1").toPath();
         read = new ReadTool(ws);
         glob = new GlobTool(ws);
-        grep = new GrepTool(ws);
+        grep = new GrepTool(ws, null, tmpDir.toString(), null);
     }
 
     private JsonObject args(String json) {
@@ -401,7 +403,7 @@ public class FileToolsTest {
         assertTrue("结果行过长: " + lines[0].length(), lines[0].length() <= 1020);
         assertTrue(lines[0].endsWith("..."));
         // 不落盘（未超限）
-        assertFalse(Files.exists(Paths.get(work, ".minion", "tmp")));
+        assertFalse("不超限不落盘", Files.exists(tmpDir));
     }
 
     /** 超 250 条：显示 250 条 + 提示路径，落盘全量 */
@@ -414,9 +416,10 @@ public class FileToolsTest {
         assertTrue(r.ok);
         int shown = r.output.split("needle", -1).length - 1;
         assertTrue("显示条数应 ≤250，实际 " + shown, shown <= 250);
-        assertTrue(r.output.contains("完整结果已保存到 .minion/tmp/grep-"));
+        assertTrue(r.output.contains("完整结果已保存到 "));
+        assertTrue(r.output.contains(tmpDir.toAbsolutePath().toString()));
         assertTrue(r.output.contains("可用 Read 查看"));
-        Path dumpDir = Paths.get(work, ".minion", "tmp");
+        Path dumpDir = tmpDir;
         java.util.List<Path> files = Files.list(dumpDir).collect(java.util.stream.Collectors.toList());
         assertEquals(1, files.size());
         assertEquals(300, Files.readAllLines(files.get(0)).size());
@@ -444,8 +447,8 @@ public class FileToolsTest {
         assertTrue(r.ok);
         assertFalse("max=0 不应显示匹配内容: " + r.output, r.output.contains("needle zero"));
         assertTrue("应提示全量落盘: " + r.output, r.output.contains("共 2 条"));
-        assertTrue(r.output.contains("完整结果已保存到 .minion/tmp/grep-"));
-        Path dumpDir = Paths.get(work, ".minion", "tmp");
+        assertTrue(r.output.contains(tmpDir.toAbsolutePath().toString()));
+        Path dumpDir = tmpDir;
         java.util.List<Path> files = Files.list(dumpDir).collect(java.util.stream.Collectors.toList());
         assertEquals(1, files.size());
         assertEquals(2, Files.readAllLines(files.get(0)).size());
@@ -466,21 +469,55 @@ public class FileToolsTest {
         assertNoLoneSurrogate("结果含孤立代理: " + r.output, r.output);
     }
 
-    /** P2 降级文案：落盘失败（.minion/tmp 被占位成文件导致目录创建失败）时，
+    /** P2 降级文案：落盘失败（会话临时目录被占位成文件导致目录创建失败）时，
      *  不得提示"完整结果已保存到 <空路径>，可用 Read 查看"误导模型去读空路径 */
     @Test
     public void grep_dumpFailure_honestNote() throws Exception {
-        Path minion = Paths.get(work, ".minion");
-        Files.createDirectories(minion);
-        Files.write(minion.resolve("tmp"), "x".getBytes()); // 占位成普通文件 → 落盘失败
+        Path tmpDirAsFile = tmp.getRoot().toPath().resolve("jar2").resolve(".session")
+                .resolve("tmp").resolve("s1");
+        Files.createDirectories(tmpDirAsFile.getParent());
+        Files.write(tmpDirAsFile, "x".getBytes()); // 占位成普通文件 → 目录创建失败 → 落盘失败
+        GrepTool g = new GrepTool(ws, null, tmpDirAsFile.toString(), null);
         for (int i = 0; i < 300; i++) {
             Files.write(Paths.get(work, "h" + i + ".txt"), ("needle line " + i).getBytes("UTF-8"));
         }
-        ToolResult r = grep.execute(args("{\"pattern\":\"needle\"}"));
+        ToolResult r = g.execute(args("{\"pattern\":\"needle\"}"));
         assertTrue(r.ok);
         assertTrue("缺降级说明: " + r.output, r.output.contains("落盘失败未保存完整结果"));
         assertFalse("不应提示保存到空路径: " + r.output, r.output.contains("完整结果已保存到 "));
         assertFalse("不应提示可 Read 查看: " + r.output, r.output.contains("可用 Read 查看"));
+    }
+
+    /** tmpDir 白名单：模型 Read 会话临时目录内文件免确认（jar 目录在工作路径之外，无 confirm 时直接放行） */
+    @Test
+    public void read_sessionTmpDir_allowedWithoutConfirm() throws Exception {
+        Path workDir = tmp.newFolder("work3").toPath();
+        Path jar = tmp.newFolder("jar3").toPath();
+        Path tmpDir = jar.resolve(".session").resolve("tmp").resolve("s1");
+        Files.createDirectories(tmpDir);
+        Path dump = Files.write(tmpDir.resolve("bash-1.txt"), "hi".getBytes(StandardCharsets.UTF_8));
+        ReadTool r = new ReadTool(new Workspace(workDir.toString()), null, tmpDir.toString(), null);
+        ToolResult res = r.execute(args("{\"path\":\"" + dump.toAbsolutePath().toString().replace("\\", "\\\\") + "\"}"));
+        assertTrue(res.ok);
+        assertTrue(res.output.contains("hi"));
+    }
+
+    /** Grep 路径指向会话临时目录：守卫放行且可搜索（SKIP_SUBTREE 豁免搜索根自身；
+     *  落盘文件本身单独跳过防自噬），不被拒绝 */
+    @Test
+    public void grep_sessionTmpDirPath_allowedWithoutConfirm() throws Exception {
+        Path workDir = tmp.newFolder("work-grep").toPath();
+        Path jar = tmp.newFolder("jar-grep").toPath();
+        Path sessionTmp = jar.resolve(".session").resolve("tmp").resolve("s1");
+        Files.createDirectories(sessionTmp);
+        Files.write(sessionTmp.resolve("note.txt"), "hello world".getBytes(StandardCharsets.UTF_8));
+        GrepTool grep = new GrepTool(new Workspace(workDir.toString()), null, sessionTmp.toString(), null); // confirm=null：被拒则硬拒绝
+        JsonObject args = new JsonObject();
+        args.addProperty("pattern", "hello");
+        args.addProperty("path", sessionTmp.toAbsolutePath().toString());
+        ToolResult r = grep.execute(args);
+        assertFalse("tmp 目录内路径不应被守卫拒绝: " + r.output, r.output.contains("路径在工作路径之外"));
+        assertTrue("root==tmpDir 应可搜索到内容: " + r.output, r.output.contains("note.txt"));
     }
 
     /** 遍历检查字符串无孤立代理（每个高/低代理必须成对出现） */

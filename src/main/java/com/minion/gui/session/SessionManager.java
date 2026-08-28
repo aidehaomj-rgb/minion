@@ -1,6 +1,7 @@
 package com.minion.gui.session;
 
 import com.minion.core.agent.AgentLoop;
+import com.minion.core.agent.RetryProgress;
 import com.minion.core.agent.Session;
 import com.minion.core.agent.SystemPromptBuilder;
 import com.minion.core.agent.TitleGenerator;
@@ -38,13 +39,17 @@ import com.minion.core.tools.confirm.ConfirmGate;
 import com.minion.core.tools.confirm.ConfirmUi;
 import com.minion.gui.command.CommandDispatcher;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 /**
  * 会话外壳：每会话一个 AgentLoop + 独占工作线程（真并行）；
@@ -65,7 +70,7 @@ public class SessionManager {
         /** 上下文压缩状态变化（true=压缩中；仅当前激活会话时 GUI 显示） */
         default void onCompressingChanged(SessionHandle h, boolean compressing) { }
         /** 429 长重试进度（attempt ≥ 1 进入/更新；0 退出；仅当前激活会话时 GUI 显示） */
-        default void onRetryProgress(SessionHandle h, int attempt) { }
+        default void onRetryProgress(SessionHandle h, RetryProgress p) { }
         /** 上下文统计变化（used/max 估算 token；GUI 环形进度圈，仅当前激活会话显示） */
         default void onContextStatsChanged(SessionHandle h, int used, int max) { }
         /** 会话被删除（deleteSession / deleteWorkspace 均通知，含非当前空间）：UI 清理页签与缓存 */
@@ -165,8 +170,8 @@ public class SessionManager {
     private void notifyCompressingChanged(SessionHandle h, boolean compressing) {
         for (Listener l : listeners) l.onCompressingChanged(h, compressing);
     }
-    private void notifyRetryProgress(SessionHandle h, int attempt) {
-        for (Listener l : listeners) l.onRetryProgress(h, attempt);
+    private void notifyRetryProgress(SessionHandle h, RetryProgress p) {
+        for (Listener l : listeners) l.onRetryProgress(h, p);
     }
     private void notifyContextStats(SessionHandle h, int used, int max) {
         for (Listener l : listeners) l.onContextStatsChanged(h, used, max);
@@ -203,12 +208,14 @@ public class SessionManager {
                 LlmClient llm = newLlm(mc);
                 ContextManager cm = new ContextManager(mc.maxContextTokens, mc.compressThreshold,
                         mc.keepRecentMessages, llm,
-                        TokenCounter.estimate(new SystemPromptBuilder(projectMdPath(ctx.name), ctx.workspace.workDir())
+                        TokenCounter.estimate(new SystemPromptBuilder(projectMdPath(ctx.name), ctx.workspace.workDir(),
+                                tmpDirOf(meta.id).toString())
                                 .build(allSkills)));
                 SessionController controller = new SessionController();
                 controller.replayHistory(s.messages); // 历史消息灌入事件流：点击会话即可重放显示
-                AgentLoop loop = new AgentLoop(llm, newRegistry(ctx),
-                        new SystemPromptBuilder(projectMdPath(ctx.name), ctx.workspace.workDir()),
+                AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s.id),
+                        new SystemPromptBuilder(projectMdPath(ctx.name), ctx.workspace.workDir(),
+                                tmpDirOf(meta.id).toString()),
                         ctx.confirmGate, controller, cm, ctx.workspace, s);
                 loop.setAllSkills(allSkills); // 技能目录接线：Skill 工具可访问 + 子 agent 系统提示词含目录段
                 loop.setSessionStore(ctx.store); // 落盘接线：恢复后随每轮/退出兜底落盘
@@ -228,10 +235,10 @@ public class SessionManager {
                         notifyCompressingChanged(h, compressing);
                     }
                 });
-                // 429 重试进度转发（AgentLoop 长重试回调 → 指示器）
-                controller.setRetryStateListener(new java.util.function.Consumer<Integer>() {
-                    @Override public void accept(Integer attempt) {
-                        notifyRetryProgress(h, attempt);
+                // 瞬时错误重试进度转发（AgentLoop 长重试回调 → 指示器）
+                controller.setRetryStateListener(new java.util.function.Consumer<RetryProgress>() {
+                    @Override public void accept(RetryProgress p) {
+                        notifyRetryProgress(h, p);
                     }
                 });
                 // 上下文统计转发（AgentLoop 关键节点推送 → 环形进度圈）
@@ -257,28 +264,46 @@ public class SessionManager {
                 gate, skillsDir);
     }
 
+    /** 会话临时目录：jarDir/.session/tmp/<sessionId>（工具落盘与模型临时文件统一位置） */
+    private Path tmpDirOf(String sessionId) {
+        return jarDir.resolve(".session").resolve("tmp").resolve(sessionId);
+    }
+
+    /** 递归删除目录（文件占用失败静默跳过；JDK8 Files.walk 需 try-with-resources 关流） */
+    private void deleteRecursively(Path dir) {
+        if (!Files.isDirectory(dir)) return;
+        try (Stream<Path> s = Files.walk(dir)) {
+            s.sorted(Comparator.reverseOrder()).forEach(p -> {
+                try { Files.deleteIfExists(p); } catch (IOException ignored) { }
+            });
+        } catch (IOException ignored) { }
+    }
+
     /**
      * 每会话独立 ToolRegistry：AgentLoop 构造时按名注册 TaskTool(this)，若同空间共享
      * 单个 registry，task 工具会永远绑定最后构造的 loop（会话 A 的 task 调用事件流入会话 B）。
      * 工具对象本身无状态（构造参数 workspace/skillsDir/gate 为空间级共享对象），
      * 每次 new ToolRegistry 复制注册同样的工具即可；TaskTool 由 AgentLoop 自动注册、绑定本会话。
+     * 文件工具（Read/Write/Edit/Glob/Grep/BrowserScreenshot/Bash）携带会话级临时目录
+     * （tmpDirOf(sessionId)），工具对象随会话创建、随会话删除。
      */
-    private ToolRegistry newRegistry(WorkspaceCtx ctx) {
+    private ToolRegistry newRegistry(WorkspaceCtx ctx, String sessionId) {
         ToolRegistry registry = new ToolRegistry();
         String skillsDir = ctx.skillsDir;
         Workspace workspace = ctx.workspace;
         ConfirmGate gate = ctx.confirmGate;
-        registry.register(new ReadTool(workspace, skillsDir, gate));
-        registry.register(new WriteTool(workspace, skillsDir));
-        registry.register(new EditTool(workspace, skillsDir));
-        registry.register(new GlobTool(workspace, skillsDir, gate));
-        registry.register(new GrepTool(workspace, skillsDir, gate));
-        registry.register(new BashTool(workspace));
+        String tmpDir = tmpDirOf(sessionId).toString();
+        registry.register(new ReadTool(workspace, skillsDir, tmpDir, gate));
+        registry.register(new WriteTool(workspace, skillsDir, tmpDir));
+        registry.register(new EditTool(workspace, skillsDir, tmpDir));
+        registry.register(new GlobTool(workspace, skillsDir, tmpDir, gate));
+        registry.register(new GrepTool(workspace, skillsDir, tmpDir, gate));
+        registry.register(new BashTool(workspace, tmpDirOf(sessionId)));
         registry.register(new WebFetchTool());
         if (browserSession != null) {
             registry.register(new BrowserTool(browserSession));
             registry.register(new BrowserEvalTool(browserSession));
-            registry.register(new BrowserScreenshotTool(browserSession, workspace, skillsDir, gate));
+            registry.register(new BrowserScreenshotTool(browserSession, workspace, skillsDir, tmpDir, gate));
             registry.register(new BrowserDebugTool(browserSession));
         }
         if (mcp != null) {
@@ -341,11 +366,13 @@ public class SessionManager {
         LlmClient llm = newLlm(mc);
         ContextManager cm = new ContextManager(mc.maxContextTokens, mc.compressThreshold,
                 mc.keepRecentMessages, llm,
-                TokenCounter.estimate(new SystemPromptBuilder(projectMdPath(currentWorkspaceName), ctx.workspace.workDir())
+                TokenCounter.estimate(new SystemPromptBuilder(projectMdPath(currentWorkspaceName), ctx.workspace.workDir(),
+                        tmpDirOf(s.id).toString())
                         .build(allSkills)));
         SessionController controller = new SessionController();
-        AgentLoop loop = new AgentLoop(llm, newRegistry(ctx),
-                new SystemPromptBuilder(projectMdPath(currentWorkspaceName), ctx.workspace.workDir()),
+        AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s.id),
+                new SystemPromptBuilder(projectMdPath(currentWorkspaceName), ctx.workspace.workDir(),
+                        tmpDirOf(s.id).toString()),
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.setAllSkills(allSkills); // 技能目录接线：Skill 工具可访问 + 子 agent 系统提示词含目录段
         loop.setSessionStore(ctx.store); // 落盘接线：每轮/退出兜底落盘生效
@@ -364,10 +391,10 @@ public class SessionManager {
                 notifyCompressingChanged(h, compressing);
             }
         });
-        // 429 重试进度转发（AgentLoop 长重试回调 → 指示器）
-        controller.setRetryStateListener(new java.util.function.Consumer<Integer>() {
-            @Override public void accept(Integer attempt) {
-                notifyRetryProgress(h, attempt);
+        // 瞬时错误重试进度转发（AgentLoop 长重试回调 → 指示器）
+        controller.setRetryStateListener(new java.util.function.Consumer<RetryProgress>() {
+            @Override public void accept(RetryProgress p) {
+                notifyRetryProgress(h, p);
             }
         });
         // 上下文统计转发（AgentLoop 关键节点推送 → 环形进度圈）
@@ -461,6 +488,9 @@ public class SessionManager {
         } catch (Exception e) {
             notifyError("删除会话文件失败: " + e.getMessage());
         }
+        // 会话临时目录一并清理；运行中删除时落盘文件可能被占用（Windows 句柄），
+        // 删除失败静默容错（deleteRecursively 内部吞错），由启动清理（Main 3 天过期清理）兜底
+        deleteRecursively(tmpDirOf(h.id));
         h.controller.eventList().setActive(false, null); // 移除被删会话的 active 残留
         if (currentSession == h) currentSession = null;
     }
@@ -559,6 +589,7 @@ public class SessionManager {
             h.pool.shutdownNow();
             h.closeAll(); // 工作空间删除即释放其全部会话的 LLM 客户端（当前 + 待回收）
             h.controller.eventList().setActive(false, null); // 移除被删会话的 active 残留
+            deleteRecursively(tmpDirOf(h.id)); // 工作空间删除：会话临时目录一并清理
         }
         ctxByName.remove(name);
         if (hasRunning) {
