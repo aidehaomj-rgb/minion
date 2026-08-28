@@ -23,15 +23,21 @@ public class GlobTool implements Tool {
 
     private final Workspace workspace;
     private final String skillsDir;
+    private final String tmpDir;
     private final ConfirmGate confirm;
 
-    public GlobTool(Workspace workspace) { this(workspace, null, null); }
+    public GlobTool(Workspace workspace) { this(workspace, null); }
 
     public GlobTool(Workspace workspace, String skillsDir) { this(workspace, skillsDir, null); }
 
     public GlobTool(Workspace workspace, String skillsDir, ConfirmGate confirm) {
+        this(workspace, skillsDir, null, confirm);
+    }
+
+    public GlobTool(Workspace workspace, String skillsDir, String tmpDir, ConfirmGate confirm) {
         this.workspace = workspace;
         this.skillsDir = skillsDir;
+        this.tmpDir = tmpDir;
         this.confirm = confirm;
     }
 
@@ -60,14 +66,14 @@ public class GlobTool implements Tool {
         final Path workRoot = workspace.cwd();
         final List<String> found = new ArrayList<String>();
         // 遍历根：无 path 时 = cwd + 技能目录（若在 cwd 之外且存在）；
-        // 指定 path 时 = 该路径（工作区内直搜；工作区外经确认放行后直搜）。
+        // 指定 path 时 = 该路径（工作区/技能目录/会话临时目录内直搜；其外经确认放行后直搜）。
         // 结果路径格式：工作区内输出相对路径；工作区外输出绝对路径（模型可直接 Read）
         final List<Path> roots = new ArrayList<Path>();
         String start = args.has("path") ? args.get("path").getAsString() : null;
         if (start != null && !start.isEmpty()) {
             final Path root = PathsGuard.resolve(workspace.cwd().toString(), start);
             if (!Files.exists(root)) return ToolResult.error("路径不存在: " + root);
-            ToolResult guard = PathsGuard.errorIfOutside(workspace.workDir(), skillsDir, root);
+            ToolResult guard = PathsGuard.errorIfOutside(workspace.workDir(), skillsDir, tmpDir, root);
             if (guard != null) {
                 if (confirm == null || !confirm.checkReadOutside(this, args, root.toString())) return guard;
             }
