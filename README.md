@@ -1,6 +1,6 @@
 # minion
 
-win7&jdk8 本地 Agent，使用 Java 8 开发，面向 Qwen 等 OpenAI Chat Completions 兼容模型。含子 agent、代码与文件工具、浏览器自动化、Anaconda/Python、Excel、SQLite、本地知识库、MCP、上下文压缩、风险操作确认和 Skills。
+win7&jdk8 本地 Agent，使用 Java 8 开发，面向 Qwen 等 OpenAI Chat Completions 兼容模型。含代码开发、浏览器自动化、Anaconda/Python、Excel/Office、SQL 数据库、本地知识库、项目记忆、会话管理、离线更新、风险审计和 Skills。
 
 ## 启动（GUI）
 
@@ -25,7 +25,7 @@ jar 自举行为（启动器内置，双击 / 命令行同样生效）：
 |---|---|
 | `workspace.json` | 工作空间（名称、work.dir、project.md）；界面「＋ 新建工作空间」创建（work.dir 用系统文件夹选择框选，project.md 可文件选择器选取；新建/修改弹窗同样支持） |
 | `model.json` | 模型配置（多模型：url/apiKey/modelName/provider/thinking/maxContextTokens 等）；设置窗「模型」页管理 |
-| `config.properties` | browser（CDP 浏览器）、python.path（Anaconda/Python）、confirm（高危确认开关/白名单）、paths（读逃逸）、skills.dir（技能目录）、boot.console（自举控制台窗口开关）；设置窗「基础设置」页可改并可浏览选择 Python、浏览器和技能目录 |
+| `config.properties` | browser（CDP 浏览器）、python.path（Anaconda/Python）、permission/confirm（权限模式与高危确认）、context（输出/读取策略）、paths（读逃逸）、skills.dir（技能目录）、boot.console（自举控制台窗口开关）；设置窗「基础设置」页可改并可浏览选择 Python、浏览器和技能目录 |
 | `mcp.json` | MCP 服务器列表（名称/传输/命令/参数/环境变量/URL/请求头/启用开关）；设置窗「MCP」页管理（列表+状态点+启用开关+新建/编辑/删除/重连） |
 
 ## 快捷操作
@@ -35,6 +35,10 @@ jar 自举行为（启动器内置，双击 / 命令行同样生效）：
 - 补全确认反显为输入块：弹层选中的 /命令、@文件 与粘贴的大于 1000 字符长文本变为输入框上方不可编辑块，块右上角关闭按钮或空输入时 Backspace 删除；长文本粘贴在光标处插入「[粘贴块N]」占位符，发送时占位符原位展开为全文（落位 = 光标位置）；其余块与文本按顺序组合（/命令仍须在消息开头）
 - `/` 斜杠命令与技能补全：/help /skills /skill <名> [参数] /compact /tokens；`/skill ` 后按技能名过滤，命令后尾随文字作为技能参数（以「用户参数: 」紧跟 `<skill>` 技能块之后注入）；命令由客户端本地执行，结果以系统行显示在聊天区，不发给模型
 - `/capabilities`：显示 Python、Excel、SQLite、知识库、浏览器和开发构建能力入口
+- `/diagnostics`、`/logs`、`/update`、`/checkpoints`：环境诊断、脱敏日志、离线更新检查和文件修改恢复点
+- `/queue add <任务>`：当前任务完成后按 FIFO 自动执行；`/queue list|remove|clear` 管理队列
+- `/sessions [关键词]`：搜索会话；`/session pin|archive|fork|export|import` 管理会话
+- `/context`、`/memory`、`/permissions`、`/secrets`：上下文、项目记忆、权限策略和加密密钥库入口
 - 设置（右上角齿轮图标）：左列导航（基础设置 / 模型 / MCP / 关于）；模型页单击仅选中模型（查看配置用「修改」），选中后点「激活」按钮切换，选中已激活模型时按钮置灰；切换/修改参数即时生效（运行中会话下一轮生效）；基础设置页底部按钮栏「应用」（保存不关窗）与「关闭」
 - 无会话时直接发送自动新建会话；发送后输入框自动清空
 - 消息区发送消息强制置底；新内容增长时贴底自动跟随，向上翻过半屏暂停、翻回底半屏恢复
@@ -48,7 +52,15 @@ jar 自举行为（启动器内置，双击 / 命令行同样生效）：
 - 关闭窗口时若有会话仍在运行会弹确认
 - 运行中补充：模型运行时输入框有内容 → 发送按钮变为补充箭头，点击即把内容注入正在进行的对话（不中断流程），消息带「⤒ 运行中补充」标识
 - AskUserQuestion 提问：模型需要用户信息时会调用 AskUserQuestion 工具（与 Claude Code 同名）提问，消息区显示问题与选项列表（若有），输入框进入回答模式（占位提示显示问题），输入答案发送即回传，对话继续
-- 图片上传：输入框底部操作行左侧回形针按钮选图（最多 3 张、每张 ≤5MB），图片以图片块展示并随消息按 OpenAI 兼容视觉格式（content 数组）发送——需视觉模型（如 qwen-vl）；DeepSeek 不支持视觉将报错。聊天区仅显示「图片：<文件名>」占位，不渲染图片本体
+- 附件上传：回形针可选图片及文档/表格/代码/压缩包等文件，也可把资源管理器文件拖入窗口或从剪贴板粘贴文件/截图；图片随视觉协议发送，普通文件以工作区路径交给 Document/Files/Excel 等工具读取
+
+## 2026-08-28 全功能完善
+
+- 稳定性：Qwen 工具参数 JSON 容错、滚动脱敏日志、环境诊断、显式后台队列、文件检查点恢复、离线更新包校验
+- 办公数据：Excel 的 profile/filter/write/append/merge/pivot/chart/export；DOCX/PPTX/PDF 提取与生成、PDF 合并拆分；SQLite/ODBC/SQL Server/MySQL/PostgreSQL 查询导出；知识库文件夹增量同步
+- 开发工作台：Git、目录树/搜索/大文件分段及摘要缓存、后台进程、六类项目模板、Maven/Python/npm 自动测试构建与服务启动
+- 浏览器：元素等待、网络空闲、上传、下载目录、多页滚动提取、标签页管理和验证码/登录人工接管
+- 长期使用：会话搜索/置顶/归档/分叉/导入导出，项目记忆与交接，三档权限策略、审计日志、本机用户绑定加密密钥库及 Skills 管理
 
 ## 运行状态指示器
 
@@ -71,9 +83,11 @@ jar 同目录 `session/<workSpaceName>/`，每会话一个 JSON 文件（每轮�
 ## Python、Excel、SQLite 与本地知识库
 
 - `Python`：`status` 自动发现并诊断 Anaconda/Python；`run_code` 执行分析代码；`run_file` 执行工作区脚本。发现顺序为设置中的 `python.path`、`MINION_PYTHON`、当前 Conda、常见 Anaconda/Miniconda 目录、PATH
-- `Excel`：`inspect` 查看 XLSX/XLS/XLSM/CSV/TSV 的工作表、行列和字段类型；`read` 预览指定工作表。复杂清洗、透视、关联、图表和写回使用 `Python` + pandas
+- `Excel`：`inspect/read/profile/filter/write/append/merge/pivot/chart/export`，基于内网 Anaconda 的 pandas/openpyxl；写操作默认输出新文件并建立检查点
+- `Document`：提取 DOCX/PPTX/PDF/XLSX，创建/替换 DOCX、创建 PPTX、PDF 合并拆分并诊断 OCR/Tesseract
+- `Database`：除 SQLite 外支持 ODBC/SQL Server、MySQL、PostgreSQL；`query` 默认只读，`execute` 需确认，`export` 可输出 CSV/XLSX
 - `SQLite`：`schema` 查看结构、`query` 只读查询、`execute` 建表及增删改；使用 Python 标准库 sqlite3，不需要额外数据库驱动
-- `Knowledge`：项目级离线知识库，保存在 `<工作区>/.minion/knowledge/`；支持 add/search/list/read/delete。搜索使用中英文关键词和中文二元组，不依赖云端向量服务
+- `Knowledge`：项目级离线知识库，保存在 `<工作区>/.minion/knowledge/`；支持 add/import/sync/search/list/read/delete，文件夹增量同步和来源引用，不依赖云端向量服务
 - 设置 → 基础设置 → `Python/Anaconda` 可选择内网解释器，例如 `C:\ProgramData\Anaconda3\python.exe`
 
 内置技能包含：`data-analysis`、`sql-database`、`knowledge-base`、`browser-automation`、`web-development`、`windows-packaging`、`app-development`。外部技能同名时覆盖内置技能。
@@ -92,7 +106,7 @@ jar 同目录 `session/<workSpaceName>/`，每会话一个 JSON 文件（每轮�
 用法(模型自动调用,也可在对话里描述操作):
 
 - `Browser`  open/back/refresh/status —— 打开页面与导航
-- `BrowserAction`  click/type/select/text/table/links/scroll/wait —— 常用语义化操作，适合 27B 模型稳定调用
+- `BrowserAction`  click/type/select/text/table/links/scroll/wait_selector/network_idle/upload/download_setup/paginate/tabs/new_tab/switch_tab/close_tab/manual_takeover —— 适合 27B 模型稳定调用
 - `BrowserEval`  执行 JS:输入、点击、提取表格数据(SPA 受控组件用 __minion_set_value 辅助)
 - `BrowserScreenshot`  截图存工作区
 - `BrowserDebug`  network/console/page —— 网络请求、控制台日志、页面状态

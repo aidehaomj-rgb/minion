@@ -47,13 +47,14 @@ public class SessionStore {
                     Session s = gson.fromJson(
                             new String(Files.readAllBytes(f), StandardCharsets.UTF_8), Session.class);
                     if (s == null || s.id == null || s.createdAt == null) continue; // 损坏条目跳过
-                    metas.add(new SessionMeta(s.id, s.createdAt, s.preview()));
+                    metas.add(new SessionMeta(s.id, s.createdAt, s.preview(), s.title, s.pinned, s.archived));
                 } catch (Exception ignored) {
                     // 单个文件损坏（JsonSyntaxException/JsonParseException 等）不影响整个列表
                 }
             }
         }
-        metas.sort(Comparator.comparing((SessionMeta m) -> m.createdAt).reversed());
+        metas.sort(Comparator.comparing((SessionMeta m) -> m.pinned).reversed()
+                .thenComparing(Comparator.comparing((SessionMeta m) -> m.createdAt).reversed()));
         return metas;
     }
 
@@ -72,11 +73,21 @@ public class SessionStore {
         public final String id;
         public final String createdAt;
         public final String preview;
+        public final String title;
+        public final boolean pinned;
+        public final boolean archived;
 
         public SessionMeta(String id, String createdAt, String preview) {
+            this(id, createdAt, preview, null, false, false);
+        }
+
+        public SessionMeta(String id, String createdAt, String preview, String title, boolean pinned, boolean archived) {
             this.id = id;
             this.createdAt = createdAt;
             this.preview = preview;
+            this.title = title;
+            this.pinned = pinned;
+            this.archived = archived;
         }
     }
 }

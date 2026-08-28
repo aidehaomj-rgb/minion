@@ -1,32 +1,29 @@
-Minion custom.2 增量更新
+Minion custom.3 增量更新
 ========================
 
-发布日期：2026-08-27
-包含提交：95117e8、58b364c
+发布日期：2026-08-28
+兼容环境：Windows 7、JDK 8、Python 3.7.6/Anaconda3、Qwen3 27B
 
-本包合并最近两次功能更新，供已安装并能正常运行的 Win7 版 Minion 直接增量升级。
+本包包含 2026-08-28 当天全部本地开发内容，并已合并 GitHub upstream/main 至 400a894。
 
-新增：
+主要新增：
 
-1. 通用文件附件：支持 PDF、DOCX、XLSX、PPTX、TXT、CSV、Markdown 和常见代码文件；图片仍按视觉输入处理。
-2. Python/Anaconda：可自动识别 Win7 上的 Python 3.7.6、Anaconda3/Miniconda，并支持手动指定解释器路径。
-3. Excel 数据分析：可检查、读取 XLSX、XLS、XLSM、CSV、TSV，调用 pandas/openpyxl/xlrd 分析数据。
-4. SQL 数据库：新增 SQLite 表结构查看、查询和经确认后执行写入语句。
-5. 本地知识库：支持 Markdown 知识的添加、搜索、列表、读取和删除。
-6. 浏览器操作：新增点击、输入、选择、取文本、取表格、取链接、滚动和等待等语义化动作。
-7. 内置能力：新增数据分析、SQL、知识库、浏览器自动化、网页开发、Windows 打包、App 开发等 Skills。
-8. 能力检查：新增 /capabilities 命令，并在设置中增加 Python 路径选择。
-
-附件说明：
-
-- 单个文档最大 10 MB，最多同时附加 8 个文档。
-- 老式 DOC、XLS、PPT 请先另存为 DOCX、XLSX、PPTX。
-- 扫描版 PDF 仍需先进行 OCR。
+1. 稳定性：Qwen 工具参数 JSON 容错、环境诊断、脱敏滚动日志、后台任务队列、文件检查点与恢复。
+2. Excel/Office：Excel 清洗、筛选、画像、合并、透视、图表、导出；DOCX/PPTX/PDF 提取与生成；PDF 合并拆分。
+3. 数据库：SQLite、ODBC/SQL Server、MySQL、PostgreSQL 的结构、查询、执行和 CSV/XLSX 导出。
+4. 知识库：文件夹批量导入、增量同步、来源引用和本地离线搜索。
+5. 附件：普通文件、图片、拖放、剪贴板文件和截图粘贴。
+6. 开发工作台：Git、文件树与大文件分段/摘要缓存、后台进程、项目模板、自动测试/构建/服务启动。
+7. 浏览器：元素等待、网络空闲、文件上传、下载目录、多页抓取、标签页管理和人工接管。
+8. 会话与上下文：搜索、置顶、归档、分叉、导入导出、项目记忆、handoff、上下文策略和统计。
+9. 安全与扩展：read-only/workspace-write/full 三档权限、审计日志、本机用户绑定加密密钥库、Skills 管理。
+10. 更新器：不再要求 JDK 必须位于安装目录；新增一键 Rollback-Minion.cmd。
 
 更新安全：
 
-- 更新前自动校验 SHA-256 并备份旧 JAR。
-- 更新失败会自动回滚。
-- 不覆盖模型配置、工作空间、会话、Skills、知识库、Python/Anaconda 或 JDK。
+- 更新前校验 SHA-256。
+- 自动备份旧 JAR，替换失败自动恢复。
+- 可双击 Rollback-Minion.cmd 一键回退。
+- 不覆盖 model.json、workspace.json、config.properties、mcp.json、session、skills、知识库、Python 或 JDK。
 
-如果升级后需要指定 Anaconda，请在设置中选择类似 C:\Anaconda3\python.exe 的解释器。
+验证结果将在包内 BUILD-INFO.txt 中记录。

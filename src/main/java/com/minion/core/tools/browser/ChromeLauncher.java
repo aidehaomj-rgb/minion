@@ -107,6 +107,13 @@ public class ChromeLauncher {
         }
     }
 
+    /** 当前 Chrome 的标签页 JSON；BrowserSession 用于标签页管理。 */
+    String pagesJson() throws IOException {
+        String json = fetchJsonList();
+        if (json == null) throw new IOException("Chrome 调试端口不可用");
+        return json;
+    }
+
     /** 自动探测 Chrome 常见安装位置;找不到返回 null */
     static String findChrome() {
         String[] candidates = {

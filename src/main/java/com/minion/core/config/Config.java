@@ -98,6 +98,10 @@ public class Config {
     /** 读逃逸：true 时 Read/Grep/Glob 可读取工作区外文件（写入类工具不受影响，仍受限） */
     public boolean readAllowOutside() { return Boolean.parseBoolean(get("paths.read.allowOutside", "false")); }
     public boolean confirmSkip() { return Boolean.parseBoolean(get("confirm.skip", "false")); }
+    /** read-only / workspace-write / full；未知值回落 workspace-write。 */
+    public String permissionMode() { String mode=get("permission.mode","workspace-write").toLowerCase(); return mode.matches("read-only|workspace-write|full")?mode:"workspace-write"; }
+    public String contextOutputMode() { return get("context.outputMode", "balanced"); }
+    public String contextReadMode() { return get("context.readMode", "chunked"); }
     /** 输入框发送键：true=Enter 发送（Ctrl+Enter 换行）；false=Ctrl+Enter 发送（Enter 换行）；无键（空/旧配置）默认 true */
     public boolean enterSends() { return Boolean.parseBoolean(get("input.enterSends", "true")); }
     public Set<String> whitelistTools()    { return csv(get("confirm.whitelist.tools", "")); }

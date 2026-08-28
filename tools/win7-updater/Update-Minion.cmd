@@ -17,16 +17,16 @@ if not exist "%PAYLOAD%" goto :missing_payload
 if not exist "%HASH_FILE%" goto :missing_payload
 
 rem 1. The update folder itself is the installation directory.
-if exist "%~dp0minion-0.1.0.jar" if exist "%~dp0jdk8\bin\java.exe" set "TARGET_DIR=%~dp0"
+if exist "%~dp0minion-0.1.0.jar" set "TARGET_DIR=%~dp0"
 
 rem 2. The update folder is directly inside the installation directory.
-if not defined TARGET_DIR if exist "%~dp0..\minion-0.1.0.jar" if exist "%~dp0..\jdk8\bin\java.exe" set "TARGET_DIR=%~dp0.."
+if not defined TARGET_DIR if exist "%~dp0..\minion-0.1.0.jar" set "TARGET_DIR=%~dp0.."
 
 rem 3. Reuse the installation directory selected on the previous run.
 if not defined TARGET_DIR if exist "%SAVED_DIR%" set /p TARGET_DIR=<"%SAVED_DIR%"
 
 :check_target
-if defined TARGET_DIR if exist "%TARGET_DIR%\minion-0.1.0.jar" if exist "%TARGET_DIR%\jdk8\bin\java.exe" goto :target_ok
+if defined TARGET_DIR if exist "%TARGET_DIR%\minion-0.1.0.jar" goto :target_ok
 
 echo Minion installation directory was not found automatically.
 echo Example: D:\tools\minion-win7-offline-0.1.0

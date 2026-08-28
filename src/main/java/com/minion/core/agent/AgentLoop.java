@@ -1,7 +1,7 @@
 package com.minion.core.agent;
 
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.minion.core.diagnostics.DiagnosticLog;
 import com.minion.core.context.ContextManager;
 import com.minion.core.context.TokenCounter;
 import com.minion.core.llm.ImagePart;
@@ -14,6 +14,7 @@ import com.minion.core.llm.UsageTracker;
 import com.minion.core.skills.Skill;
 import com.minion.core.storage.SessionStore;
 import com.minion.core.tools.Tool;
+import com.minion.core.tools.ToolArguments;
 import com.minion.core.tools.ToolRegistry;
 import com.minion.core.tools.ToolResult;
 import com.minion.core.tools.Workspace;
@@ -672,33 +673,50 @@ public class AgentLoop {
     }
 
     private ToolResult runOneTool(ToolCall call) throws Exception {
+        long started = System.nanoTime();
         try {
             Tool tool = registry.get(call.name);
             if (tool == null) {
-                return ToolResult.error("未知工具: " + call.name);
+                ToolResult result = ToolResult.error("未知工具: " + call.name);
+                DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                return result;
             }
             JsonObject args;
             try {
-                args = JsonParser.parseString(call.arguments == null ? "{}" : call.arguments).getAsJsonObject();
+                args = ToolArguments.parseObject(call.arguments);
             } catch (Exception e) {
-                return ToolResult.error("工具参数 JSON 解析失败: " + e.getMessage()
-                        + "，请检查 arguments 格式");
+                ToolResult result = ToolResult.error("工具参数 JSON 解析失败: " + e.getMessage()
+                        + "。请仅返回符合 schema 的 JSON 对象后重试，不要使用 Markdown 代码围栏");
+                DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                return result;
             }
             if (!confirmGate.check(tool, args)) {
                 String detail = args.has("command") ? args.get("command").getAsString()
                         : (args.has("path") ? args.get("path").getAsString() : args.toString());
-                return ToolResult.error("用户拒绝了该操作（" + call.name + " → " + detail + "），请调整方案");
+                ToolResult result = ToolResult.error("用户拒绝了该操作（" + call.name + " → " + detail + "），请调整方案");
+                DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                return result;
             }
             ui.onToolCall(call.name, args);
+            ToolResult result;
             try {
-                return tool.execute(args);
+                result = tool.execute(args);
             } catch (Exception e) {
-                return ToolResult.error("工具执行异常: " + e.getMessage());
+                result = ToolResult.error("工具执行异常: " + e.getClass().getSimpleName() + ": " + e.getMessage()
+                        + "。请读取最新状态并调整参数后重试");
             }
+            DiagnosticLog.tool(call.name, elapsedMs(started), result.ok, result.output);
+            return result;
         } catch (RuntimeException e) {
             // 防御：参数类型非法等 unchecked 异常不得穿透执行线程
-            return ToolResult.error("工具执行异常: " + e.getMessage());
+            ToolResult result = ToolResult.error("工具执行异常: " + e.getMessage());
+            DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+            return result;
         }
+    }
+
+    private static long elapsedMs(long startedNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
     }
 
     /** 派发子 agent（Task 15 由 TaskTool 调用） */

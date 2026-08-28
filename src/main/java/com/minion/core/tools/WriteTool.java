@@ -1,6 +1,7 @@
 package com.minion.core.tools;
 
 import com.google.gson.JsonObject;
+import com.minion.core.checkpoint.CheckpointStore;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -14,15 +15,21 @@ public class WriteTool implements Tool {
     private final Workspace workspace;
     private final String skillsDir;
     private final String tmpDir;
+    private final CheckpointStore checkpoints;
 
     public WriteTool(Workspace workspace) { this(workspace, null); }
 
     public WriteTool(Workspace workspace, String skillsDir) { this(workspace, skillsDir, null); }
 
     public WriteTool(Workspace workspace, String skillsDir, String tmpDir) {
+        this(workspace, skillsDir, tmpDir, null);
+    }
+
+    public WriteTool(Workspace workspace, String skillsDir, String tmpDir, CheckpointStore checkpoints) {
         this.workspace = workspace;
         this.skillsDir = skillsDir;
         this.tmpDir = tmpDir;
+        this.checkpoints = checkpoints;
     }
 
     @Override
@@ -54,6 +61,10 @@ public class WriteTool implements Tool {
         if (guard != null) return guard;
         if (p.getParent() != null) Files.createDirectories(p.getParent());
         String content = args.get("content").getAsString();
+        if (checkpoints != null) {
+            try { checkpoints.create(p, "Write"); }
+            catch (IOException e) { return ToolResult.error("创建写入前检查点失败，未修改文件: " + e.getMessage()); }
+        }
         Files.write(p, content.getBytes(StandardCharsets.UTF_8));
         return ToolResult.success("已写入 " + p + " (" + content.length() + " 字符)");
     }

@@ -10,6 +10,8 @@ Minion 增量更新包使用说明
    D:\tools\minion-win7-offline-0.1.0
 5. 确认后更新器会记住该目录，以后通常不需要再次输入。
 
+安装目录只需包含 minion-0.1.0.jar；JDK 8 可以在其他目录或由 VS Code 扩展配置。
+
 也可以把整个更新包文件夹直接放进 Minion 安装目录，更新器会自动识别父目录。
 
 二、更新器会做什么
@@ -35,5 +37,5 @@ skills\
 如果新版本启动后有问题：
 
 1. 关闭 Minion。
-2. 将 backup\minion-0.1.0.jar.bak 复制回安装目录。
-3. 改名为 minion-0.1.0.jar 并覆盖新版文件。
+2. 双击更新包中的 Rollback-Minion.cmd。
+3. 确认安装目录后自动恢复 backup\minion-0.1.0.jar.bak。

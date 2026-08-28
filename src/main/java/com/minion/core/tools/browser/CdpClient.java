@@ -43,6 +43,18 @@ public class CdpClient extends WebSocketListener {
 
     public boolean isConnected() { return connected; }
 
+    /** 主动断开当前页面端点（切换标签页/应用退出时使用）。 */
+    public synchronized void disconnect() {
+        connected = false;
+        WebSocket current = socket;
+        socket = null;
+        if (current != null) current.close(1000, "switch target");
+        for (Pending p : pending.values()) {
+            synchronized (p) { p.err = "连接已切换"; p.notifyAll(); }
+        }
+        pending.clear();
+    }
+
     /** 连接(阻塞至握手完成或超时);失败抛 IOException */
     public void connect(String wsUrl) throws IOException {
         if (connected) return;

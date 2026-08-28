@@ -12,13 +12,16 @@ public class SlashSuggesterTest {
 
     @Test public void builtins_coverAllCommands() {
         List<Suggestion> all = SlashSuggester.all(Arrays.<Skill>asList());
-        assertEquals(6, all.size());
+        assertEquals(17, all.size());
         assertEquals("/help", all.get(0).insertText);
         assertEquals("/skills", all.get(1).insertText);
         assertEquals("/skill", all.get(2).insertText);
         assertEquals("/compact", all.get(3).insertText);
         assertEquals("/capabilities", all.get(4).insertText);
         assertEquals("/tokens", all.get(5).insertText);
+        assertTrue(all.stream().anyMatch(s -> "/sessions".equals(s.insertText)));
+        assertTrue(all.stream().anyMatch(s -> "/context".equals(s.insertText)));
+        assertTrue(all.stream().anyMatch(s -> "/permissions".equals(s.insertText)));
     }
 
     @Test public void skillEntries_insertFullSkillCommand() {

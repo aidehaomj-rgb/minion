@@ -19,6 +19,9 @@ public class Session {
     public String title;
     public String workDir;
     public String modelName;
+    /** 会话管理元数据：置顶优先展示；归档后从默认侧栏隐藏但仍保留落盘。 */
+    public boolean pinned;
+    public boolean archived;
     /** 会话级工作目录(相对路径基准);null/空 = 跟随工作区根 */
     public String cwd;
     public List<Message> messages = new ArrayList<Message>();

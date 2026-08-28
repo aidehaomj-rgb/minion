@@ -14,8 +14,11 @@ import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.Clipboard;
+import javafx.scene.input.DragEvent;
+import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.GridPane;
@@ -26,6 +29,9 @@ import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
 import javafx.stage.FileChooser;
 import javafx.stage.FileChooser.ExtensionFilter;
+import javafx.embed.swing.SwingFXUtils;
+import javax.imageio.ImageIO;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -136,7 +142,18 @@ public class InputView extends VBox {
             // 发送时占位符原位展开为全文，保证落位 = 光标位置；短文本不拦截走默认粘贴
             if ((e.isControlDown() && e.getCode() == KeyCode.V)
                     || (e.isShiftDown() && e.getCode() == KeyCode.INSERT)) {
-                String clip = Clipboard.getSystemClipboard().getString();
+                Clipboard clipboard = Clipboard.getSystemClipboard();
+                if (clipboard.hasFiles()) {
+                    addAttachments(clipboard.getFiles());
+                    e.consume();
+                    return;
+                }
+                if (clipboard.hasImage()) {
+                    addClipboardImage(clipboard);
+                    e.consume();
+                    return;
+                }
+                String clip = clipboard.getString();
                 if (InputChip.shouldChipPaste(clip)) {
                     InputChip chip = InputChip.pasteChip(clip, "[粘贴块" + (++pasteSeq) + "]");
                     addChip(chip);
@@ -173,6 +190,17 @@ public class InputView extends VBox {
         // 大框：上=块行+输入框，下=底部操作行（上传按钮左 + 弹性空白 + 发送按钮右）
         frame = new VBox(6);
         frame.getStyleClass().add("input-frame");
+        frame.setOnDragOver(e -> {
+            if (e.getGestureSource() != frame && e.getDragboard().hasFiles()) e.acceptTransferModes(TransferMode.COPY);
+            e.consume();
+        });
+        frame.setOnDragDropped(e -> {
+            Dragboard board = e.getDragboard();
+            boolean ok = board.hasFiles();
+            if (ok) addAttachments(board.getFiles());
+            e.setDropCompleted(ok);
+            e.consume();
+        });
         // 块行（上方）+ 文本区（下方）：chipRow 无块时 unmanaged 不占位
         chipRow.getStyleClass().add("chip-row");
         VBox composer = new VBox(6);
@@ -655,7 +683,12 @@ public class InputView extends VBox {
                 "*.html", "*.css", "*.sql", "*.sh", "*.ps1", "*.bat", "*.properties", "*.ini", "*.conf"));
         List<File> selected = chooser.showOpenMultipleDialog(getScene().getWindow());
         if (selected == null || selected.isEmpty()) return;
+        addAttachments(selected);
+    }
 
+    /** 文件选择、拖放和剪贴板文件共用同一校验/解析路径。 */
+    private void addAttachments(List<File> selected) {
+        if (selected == null || selected.isEmpty()) return;
         int have = 0;
         for (InputChip c : chips) if (c.type == InputChip.Type.IMAGE) have++;
         int documents = 0;
@@ -688,6 +721,20 @@ public class InputView extends VBox {
                 notifyChat("读取附件失败（" + f.getName() + "）: " + ex.getMessage());
             }
         }
+    }
+
+    /** 剪贴板位图转 PNG 后直接进入视觉通道，不在磁盘创建临时文件。 */
+    private void addClipboardImage(Clipboard clipboard) {
+        int have = 0;
+        for (InputChip c : chips) if (c.type == InputChip.Type.IMAGE) have++;
+        if (have >= ImagePart.MAX_IMAGES) { notifyChat("最多上传 " + ImagePart.MAX_IMAGES + " 张图片"); return; }
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            ImageIO.write(SwingFXUtils.fromFXImage(clipboard.getImage(), null), "png", out);
+            byte[] bytes = out.toByteArray();
+            if (bytes.length > ImagePart.MAX_FILE_BYTES) { notifyChat("剪贴板图片超过大小限制"); return; }
+            addChip(InputChip.imageChip("image/png", Base64.getEncoder().encodeToString(bytes), "剪贴板图片.png"));
+        } catch (Exception e) { notifyChat("读取剪贴板图片失败: " + e.getMessage()); }
     }
 
     private static boolean isImage(String name) {

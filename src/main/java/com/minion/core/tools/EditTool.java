@@ -1,6 +1,7 @@
 package com.minion.core.tools;
 
 import com.google.gson.JsonObject;
+import com.minion.core.checkpoint.CheckpointStore;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,15 +13,21 @@ public class EditTool implements Tool {
     private final Workspace workspace;
     private final String skillsDir;
     private final String tmpDir;
+    private final CheckpointStore checkpoints;
 
     public EditTool(Workspace workspace) { this(workspace, null); }
 
     public EditTool(Workspace workspace, String skillsDir) { this(workspace, skillsDir, null); }
 
     public EditTool(Workspace workspace, String skillsDir, String tmpDir) {
+        this(workspace, skillsDir, tmpDir, null);
+    }
+
+    public EditTool(Workspace workspace, String skillsDir, String tmpDir, CheckpointStore checkpoints) {
         this.workspace = workspace;
         this.skillsDir = skillsDir;
         this.tmpDir = tmpDir;
+        this.checkpoints = checkpoints;
     }
 
     @Override
@@ -79,6 +86,10 @@ public class EditTool implements Tool {
                 : matchContent.replaceFirst(java.util.regex.Pattern.quote(matchOld),
                         java.util.regex.Matcher.quoteReplacement(matchNew));
         if (crlf) updated = updated.replace("\n", "\r\n");
+        if (checkpoints != null) {
+            try { checkpoints.create(p, "Edit"); }
+            catch (IOException e) { return ToolResult.error("创建编辑前检查点失败，未修改文件: " + e.getMessage()); }
+        }
         Files.write(p, updated.getBytes(d.charset)); // 按原编码写回，不破坏文件其余内容
         return ToolResult.success("已替换 " + (replaceAll ? count : 1) + " 处: " + p);
     }

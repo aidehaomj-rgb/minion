@@ -1,7 +1,10 @@
 package com.minion.core.tools.browser;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -236,6 +239,64 @@ public class BrowserSession {
         } catch (IOException ignored) { }
         return "当前页面: " + (currentUrl.isEmpty() ? "(未知)" : currentUrl);
     }
+
+    /** 等到 performance 资源数稳定一段时间，适配 SPA/Ajax 页面。 */
+    public synchronized String waitForNetworkIdle(int timeoutMs, int idleMs) throws IOException {
+        ensureConnected(); enableDomains();
+        long deadline=System.currentTimeMillis()+Math.max(500,Math.min(timeoutMs,60000));
+        long stableAt=System.currentTimeMillis(); String previous="";
+        while(System.currentTimeMillis()<deadline){
+            String now=evaluate("String(performance.getEntriesByType('resource').length)+'|'+document.readyState");
+            if(!now.equals(previous)){previous=now;stableAt=System.currentTimeMillis();}
+            if(System.currentTimeMillis()-stableAt>=Math.max(200,Math.min(idleMs,5000)))return "网络已空闲: "+previous;
+            try{Thread.sleep(200);}catch(InterruptedException e){Thread.currentThread().interrupt();break;}
+        }
+        return "等待网络空闲超时（页面仍可继续操作）";
+    }
+
+    /** 使用 CDP 为 file input 设置本机文件，绕过脚本无法写入 input.files 的浏览器限制。 */
+    public synchronized String upload(String selector, List<String> files) throws IOException {
+        ensureConnected();
+        JsonObject doc=client.command("DOM.getDocument",new JsonObject());
+        int root=doc.getAsJsonObject("root").get("nodeId").getAsInt();
+        JsonObject query=new JsonObject();query.addProperty("nodeId",root);query.addProperty("selector",selector);
+        JsonObject result=client.command("DOM.querySelector",query);int node=result.get("nodeId").getAsInt();
+        if(node==0)throw new IOException("未找到上传控件: "+selector);
+        JsonObject params=new JsonObject();params.addProperty("nodeId",node);JsonArray paths=new JsonArray();for(String file:files)paths.add(file);params.add("files",paths);
+        client.command("DOM.setFileInputFiles",params);
+        return "已选择 "+files.size()+" 个文件";
+    }
+
+    public synchronized String configureDownloads(String path) throws IOException {
+        ensureConnected();JsonObject p=new JsonObject();p.addProperty("behavior","allow");p.addProperty("downloadPath",path);p.addProperty("eventsEnabled",true);
+        try{client.command("Browser.setDownloadBehavior",p);}catch(IOException e){client.command("Page.setDownloadBehavior",p);}
+        return "下载目录已设置: "+path;
+    }
+
+    public synchronized String tabs() throws IOException {
+        JsonArray pages=JsonParser.parseString(launcher.pagesJson()).getAsJsonArray();StringBuilder out=new StringBuilder();
+        for(JsonElement e:pages){JsonObject p=e.getAsJsonObject();if(!"page".equals(value(p,"type")))continue;out.append(value(p,"id")).append("  ").append(value(p,"title")).append("  ").append(value(p,"url")).append('\n');}
+        return out.length()==0?"没有标签页":out.toString().trim();
+    }
+
+    public synchronized String newTab(String url) throws IOException {
+        ensureConnected();JsonObject p=new JsonObject();p.addProperty("url",url==null||url.trim().isEmpty()?"about:blank":url);JsonObject r=client.command("Target.createTarget",p);
+        return "已创建标签页: "+(r.has("targetId")?r.get("targetId").getAsString():"完成");
+    }
+
+    public synchronized String switchTab(String targetId) throws IOException {
+        JsonArray pages=JsonParser.parseString(launcher.pagesJson()).getAsJsonArray();String endpoint=null,url="";
+        for(JsonElement e:pages){JsonObject p=e.getAsJsonObject();if(targetId.equals(value(p,"id"))){endpoint=value(p,"webSocketDebuggerUrl");url=value(p,"url");break;}}
+        if(endpoint==null||endpoint.isEmpty())throw new IOException("标签页不存在: "+targetId);
+        client.disconnect();domainsEnabled=false;helperInjected=false;client.connect(endpoint);currentUrl=url;enableDomains();
+        return "已切换标签页: "+targetId+"  "+url;
+    }
+
+    public synchronized String closeTab(String targetId) throws IOException {
+        ensureConnected();JsonObject p=new JsonObject();p.addProperty("targetId",targetId);client.command("Target.closeTarget",p);return "已关闭标签页: "+targetId;
+    }
+
+    private static String value(JsonObject o,String key){return o.has(key)&&!o.get(key).isJsonNull()?o.get(key).getAsString():"";}
 
     private static String truncate(String s, int n) {
         return s.length() > n ? s.substring(0, n) + "..." : s;

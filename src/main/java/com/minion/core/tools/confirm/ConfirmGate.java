@@ -5,6 +5,7 @@ import com.minion.core.config.Config;
 import com.minion.core.tools.BashTool;
 import com.minion.core.tools.DangerousCommands;
 import com.minion.core.tools.Tool;
+import com.minion.core.diagnostics.DiagnosticLog;
 
 /** 高危操作确认：跳过开关 / 白名单 / Y-N-W-A 交互 */
 public class ConfirmGate {
@@ -21,14 +22,16 @@ public class ConfirmGate {
     /** 返回 true = 放行执行 */
     public synchronized boolean check(Tool tool, JsonObject args) {
         if (!tool.isHighRisk(args)) return true;
-        if (sessionBypass || config.confirmSkip()) return true;
-        if (isWhitelisted(tool, args)) return true;
+        String mode = config.permissionMode();
+        if ("read-only".equals(mode)) { DiagnosticLog.info("permission", "DENY read-only " + highRiskDetail(tool,args)); return false; }
+        if ("full".equals(mode) || sessionBypass || config.confirmSkip()) { DiagnosticLog.info("permission", "ALLOW bypass " + highRiskDetail(tool,args)); return true; }
+        if (isWhitelisted(tool, args)) { DiagnosticLog.info("permission", "ALLOW whitelist " + highRiskDetail(tool,args)); return true; }
 
         String detail = highRiskDetail(tool, args);
         // ⚠ 在 mintty 默认字体链中渲染为 ?，高危确认用 ASCII 的 !
         ConfirmUi.Decision d = ui.ask("! 高危操作 " + detail);
-        if (d == ConfirmUi.Decision.APPROVE) return true;
-        if (d == ConfirmUi.Decision.REJECT) return false;
+        if (d == ConfirmUi.Decision.APPROVE) { DiagnosticLog.info("permission", "ALLOW once " + detail); return true; }
+        if (d == ConfirmUi.Decision.REJECT) { DiagnosticLog.info("permission", "DENY user " + detail); return false; }
         if (d == ConfirmUi.Decision.APPROVE_WHITELIST) {
             addToWhitelist(tool, args);
             return true;
@@ -52,7 +55,8 @@ public class ConfirmGate {
     }
 
     private synchronized boolean checkOutside(Tool tool, JsonObject args, String path, String label) {
-        if (config.readAllowOutside() || sessionBypass) return true;
+        if ("full".equals(config.permissionMode()) || config.readAllowOutside() || sessionBypass) return true;
+        if ("read-only".equals(config.permissionMode()) && "越界写入".equals(label)) { DiagnosticLog.info("permission", "DENY read-only outside-write " + path); return false; }
         String detail = tool.name() + " → " + path;
         ConfirmUi.Decision d = ui.ask("! " + label + " " + detail);
         if (d == ConfirmUi.Decision.APPROVE) return true;

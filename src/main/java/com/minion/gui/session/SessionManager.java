@@ -1,10 +1,12 @@
 package com.minion.gui.session;
 
+import com.google.gson.Gson;
 import com.minion.core.agent.AgentLoop;
 import com.minion.core.agent.RetryProgress;
 import com.minion.core.agent.Session;
 import com.minion.core.agent.SystemPromptBuilder;
 import com.minion.core.agent.TitleGenerator;
+import com.minion.core.checkpoint.CheckpointStore;
 import com.minion.core.config.Config;
 import com.minion.core.config.ModelConfig;
 import com.minion.core.config.ModelManager;
@@ -12,12 +14,15 @@ import com.minion.core.config.WorkspaceConfig;
 import com.minion.core.config.WorkspaceManager;
 import com.minion.core.context.ContextManager;
 import com.minion.core.context.TokenCounter;
+import com.minion.core.diagnostics.DiagnosticLog;
 import com.minion.core.llm.DeepSeekClient;
 import com.minion.core.llm.ImagePart;
 import com.minion.core.llm.LlmClient;
+import com.minion.core.llm.Message;
 import com.minion.core.mcp.McpManager;
 import com.minion.core.mcp.McpServer;
 import com.minion.core.mcp.McpToolInfo;
+import com.minion.core.security.SecretStore;
 import com.minion.core.tools.mcp.McpProxyTool;
 import com.minion.core.skills.Skill;
 import com.minion.core.storage.SessionStore;
@@ -26,6 +31,7 @@ import com.minion.core.tools.EditTool;
 import com.minion.core.tools.GlobTool;
 import com.minion.core.tools.GrepTool;
 import com.minion.core.tools.ReadTool;
+import com.minion.core.tools.PathsGuard;
 import com.minion.core.tools.ToolRegistry;
 import com.minion.core.tools.WebFetchTool;
 import com.minion.core.tools.Workspace;
@@ -38,17 +44,34 @@ import com.minion.core.tools.browser.BrowserSession;
 import com.minion.core.tools.browser.BrowserTool;
 import com.minion.core.tools.confirm.ConfirmGate;
 import com.minion.core.tools.confirm.ConfirmUi;
+import com.minion.core.tools.checkpoint.CheckpointTool;
 import com.minion.core.tools.data.ExcelTool;
+import com.minion.core.tools.data.DatabaseTool;
+import com.minion.core.tools.data.DocumentTool;
 import com.minion.core.tools.data.SqliteTool;
+import com.minion.core.tools.dev.BuildTool;
+import com.minion.core.tools.dev.FilesTool;
+import com.minion.core.tools.dev.GitTool;
+import com.minion.core.tools.dev.ProcessTool;
+import com.minion.core.tools.dev.ProjectTool;
 import com.minion.core.tools.knowledge.KnowledgeTool;
+import com.minion.core.tools.context.ContextTool;
+import com.minion.core.tools.context.MemoryTool;
 import com.minion.core.tools.python.PythonRuntime;
 import com.minion.core.tools.python.PythonTool;
+import com.minion.core.tools.system.DiagnosticsTool;
+import com.minion.core.tools.system.LogsTool;
+import com.minion.core.tools.system.UpdateTool;
+import com.minion.core.tools.security.PermissionTool;
+import com.minion.core.tools.security.SecretsTool;
+import com.minion.core.tools.skills.SkillAdminTool;
 import com.minion.gui.command.CommandDispatcher;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -95,6 +118,7 @@ public class SessionManager {
     private final BrowserSession browserSession; // 可为 null（测试/未配置浏览器路径）
     private final McpManager mcp; // 可为 null（测试）；MCP 服务器管理：惰性连接 + 工具补注册
     private final CommandDispatcher dispatcher; // 斜杠命令本地分发（GUI 输入路径）
+    private final SecretStore secretStore;
     private final List<Listener> listeners = new ArrayList<Listener>();
 
     private final Map<String, WorkspaceCtx> ctxByName = new HashMap<String, WorkspaceCtx>();
@@ -133,6 +157,9 @@ public class SessionManager {
         this.allSkills = allSkills;
         this.browserSession = browserSession;
         this.mcp = mcp;
+        DiagnosticLog.initialize(jarDir);
+        DiagnosticLog.info("startup", "SessionManager 初始化，jarDir=" + jarDir);
+        this.secretStore = new SecretStore(jarDir);
         this.dispatcher = new CommandDispatcher(allSkills);
         if (mcp != null) {
             // 连接完成（后台线程）：补注册 MCP 工具进所有存活会话（下一轮 schemas() 可见）
@@ -168,6 +195,7 @@ public class SessionManager {
         for (Listener l : listeners) l.onWorkspaceChanged();
     }
     private void notifyError(String msg) {
+        DiagnosticLog.error("session", msg);
         for (Listener l : listeners) l.onError(msg);
     }
     private void notifyAskChanged(SessionHandle h, boolean asking) {
@@ -219,7 +247,7 @@ public class SessionManager {
                                 .build(allSkills)));
                 SessionController controller = new SessionController();
                 controller.replayHistory(s.messages); // 历史消息灌入事件流：点击会话即可重放显示
-                AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s.id),
+                AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s),
                         new SystemPromptBuilder(projectMdPath(ctx.name), ctx.workspace.workDir(),
                                 tmpDirOf(meta.id).toString()),
                         ctx.confirmGate, controller, cm, ctx.workspace, s);
@@ -293,27 +321,47 @@ public class SessionManager {
      * 文件工具（Read/Write/Edit/Glob/Grep/BrowserScreenshot/Bash）携带会话级临时目录
      * （tmpDirOf(sessionId)），工具对象随会话创建、随会话删除。
      */
-    private ToolRegistry newRegistry(WorkspaceCtx ctx, String sessionId) {
+    private ToolRegistry newRegistry(WorkspaceCtx ctx, Session session) {
         ToolRegistry registry = new ToolRegistry();
         String skillsDir = ctx.skillsDir;
         Workspace workspace = ctx.workspace;
         ConfirmGate gate = ctx.confirmGate;
+        String sessionId = session.id;
         String tmpDir = tmpDirOf(sessionId).toString();
+        CheckpointStore checkpoints = new CheckpointStore(Paths.get(workspace.workDir()),
+                Paths.get(workspace.workDir()).resolve(".minion").resolve("checkpoints").resolve(sessionId));
         registry.register(new ReadTool(workspace, skillsDir, tmpDir, gate));
-        registry.register(new WriteTool(workspace, skillsDir, tmpDir));
-        registry.register(new EditTool(workspace, skillsDir, tmpDir));
+        registry.register(new WriteTool(workspace, skillsDir, tmpDir, checkpoints));
+        registry.register(new EditTool(workspace, skillsDir, tmpDir, checkpoints));
         registry.register(new GlobTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new GrepTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new BashTool(workspace, tmpDirOf(sessionId)));
         PythonRuntime python = new PythonRuntime(config.pythonPath());
+        registry.register(new FilesTool(workspace));
+        registry.register(new GitTool(workspace));
+        ProcessTool processTool = new ProcessTool(workspace);
+        registry.register(processTool);
+        registry.register(new ProjectTool(workspace));
+        registry.register(new BuildTool(workspace, python, processTool));
         registry.register(new PythonTool(workspace, python));
-        registry.register(new ExcelTool(workspace, python));
+        registry.register(new ExcelTool(workspace, python, checkpoints));
         registry.register(new SqliteTool(workspace, python));
+        registry.register(new DatabaseTool(workspace, python, checkpoints, secretStore));
+        registry.register(new DocumentTool(workspace, python, checkpoints));
         registry.register(new KnowledgeTool(workspace));
+        registry.register(new MemoryTool(workspace, checkpoints));
+        registry.register(new ContextTool(session, models.current().maxContextTokens, config));
+        registry.register(new PermissionTool(config));
+        registry.register(new SecretsTool(secretStore));
+        registry.register(new SkillAdminTool(skillsDir, workspace));
+        registry.register(new CheckpointTool(checkpoints));
+        registry.register(new DiagnosticsTool(config, workspace, python, jarDir));
+        registry.register(new LogsTool(workspace));
+        registry.register(new UpdateTool(jarDir));
         registry.register(new WebFetchTool());
         if (browserSession != null) {
             registry.register(new BrowserTool(browserSession));
-            registry.register(new BrowserActionTool(browserSession));
+            registry.register(new BrowserActionTool(browserSession, workspace));
             registry.register(new BrowserEvalTool(browserSession));
             registry.register(new BrowserScreenshotTool(browserSession, workspace, skillsDir, tmpDir, gate));
             registry.register(new BrowserDebugTool(browserSession));
@@ -382,7 +430,7 @@ public class SessionManager {
                         tmpDirOf(s.id).toString())
                         .build(allSkills)));
         SessionController controller = new SessionController();
-        AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s.id),
+        AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s),
                 new SystemPromptBuilder(projectMdPath(currentWorkspaceName), ctx.workspace.workDir(),
                         tmpDirOf(s.id).toString()),
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
@@ -463,7 +511,16 @@ public class SessionManager {
 
     public List<SessionHandle> sessions() {
         WorkspaceCtx ctx = ctxByName.get(currentWorkspaceName);
-        return ctx == null ? new ArrayList<SessionHandle>() : new ArrayList<SessionHandle>(ctx.sessions);
+        if (ctx == null) return new ArrayList<SessionHandle>();
+        List<SessionHandle> visible = new ArrayList<SessionHandle>();
+        for (SessionHandle h : ctx.sessions) if (!h.session.archived) visible.add(h);
+        visible.sort(new Comparator<SessionHandle>() {
+            @Override public int compare(SessionHandle a, SessionHandle b) {
+                if (a.session.pinned != b.session.pinned) return a.session.pinned ? -1 : 1;
+                return b.id.compareTo(a.id);
+            }
+        });
+        return visible;
     }
 
     /** 按 id 查找会话（跨所有工作空间）：页签点击路径——页签与工作空间无关 */
@@ -491,6 +548,7 @@ public class SessionManager {
         WorkspaceCtx ctx = ctxByName.get(h.workspaceName);
         if (ctx == null) return;
         if (h.running) stop(h);
+        shutdownSessionTools(h);
         h.loop.shutdown();
         h.pool.shutdownNow();
         h.closeAll(); // 会话删除即释放其 LLM 客户端（当前 + 待回收，okhttp 资源）
@@ -597,6 +655,7 @@ public class SessionManager {
             h.deleted = true; // 先置位：send 中据此中止，防已删除会话的文件/事件复活
             notifySessionDeleted(h);
             if (h.running) { h.loop.interrupt(); hasRunning = true; } // 终止运行中循环（stop 语义）
+            shutdownSessionTools(h);
             h.loop.shutdown();
             h.pool.shutdownNow();
             h.closeAll(); // 工作空间删除即释放其全部会话的 LLM 客户端（当前 + 待回收）
@@ -661,7 +720,16 @@ public class SessionManager {
                     h.running = true;
                     notifyRunningChanged(h, true);
                     try {
-                        h.loop.runUserTurn(text, images);
+                        String currentText = text;
+                        List<ImagePart> currentImages = images;
+                        while (!h.deleted) {
+                            h.loop.runUserTurn(currentText, currentImages);
+                            SessionHandle.QueuedMessage queued = h.pollQueued();
+                            if (queued == null) break;
+                            h.controller.onSystem("开始执行队列中的下一项任务");
+                            currentText = queued.text;
+                            currentImages = null;
+                        }
                     } finally {
                         if (h.deleted) {
                             // 运行中被删除：runUserTurn 退出路径已把文件写回（deleted 对 AgentLoop 不可见），
@@ -725,10 +793,64 @@ public class SessionManager {
 
     /** 斜杠命令本地分发：命中 → 聊天区回显命令 + 系统行结果（不入 LLM 历史）；未命中 → 按普通消息发送 */
     public void dispatchCommand(SessionHandle h, String text) {
+        String sessionResult = dispatchSessionCommand(h, text);
+        if (sessionResult != null) {
+            h.controller.onUserMessage(text);
+            h.controller.onSystem(sessionResult);
+            return;
+        }
         String result = dispatcher.dispatch(h, text);
         if (result == null) { send(h, text); return; }
         h.controller.onUserMessage(text); // 仅展示回显，不注入 LLM 历史
         h.controller.onSystem(result);
+    }
+
+    /** 会话目录需要访问 manager/store，因此在通用 CommandDispatcher 之前本地处理。 */
+    private String dispatchSessionCommand(SessionHandle h, String input) {
+        if (input == null) return null;
+        String trimmed = input.trim();
+        if (!(trimmed.equalsIgnoreCase("/sessions") || trimmed.toLowerCase().startsWith("/sessions ")
+                || trimmed.equalsIgnoreCase("/session") || trimmed.toLowerCase().startsWith("/session "))) return null;
+        String[] parts = trimmed.split("\\s+", 3);
+        if ("/sessions".equalsIgnoreCase(parts[0])) {
+            String query = parts.length > 1 ? trimmed.substring(trimmed.indexOf(' ') + 1).trim() : "";
+            boolean archivedOnly = "archived".equalsIgnoreCase(query), all = "all".equalsIgnoreCase(query);
+            WorkspaceCtx ctx = ctxByName.get(h.workspaceName); if (ctx == null) return "工作空间不存在";
+            StringBuilder out = new StringBuilder("会话目录："); int count=0;
+            for (SessionHandle item : ctx.sessions) {
+                String hay=(item.title==null?"":item.title)+" "+item.session.preview()+" "+item.id;
+                if(archivedOnly&&!item.session.archived)continue;
+                if(!all&&!archivedOnly&&!query.isEmpty()&&!hay.toLowerCase().contains(query.toLowerCase()))continue;
+                if(!all&&!archivedOnly&&query.isEmpty()&&item.session.archived)continue;
+                out.append('\n').append(item.session.pinned?"[置顶] ":"").append(item.session.archived?"[归档] ":"")
+                        .append(item.id).append("  ").append(item.title==null?"(新会话)":item.title).append(" — ").append(item.session.preview());count++;
+            }
+            return count==0?"未找到会话":out.append("\n共 ").append(count).append(" 个").toString();
+        }
+        if(parts.length<2)return "用法: /session pin|unpin|archive|unarchive|fork|export [路径]|import <路径>";
+        String action=parts[1].toLowerCase();
+        if("pin".equals(action)||"unpin".equals(action)){h.session.pinned="pin".equals(action);persist(h);notifyTitleChanged(h);return h.session.pinned?"会话已置顶":"已取消置顶";}
+        if("archive".equals(action)||"unarchive".equals(action)){h.session.archived="archive".equals(action);persist(h);notifyTitleChanged(h);return h.session.archived?"会话已归档（/sessions archived 查看）":"会话已恢复";}
+        if("fork".equals(action))return forkSession(h);
+        if("export".equals(action))return exportSession(h,parts.length>2?parts[2]:"");
+        if("import".equals(action))return importSession(parts.length>2?parts[2]:"");
+        return "未知会话操作: "+action;
+    }
+
+    private String forkSession(SessionHandle source) {
+        SessionHandle fork=createSession((source.title==null?"会话":source.title)+"（副本）");if(fork==null)return "创建副本失败";
+        Message[] copied=new Gson().fromJson(new Gson().toJson(source.session.messages),Message[].class);
+        fork.session.messages.clear();if(copied!=null)fork.session.messages.addAll(java.util.Arrays.asList(copied));
+        fork.titlePending=false;fork.session.title=fork.title;fork.controller.replayHistory(fork.session.messages);persist(fork);notifyTitleChanged(fork);
+        return "已创建会话副本: "+fork.id;
+    }
+
+    private String exportSession(SessionHandle h,String raw) {
+        try { Path target=raw.trim().isEmpty()?Paths.get(h.session.workDir).resolve(".minion/session-exports").resolve(h.id+".md"):Paths.get(h.session.workDir).resolve(raw).normalize().toAbsolutePath();if(!PathsGuard.inside(h.session.workDir,target))return "导出路径必须位于工作区";if(target.getParent()!=null)Files.createDirectories(target.getParent());StringBuilder md=new StringBuilder("# ").append(h.title==null?h.id:h.title).append("\n\n");for(Message m:h.session.messages){md.append("## ").append(m.role).append("\n\n");if(m.content!=null)md.append(m.content).append("\n\n");if(m.reasoningContent!=null&&!m.reasoningContent.isEmpty())md.append("<details><summary>思考</summary>\n\n").append(m.reasoningContent).append("\n\n</details>\n\n");}Files.write(target,md.toString().getBytes(StandardCharsets.UTF_8));return "会话已导出: "+target;}catch(Exception e){return "导出失败: "+e.getMessage();}
+    }
+
+    private String importSession(String raw) {
+        try {if(raw.trim().isEmpty())return "用法: /session import <工作区内 Markdown 路径>";WorkspaceCtx ctx=ctxByName.get(currentWorkspaceName);Path root=Paths.get(ctx.workspace.workDir()).toAbsolutePath().normalize(),source=root.resolve(raw).normalize().toAbsolutePath();if(!PathsGuard.inside(ctx.workspace.workDir(),source)||!Files.isRegularFile(source))return "导入文件不存在或越出工作区";if(Files.size(source)>2*1024*1024)return "导入文件超过 2MB，请先精简或分段";String body=new String(Files.readAllBytes(source),StandardCharsets.UTF_8);SessionHandle imported=createSession("导入-"+source.getFileName());imported.titlePending=false;imported.session.messages.add(Message.user("以下是导入的历史记录，请作为上下文参考：\n\n"+body));imported.controller.replayHistory(imported.session.messages);persist(imported);notifyTitleChanged(imported);return "已导入为新会话: "+imported.id;}catch(Exception e){return "导入失败: "+e.getMessage();}
     }
 
     private void persist(SessionHandle h) {
@@ -760,11 +882,18 @@ public class SessionManager {
         for (WorkspaceCtx ctx : ctxByName.values()) {
             for (SessionHandle h : ctx.sessions) {
                 if (h.running) h.loop.interrupt();
+                shutdownSessionTools(h);
                 h.loop.shutdown();
                 h.loop.awaitToolsTerminated(8000); // 等 bash 等子进程清理完成，防孤儿残留
                 h.pool.shutdownNow();
                 h.closeAll(); // 关 okhttp 连接池/线程（当前 + 待回收），防 JVM 残留
             }
         }
+    }
+
+    /** 回收由开发工作台启动的后台服务，防止关窗/删会话后残留 cmd、Python 或 Node 进程。 */
+    private static void shutdownSessionTools(SessionHandle h) {
+        com.minion.core.tools.Tool tool = h.loop.registry().get("Process");
+        if (tool instanceof ProcessTool) ((ProcessTool) tool).shutdown();
     }
 }

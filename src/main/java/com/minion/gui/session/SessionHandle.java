@@ -5,6 +5,7 @@ import com.minion.core.agent.Session;
 import com.minion.core.llm.LlmClient;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -56,6 +57,42 @@ public class SessionHandle {
     public volatile boolean askPending;
     /** AskUserQuestion 问题文本（回答模式占位提示用） */
     public volatile String askQuestion;
+
+    /** 显式后台任务队列（/queue add）；与 Steering 的“立即补充当前轮”语义分开。 */
+    private final List<QueuedMessage> queuedMessages = new ArrayList<QueuedMessage>();
+
+    public synchronized int enqueue(String text) {
+        if (text == null || text.trim().isEmpty()) return queuedMessages.size();
+        queuedMessages.add(new QueuedMessage(text.trim(), System.currentTimeMillis()));
+        return queuedMessages.size();
+    }
+
+    public synchronized QueuedMessage pollQueued() {
+        return queuedMessages.isEmpty() ? null : queuedMessages.remove(0);
+    }
+
+    public synchronized List<QueuedMessage> queuedSnapshot() {
+        return Collections.unmodifiableList(new ArrayList<QueuedMessage>(queuedMessages));
+    }
+
+    public synchronized boolean removeQueued(int oneBasedIndex) {
+        int i = oneBasedIndex - 1;
+        if (i < 0 || i >= queuedMessages.size()) return false;
+        queuedMessages.remove(i);
+        return true;
+    }
+
+    public synchronized int clearQueued() {
+        int count = queuedMessages.size();
+        queuedMessages.clear();
+        return count;
+    }
+
+    public static final class QueuedMessage {
+        public final String text;
+        public final long createdAt;
+        QueuedMessage(String text, long createdAt) { this.text = text; this.createdAt = createdAt; }
+    }
 
     public SessionHandle(String id, String workspaceName, Session session,
                          AgentLoop loop, SessionController controller, String title,

@@ -3,23 +3,40 @@ package com.minion.core.tools.browser;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.minion.core.tools.SchemaGenerator;
+import com.minion.core.tools.PathsGuard;
 import com.minion.core.tools.Tool;
 import com.minion.core.tools.ToolResult;
+import com.minion.core.tools.Workspace;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 /** 给中小模型使用的语义化浏览器动作，减少手写 BrowserEval JavaScript 的失败率。 */
 public class BrowserActionTool implements Tool {
     private final BrowserSession session;
-    public BrowserActionTool(BrowserSession session){this.session=session;}
+    private final Workspace workspace;
+    public BrowserActionTool(BrowserSession session){this(session,null);}
+    public BrowserActionTool(BrowserSession session,Workspace workspace){this.session=session;this.workspace=workspace;}
     @Override public String name(){return "BrowserAction";}
-    @Override public String description(){return "语义化网页操作：click/type/select/text/table/links/scroll/wait；selector 使用 CSS 选择器";}
+    @Override public String description(){return "语义化网页操作：元素交互、等待/网络空闲、上传/下载、多页抓取、标签页管理与人工接管；selector 使用 CSS";}
     @Override public JsonObject schema(){return SchemaGenerator.objectSchema("网页元素操作",
-            new String[]{"action","selector","value","timeoutMs"},new String[]{"action"});}
+            new String[]{"action","selector","value","path","targetId","timeoutMs","pages"},new String[]{"action"});}
     @Override public ToolResult execute(JsonObject args){
         String action=text(args,"action").toLowerCase(Locale.ROOT),selector=text(args,"selector"),value=text(args,"value");
         try{
+            if("tabs".equals(action))return ok(session.tabs());
+            if("new_tab".equals(action))return ok(session.newTab(value));
+            if("switch_tab".equals(action))return ok(session.switchTab(text(args,"targetId")));
+            if("close_tab".equals(action))return ok(session.closeTab(text(args,"targetId")));
+            if("network_idle".equals(action))return ok(session.waitForNetworkIdle(integer(args,"timeoutMs",15000),800));
+            if("manual_takeover".equals(action))return ToolResult.success("已暂停自动操作。请在 Chrome 中手工完成验证码、登录或敏感确认，完成后再让 Agent 执行 status/继续。");
+            if("download_setup".equals(action))return configureDownloads(text(args,"path"));
+            if("upload".equals(action))return upload(selector,text(args,"path"));
+            if("paginate".equals(action))return paginate(selector,integer(args,"pages",5),integer(args,"timeoutMs",1000));
             if("links".equals(action))return ok(session.evaluate("JSON.stringify([...document.querySelectorAll('a[href]')].slice(0,200).map(a=>({text:(a.innerText||a.textContent||'').trim(),href:a.href})))"));
             if("scroll".equals(action)){String amount=value.isEmpty()?"window.innerHeight":value;return ok(session.evaluate("window.scrollBy(0,"+numeric(amount)+"); '已滚动'"));}
             if(selector.isEmpty())return ToolResult.error(action+" 需要 selector 参数");
@@ -33,9 +50,22 @@ public class BrowserActionTool implements Tool {
             if("select".equals(action))return ok(session.evaluate("(()=>{let e="+q+";if(!e)throw Error('未找到元素');e.value="+js(value)+";e.dispatchEvent(new Event('change',{bubbles:true}));return '已选择' })()"));
             if("text".equals(action))return ok(session.evaluate("(()=>{let e="+q+";if(!e)throw Error('未找到元素');return e.innerText||e.textContent||''})()"));
             if("table".equals(action))return ok(session.evaluate("(()=>{let e="+q+";if(!e)throw Error('未找到表格');return JSON.stringify([...e.querySelectorAll('tr')].map(r=>[...r.querySelectorAll('th,td')].map(c=>(c.innerText||'').trim())))})()"));
-            if("wait".equals(action))return waitFor(selector,integer(args,"timeoutMs",10000));
-            return ToolResult.error("未知 action: "+action+"（支持 click/type/select/text/table/links/scroll/wait）");
+            if("wait".equals(action)||"wait_selector".equals(action))return waitFor(selector,integer(args,"timeoutMs",10000));
+            return ToolResult.error("未知 action: "+action+"（支持 click/type/select/text/table/links/scroll/wait_selector/network_idle/upload/download_setup/paginate/tabs/new_tab/switch_tab/close_tab/manual_takeover）");
         }catch(IOException e){return ToolResult.error(e.getMessage());}
+    }
+    private ToolResult configureDownloads(String raw)throws IOException{
+        if(workspace==null)return ToolResult.error("下载功能未配置工作区");Path dir=raw.trim().isEmpty()?workspace.cwd().resolve("downloads"):workspace.cwd().resolve(raw).normalize().toAbsolutePath();ToolResult g=PathsGuard.errorIfOutside(workspace.workDir(),dir);if(g!=null)return g;Files.createDirectories(dir);return ok(session.configureDownloads(dir.toString()));
+    }
+    private ToolResult upload(String selector,String raw)throws IOException{
+        if(workspace==null)return ToolResult.error("上传功能未配置工作区");if(selector.trim().isEmpty()||raw.trim().isEmpty())return ToolResult.error("upload 需要 selector 和 path");List<String> files=new ArrayList<String>();
+        for(String item:raw.split("[,\\n]")){if(item.trim().isEmpty())continue;Path p=workspace.cwd().resolve(item.trim()).normalize().toAbsolutePath();ToolResult g=PathsGuard.errorIfOutside(workspace.workDir(),p);if(g!=null)return g;if(!Files.isRegularFile(p))return ToolResult.error("上传文件不存在: "+p);files.add(p.toString());}
+        return files.isEmpty()?ToolResult.error("没有可上传文件"):ok(session.upload(selector,files));
+    }
+    private ToolResult paginate(String selector,int pages,int delay)throws IOException{
+        pages=Math.max(1,Math.min(pages,50));delay=Math.max(100,Math.min(delay,5000));StringBuilder out=new StringBuilder();
+        for(int i=0;i<pages;i++){String script=selector.trim().isEmpty()?"document.body.innerText":"(()=>{let e=document.querySelector("+js(selector)+");return e?(e.innerText||e.textContent||''):''})()";out.append("--- 第 ").append(i+1).append(" 页 ---\n").append(session.evaluate(script)).append('\n');session.evaluate("window.scrollBy(0,window.innerHeight); 'ok'");try{Thread.sleep(delay);}catch(InterruptedException e){Thread.currentThread().interrupt();break;}}
+        return ToolResult.success(out.length()>60000?out.substring(0,60000)+"\n[输出已截断]":out.toString());
     }
     private ToolResult waitFor(String selector,int timeout)throws IOException{
         long end=System.currentTimeMillis()+Math.max(100,Math.min(timeout,60000));
