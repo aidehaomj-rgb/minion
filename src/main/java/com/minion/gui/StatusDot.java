@@ -25,11 +25,25 @@ public final class StatusDot {
     private StatusDot() {
     }
 
-    /** 建状态点：running 时附加呼吸动画 */
+    /** 兼容页签旧入口：运行中显示黄色，否则隐藏。 */
     public static Circle create(boolean running) {
+        return create(running ? com.minion.gui.session.SessionHandle.ActivityState.RUNNING
+                : com.minion.gui.session.SessionHandle.ActivityState.NONE);
+    }
+
+    /** 建三态状态点：运行黄+呼吸，完成未查看绿+常亮，已查看隐藏。 */
+    public static Circle create(com.minion.gui.session.SessionHandle.ActivityState state) {
         Circle dot = new Circle(4);
         dot.getStyleClass().add("status-dot");
-        if (running) startPulse(dot);
+        if (state == com.minion.gui.session.SessionHandle.ActivityState.RUNNING) {
+            dot.getStyleClass().add("status-dot-running");
+            startPulse(dot);
+        } else if (state == com.minion.gui.session.SessionHandle.ActivityState.COMPLETED_UNREAD) {
+            dot.getStyleClass().add("status-dot-completed");
+        } else {
+            dot.setVisible(false);
+            dot.setManaged(false);
+        }
         return dot;
     }
 

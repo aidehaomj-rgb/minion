@@ -127,6 +127,31 @@ public class SessionManagerTest {
         assertEquals(h2, m.currentSession());
     }
 
+    @Test
+    public void activityState_runningCompletedAndViewed() throws Exception {
+        SessionManager m = newManager();
+        SessionHandle h = m.createSession(null);
+        assertEquals(SessionHandle.ActivityState.NONE, h.activityState());
+        h.running = true;
+        assertEquals(SessionHandle.ActivityState.RUNNING, h.activityState());
+        h.running = false;
+        h.completionUnread = true;
+        assertEquals(SessionHandle.ActivityState.COMPLETED_UNREAD, h.activityState());
+        m.activateSession(h);
+        assertFalse(h.completionUnread);
+        assertEquals(SessionHandle.ActivityState.NONE, h.activityState());
+    }
+
+    @Test
+    public void clickingAlreadyActiveSession_clearsCompletedDot() throws Exception {
+        SessionManager m = newManager();
+        SessionHandle h = m.createSession(null);
+        m.activateSession(h);
+        h.completionUnread = true;
+        m.activateSession(h); // 重复激活仍代表用户点击查看
+        assertFalse(h.completionUnread);
+    }
+
     /** 会话文件位于 jarDir/session/<工作空间名>/ 下 */
     @Test
     public void sessionFilesInWorkspaceDir() throws Exception {

@@ -51,6 +51,16 @@ public class SessionHandle {
     public volatile boolean titlePending;
     /** 是否正在后台运行（UI 徽标/终止按钮依据） */
     public volatile boolean running;
+    /** 最近一次运行已结束、用户尚未点击查看；仅为本次进程 UI 状态，不落盘。 */
+    public volatile boolean completionUnread;
+
+    public enum ActivityState { NONE, RUNNING, COMPLETED_UNREAD }
+
+    /** 左侧状态点三态（纯逻辑，便于无 JavaFX 测试）。 */
+    public ActivityState activityState() {
+        if (running) return ActivityState.RUNNING;
+        return completionUnread ? ActivityState.COMPLETED_UNREAD : ActivityState.NONE;
+    }
     /** 会话已删除（send 中据此中止，防已删除会话的文件/事件复活） */
     public volatile boolean deleted;
     /** AskUserQuestion 挂起中（输入框进入回答模式；回答/中断/回合结束复位） */

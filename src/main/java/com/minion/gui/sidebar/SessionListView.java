@@ -46,7 +46,10 @@ public class SessionListView extends ListView<SessionHandle> {
             // 悬停按钮（✎/✕）的点击会冒泡到此 handler：跳过切换，避免误激活会话（按钮事件已由按钮自身处理）
             if (isHoverButton(e.getTarget())) return;
             SessionHandle h = getSelectionModel().getSelectedItem();
-            if (h != null && e.getClickCount() == 1) manager.activateSession(h);
+            if (h != null && e.getClickCount() == 1) {
+                manager.activateSession(h);
+                refresh(); // 重复点击当前会话也要立即清掉绿色完成点
+            }
         });
         Platform.runLater(() -> refresh()); // 初始恢复列表（restoreSessions 无 Listener 通知）
     }
@@ -80,7 +83,7 @@ public class SessionListView extends ListView<SessionHandle> {
                 return;
             }
             String label = (h.session.pinned ? "★ " : "") + (h.title == null ? "(新会话)" : h.title);
-            Circle dot = StatusDot.create(h.running);
+            Circle dot = StatusDot.create(h.activityState());
             Label name = new Label(label);
             name.getStyleClass().add("cell-text"); // 显式上色：graphic 内 Label 不响应 .list-cell 的 -fx-text-fill
             name.setTextOverrun(OverrunStyle.ELLIPSIS);

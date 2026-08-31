@@ -238,7 +238,10 @@ public class MainWindow {
                 });
             }
             @Override public void onSessionRunningChanged(SessionHandle h, boolean running) {
-                Platform.runLater(() -> updateTab(h));
+                Platform.runLater(() -> {
+                    updateTab(h);
+                    sessionList.refresh();
+                });
                 if (inputView != null) inputView.onRunningChanged(h, running);
                 // 仅当前激活会话反映到指示器（chatView 字段 FX 线程读写，统一 runLater 访问）
                 Platform.runLater(() -> {

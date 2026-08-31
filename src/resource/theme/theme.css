@@ -287,7 +287,8 @@
 
 /* 状态点（呼吸动画由 StatusDot 的 Timeline 实现——JavaFX 8 不支持 CSS keyframe） */
 .status-dot { -fx-background-radius: 5; -fx-min-width: 8; -fx-min-height: 8; }
-.status-dot-running { -fx-background-color: #3fb950; }
+.status-dot-running { -fx-fill: #f2c94c; }
+.status-dot-completed { -fx-fill: #3fb950; }
 
 /* ===== 运行状态指示器（正文区左下角齿轮+文案） ===== */
 .running-indicator { -fx-spacing: 8; }

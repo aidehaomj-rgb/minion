@@ -191,6 +191,7 @@ public class SessionManager {
     }
     /** running 回调：会话空闲时顺带回收换模型遗留的旧客户端（防 okhttp 资源滞留） */
     private void notifyRunningChanged(SessionHandle h, boolean running) {
+        h.completionUnread = !running;
         if (!running) h.closeRetired();
         for (Listener l : listeners) l.onSessionRunningChanged(h, running);
     }
@@ -609,6 +610,7 @@ public class SessionManager {
     public void activateSession(SessionHandle h) {
         if (h.deleted) return; // 已删句柄不可再激活（防已删会话残留激活态/后续 send 落空）
         if (!currentWorkspaceName.equals(h.workspaceName)) return; // 非当前工作空间的句柄不激活
+        h.completionUnread = false; // 用户点击查看后清除绿色完成提示；重复激活同样生效
         if (currentSession == h) return; // 重复激活（页签选中/左侧点击重叠）幂等跳过，避免重放闪烁
         if (currentSession != null) currentSession.controller.eventList().setActive(false, null);
         currentSession = h;
