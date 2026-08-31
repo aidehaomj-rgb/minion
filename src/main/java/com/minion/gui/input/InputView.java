@@ -55,6 +55,7 @@ public class InputView extends VBox {
     private final TextArea input = new TextArea();
     private final Button sendButton = new Button();
     private final Button uploadButton = new Button();
+    private final Button guideButton = new Button("开始引导");
     private final ContextRing contextRing = new ContextRing();
     private final SVGPath arrowIcon = IconFactory.send();
     private final SVGPath stopIcon = IconFactory.stop();
@@ -77,6 +78,10 @@ public class InputView extends VBox {
     private boolean running;
     private boolean askPending;
     private String askQuestion;
+    /** 空白新会话必须先点“开始引导”；只控制编辑入口，不自动向模型发送内容。 */
+    private boolean guideRequired = true;
+    /** 无会话首页已点过引导；首次发送自动创建会话时继承解锁状态，避免异步激活又锁回去。 */
+    private boolean unboundGuideOpened;
 
     public InputView(final SessionManager manager, final Config config) {
         this.manager = manager;
@@ -110,6 +115,10 @@ public class InputView extends VBox {
         uploadButton.getStyleClass().add("btn-upload");
         uploadButton.setTooltip(new Tooltip("添加附件（图片、PDF、Word、Excel、PPT、文本/代码）"));
         uploadButton.setOnAction(e -> chooseAttachments());
+
+        guideButton.getStyleClass().add("btn-guide");
+        guideButton.setTooltip(new Tooltip("点击后开始输入，由 Agent 根据你的目标逐步引导"));
+        guideButton.setOnAction(e -> openGuideInput());
 
         sendButton.setMinSize(36, 36);
         sendButton.setPrefSize(36, 36);
@@ -209,7 +218,7 @@ public class InputView extends VBox {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         HBox bottomRow = new HBox(8);
-        bottomRow.getChildren().addAll(uploadButton, contextRing, spacer, sendButton);
+        bottomRow.getChildren().addAll(guideButton, uploadButton, contextRing, spacer, sendButton);
         frame.getChildren().addAll(composer, bottomRow);
 
         // 启动/未选会话：环形圈初始隐藏（bindSession(null) 与 onContextStats 无数据时均不显示，避免空白 Tooltip 颜色块）
@@ -240,6 +249,7 @@ public class InputView extends VBox {
         root.add(frame, 1, 0);
         getChildren().add(root);
         updatePrompt(); // askPending 默认 false，显示正常发送键提示
+        applyGuideState(); // 首次启动无会话：先点引导再输入
     }
 
     /** 确认插入的最终文本：@ 文件补全补回 @ 前缀（FileSuggester 的 insertText 为纯路径）。
@@ -451,13 +461,27 @@ public class InputView extends VBox {
 
     /** MainWindow 激活会话时调用 */
     public void bindSession(SessionHandle h) {
+        final SessionHandle previous = this.current;
         this.current = h;
         Platform.runLater(() -> {
+            boolean changed = previous != h;
+            if (changed) {
+                clearComposer(); // 草稿属于旧会话，禁止串入新会话
+                if (previous == null && h != null && unboundGuideOpened) {
+                    guideRequired = false;
+                    unboundGuideOpened = false;
+                } else {
+                    guideRequired = requiresGuideForTarget(h != null,
+                            h != null && h.titlePending,
+                            h == null ? 0 : h.session.messages.size());
+                }
+            }
             running = h != null && h.running;
             askPending = h != null && h.askPending;
             askQuestion = h == null ? null : h.askQuestion;
             updateButton();
             updatePrompt();
+            applyGuideState();
             // 环形圈：切会话先隐藏，初始估算放会话线程（全量估算较重，防卡 UI），完成后 runLater 填充
             contextRing.setCompressing(false);
             contextRing.setVisible(false);
@@ -543,7 +567,9 @@ public class InputView extends VBox {
     }
 
     private void updatePrompt() {
-        if (askPending) {
+        if (guideRequired) {
+            input.setPromptText("点击“开始引导”后描述你想完成的事情");
+        } else if (askPending) {
             String q = askQuestion == null ? "" : askQuestion;
             input.setPromptText("回答: " + (q.length() > 40 ? q.substring(0, 40) + "…" : q));
         } else {
@@ -586,6 +612,29 @@ public class InputView extends VBox {
             case ANSWER_DIM: applyStyle(arrowIcon, buttonStyleClass(mode), 0.35, "输入回答后发送 (" + sendKey + ")"); break;
             case STOP:       applyStyle(stopIcon, buttonStyleClass(mode), 1.0, "终止当前运行 (Esc)"); break;
         }
+        sendButton.setDisable(guideRequired);
+    }
+
+    /** 会话绑定是否进入引导锁定；同一会话的状态刷新不能把正在输入的内容重新锁住。 */
+    static boolean requiresGuideForTarget(boolean hasSession, boolean titlePending, int messageCount) {
+        return !hasSession || (titlePending && messageCount == 0);
+    }
+
+    private void openGuideInput() {
+        if (!guideRequired) return;
+        guideRequired = false;
+        if (current == null) unboundGuideOpened = true;
+        applyGuideState();
+        input.requestFocus();
+    }
+
+    private void applyGuideState() {
+        input.setDisable(guideRequired);
+        uploadButton.setDisable(guideRequired);
+        guideButton.setVisible(guideRequired);
+        guideButton.setManaged(guideRequired);
+        updatePrompt();
+        updateButton();
     }
 
     private void applyStyle(SVGPath graphic, String styleClass, double opacity, String tip) {

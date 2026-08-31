@@ -7,6 +7,16 @@ import static org.junit.Assert.*;
 /** 按钮状态机纯函数测试：图标/透明度/背景类/动作的判定依据 */
 public class InputViewButtonTest {
 
+    @Test public void guideRequired_withoutActiveSession() {
+        assertTrue(InputView.requiresGuideForTarget(false, false, 0));
+    }
+
+    @Test public void guideRequired_forBlankNewSessionOnly() {
+        assertTrue(InputView.requiresGuideForTarget(true, true, 0));
+        assertFalse(InputView.requiresGuideForTarget(true, true, 1));
+        assertFalse(InputView.requiresGuideForTarget(true, false, 0));
+    }
+
     @Test
     public void idle_withContent_send() {
         assertEquals(InputView.BtnMode.SEND, InputView.buttonMode(false, false, true));
