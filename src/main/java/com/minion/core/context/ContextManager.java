@@ -13,7 +13,8 @@ public class ContextManager {
     private static final String COMPRESS_SYSTEM =
             "你是 minion 的上下文压缩器。把用户提供的对话历史压缩成一段中文摘要，保留："
           + "未完成的任务与目标、已做出的关键决策及原因、使用过的工具与结果要点、"
-          + "相关文件路径、代码约定、用户偏好。只输出摘要正文，不要客套，3000 字以内。";
+          + "相关文件路径、代码约定、用户偏好、当前进度、失败尝试和明确的下一步。"
+          + "不要省略仍待执行的用户要求；只输出结构清晰的摘要正文，不要客套，3000 字以内。";
 
     private static final int KEEP_MIN = 12;          // 保留区下限（条数）
     private static final double KEEP_RATIO = 0.5;    // 保留区占比目标
@@ -26,6 +27,9 @@ public class ContextManager {
     private volatile int keepRecent;
     private volatile LlmClient llm;
     private final int systemTokens;    // system 提示词 token 估算在构造时固定，保持不变
+    /** 最近一次 compress 是否真正尝试过压缩（take>0）：false = 真无可压缩（条数/token 未达），
+     *  true = 已尝试但 LLM 调用失败原样返回。供 AgentLoop 区分"暂无可压缩"与"压缩失败"提示 */
+    private volatile boolean lastCompressAttempted;
 
     public ContextManager(int maxContextTokens, double threshold, int keepRecent,
                           LlmClient llm, int systemTokens) {
@@ -49,6 +53,9 @@ public class ContextManager {
     /** 上下文窗口上限（AgentLoop 压缩百分比计算用） */
     public int maxTokens() { return maxContextTokens; }
 
+    /** 最近一次 compress 是否真正尝试过压缩（供"压缩失败"与"暂无可压缩"文案区分） */
+    public boolean lastCompressAttempted() { return lastCompressAttempted; }
+
     /** 自动压缩阈值（0~1，如 0.8=80% 触发；GUI 悬停"剩余x%自动压缩"计算用） */
     public double threshold() { return threshold; }
 
@@ -57,7 +64,19 @@ public class ContextManager {
     }
 
     public boolean shouldCompress(List<Message> messages) {
-        return estimate(messages) >= maxContextTokens * threshold;
+        return estimate(messages) >= autoCompressAtTokens();
+    }
+
+    /**
+     * 除用户配置比例外，至少预留 4096 token 或窗口的 8% 给下一次模型输出和工具结果，
+     * 避免刚低于比例阈值却因一次大工具输出直接撞上服务端上限。
+     */
+    public int autoCompressAtTokens() {
+        int ratioLimit = (int) Math.floor(maxContextTokens * threshold);
+        // 极小测试/本地模型窗口不额外扣 4096，否则触发线会失真；常见 32k+ 模型启用余量。
+        int reserve = maxContextTokens < 16384 ? 0
+                : Math.max(4096, (int) Math.ceil(maxContextTokens * 0.08));
+        return Math.max(1, Math.min(ratioLimit, maxContextTokens - reserve));
     }
 
     /** 按完整回合链切块。summary 消息跳过（已压缩过，不再参与）；pinned 消息跳过（技能
@@ -89,18 +108,23 @@ public class ContextManager {
     }
 
     /** 保留区动态缩小：keep 条数起步，保留区 token 占比 > KEEP_RATIO 且条数 > KEEP_MIN
-     *  时减半重算。返回要压缩的链数（前 take 个链）。 */
+     *  时减半重算。take==0 但上下文已超阈值时同样强制缩小：消息条数少但单条超长
+     *  （如 43 轮长思考/大工具输出，token 已 99% 而条数 ≤ keepRecent）时，
+     *  修复前 take==0 直接原样返回，误报"暂无可压缩内容"。返回要压缩的链数（前 take 个链）。 */
     private int takeChains(List<List<Message>> chains, int limit, List<Message> messages) {
         int take = computeTake(chains, limit);
         int total = TokenCounter.estimateMessages(messages);
-        while (take > 0 && limit > KEEP_MIN) {
+        boolean force = take == 0 && shouldCompress(messages); // 条数不足但 token 超阈值：强制缩小
+        while ((force || take > 0) && limit > KEEP_MIN) {
             int keptTokens = 0;
             for (int i = take; i < chains.size(); i++) {
                 keptTokens += TokenCounter.estimateMessages(chains.get(i));
             }
-            if ((double) keptTokens / total <= KEEP_RATIO) break;
+            if (take > 0 && (double) keptTokens / total <= KEEP_RATIO) break;
             limit = Math.max(KEEP_MIN, limit / 2); // 减半不跌破下限（如 13 → 12，而非 6）
-            take = computeTake(chains, limit);
+            int next = computeTake(chains, limit);
+            if (next == 0) break; // 缩到下限仍全保留（消息 ≤ KEEP_MIN 条）：真无可压缩
+            take = next;
         }
         return take;
     }
@@ -124,7 +148,11 @@ public class ContextManager {
         // splitByTokens 会把 mid 钳回 from，产生同参数递归 → 无限递归栈溢出
         List<List<Message>> chains = splitOversizedChains(chunkChains(messages));
         int take = takeChains(chains, keepRecent, messages);
-        if (take == 0) return messages; // 全部要保留，无需压缩
+        if (take == 0) {
+            lastCompressAttempted = false; // 真无可压缩（未达压缩条件）
+            return messages; // 全部要保留，无需压缩
+        }
+        lastCompressAttempted = true; // 已尝试：后续无论成败都不是"无可压缩"
 
         SegResult res = compressChains(chains, 0, take, null);
         if (res == null) {

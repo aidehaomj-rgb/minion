@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -44,9 +45,14 @@ public final class PythonRuntime {
 
     public RunResult status(Path cwd) throws IOException {
         Path python = require();
-        String code = "import sys,importlib.util\nmods=['pandas','numpy','openpyxl','xlrd','matplotlib','sqlite3','flask','requests','PyInstaller']\n"
+        String code = "import sys\nmods=['pandas','numpy','openpyxl','xlrd','matplotlib','sqlite3','PyPDF2','pdfminer','flask','requests','PyInstaller']\n"
                 + "print('executable='+sys.executable)\nprint('version='+sys.version.replace('\\n',' '))\n"
-                + "print('modules='+','.join(m+':'+('ok' if importlib.util.find_spec(m) else 'missing') for m in mods))";
+                + "results=[]\n"
+                + "for m in mods:\n"
+                + " try:\n  x=__import__(m); v=getattr(x,'__version__','ok'); results.append(m+':ok('+str(v)+')')\n"
+                + " except Exception as e: results.append(m+':error('+type(e).__name__+': '+str(e)+')')\n"
+                + "print('modules='+','.join(results))\n"
+                + "print('sqlite_dll='+__import__('os').path.join(sys.prefix,'Library','bin','sqlite3.dll'))";
         return run(Arrays.asList(python.toString(), "-X", "utf8", "-c", code), cwd, 30);
     }
 
@@ -79,6 +85,7 @@ public final class PythonRuntime {
         pb.redirectErrorStream(true);
         pb.environment().put("PYTHONIOENCODING", "utf-8");
         pb.environment().put("PYTHONUTF8", "1");
+        configurePythonEnvironment(pb.environment(), command.isEmpty() ? null : Paths.get(command.get(0)));
         Process process = pb.start();
         final StringBuilder out = new StringBuilder();
         Thread reader = new Thread(() -> {
@@ -148,6 +155,35 @@ public final class PythonRuntime {
     }
 
     private static void add(Set<String> set, String value) { if (value != null && !value.trim().isEmpty()) set.add(value.trim()); }
+
+    /**
+     * Conda 在 Windows 7/Python 3.7 下依靠 PATH 查找 sqlite3.dll、OpenSSL 等本机 DLL。
+     * 从 IDE/JAR 启动时通常没有执行 activate.bat，因此在每个 Python 子进程中显式补齐。
+     */
+    static void configurePythonEnvironment(Map<String, String> env, Path executable) {
+        if (env == null || executable == null) return;
+        Path prefix = executable.toAbsolutePath().normalize().getParent();
+        if (prefix == null) return;
+        List<Path> candidates = Arrays.asList(prefix, prefix.resolve("DLLs"),
+                prefix.resolve("Library").resolve("bin"), prefix.resolve("Scripts"),
+                prefix.resolve("Library").resolve("usr").resolve("bin"));
+        StringBuilder path = new StringBuilder();
+        for (Path candidate : candidates) {
+            if (!Files.isDirectory(candidate)) continue;
+            if (path.length() > 0) path.append(File.pathSeparator);
+            path.append(candidate);
+        }
+        String old = env.get("PATH");
+        if (old == null) old = env.get("Path");
+        if (old != null && !old.isEmpty()) {
+            if (path.length() > 0) path.append(File.pathSeparator);
+            path.append(old);
+        }
+        if (path.length() > 0) env.put("PATH", path.toString());
+        if (Files.isDirectory(prefix.resolve("conda-meta")) && !env.containsKey("CONDA_PREFIX")) {
+            env.put("CONDA_PREFIX", prefix.toString());
+        }
+    }
 
     public static final class RunResult {
         public final int exitCode; public final String output; public final boolean timedOut;

@@ -30,19 +30,39 @@ public class SystemPromptBuilder {
     private final String workDir;
     /** 会话临时目录（可空=不注入；模型需要知道临时文件位置与读写权限） */
     private final String tmpDir;
+    /** 工具空输出占位开关：开启时追加第 9 条规则，告知模型「输出内容为空」占位含义（与配置联动） */
+    private final boolean emptyOutputPlaceholder;
+    /** 项目级技能目录绝对路径（可空=未配置，不输出目录说明行） */
+    private final String projectSkillsDir;
 
     public SystemPromptBuilder(String projectMdPath) { this(projectMdPath, null, null); }
 
     public SystemPromptBuilder(String projectMdPath, String workDir) { this(projectMdPath, workDir, null); }
 
     public SystemPromptBuilder(String projectMdPath, String workDir, String tmpDir) {
+        this(projectMdPath, workDir, tmpDir, false, null);
+    }
+
+    public SystemPromptBuilder(String projectMdPath, String workDir, String tmpDir,
+                               boolean emptyOutputPlaceholder) {
+        this(projectMdPath, workDir, tmpDir, emptyOutputPlaceholder, null);
+    }
+
+    public SystemPromptBuilder(String projectMdPath, String workDir, String tmpDir,
+                               boolean emptyOutputPlaceholder, String projectSkillsDir) {
         this.projectMdPath = projectMdPath;
         this.workDir = workDir;
         this.tmpDir = tmpDir;
+        this.emptyOutputPlaceholder = emptyOutputPlaceholder;
+        this.projectSkillsDir = projectSkillsDir;
     }
 
     public String build(List<Skill> allSkills) {
         StringBuilder sb = new StringBuilder(BUILTIN);
+        if (emptyOutputPlaceholder) {
+            sb.append("\n9.工具执行成功但无输出时，返回结果将为「输出内容为空」（如 mvn -q 输出重定向、读取空文件）：")
+              .append("表示命令成功、无输出内容，请按成功结果处理，不要视为失败或重复调用同一工具。\n");
+        }
         if (workDir != null && !workDir.trim().isEmpty()) {
             sb.append("\n\n=== 当前工作目录 ===\n")
               .append("工作目录: ").append(workDir).append("\n")
@@ -64,13 +84,19 @@ public class SystemPromptBuilder {
             sb.append("当任务与某技能描述匹配时，调用 Skill 工具加载（正文将作为一条用户消息注入，立即生效）。")
               .append("技能描述是路由条件——先看\"何时用/何时不用\"，匹配才加载，不匹配不要加载。")
               .append("同一技能不要重复加载；技能正文中引用的 Claude Code 专属机制（plan mode、ExitPlanMode、/loop 等）在本环境中不可用，相关审查确认用 AskUserQuestion 代替。\n");
-            sb.append("技能源文件可能在工作路径之外；内置技能直接用 Skill 加载，外部技能的参考文档可用 Read 读取：\n");
+            sb.append("技能源文件可能在工作路径之外，如需读取技能参考文档，可直接用 Read 工具读取其绝对路径：\n");
+            sb.append("[内置] 来自软件配置 skills.dir；[项目] 来自当前工作空间的项目级技能路径，同名时项目级优先。\n");
             for (Skill s : allSkills) sb.append("- ").append(s.hint()).append("（").append(s.file).append("）\n");
+            if (projectSkillsDir != null && !projectSkillsDir.trim().isEmpty()) {
+                sb.append("\n项目级技能目录: ").append(projectSkillsDir.trim())
+                  .append("（随当前工作空间变化，只包含本项目的技能）\n");
+            }
         }
         return sb.toString();
     }
 
     static String loadProjectMd(String path) {
+        if (path == null || path.trim().isEmpty()) return ""; // 未配置主说明文件：整段不注入
         try {
             Path p = Paths.get(path);
             if (Files.exists(p) && Files.isRegularFile(p)) {

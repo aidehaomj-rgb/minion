@@ -5,11 +5,10 @@ JDK 8 + Maven 单模块。GUI 为唯一界面（JavaFX 8，JDK 自带 jfxrt）�
 
 ## 常用命令
 
-    JAVA_HOME="D:\javame\jdk1.8" mvn clean package   # 构建（产物 target/minion-0.1.0.jar，含依赖；必须 JDK8 含 JavaFX）
-    JAVA_HOME="D:\javame\jdk1.8" mvn test            # 运行测试
-    java -jar target/minion-0.1.0.jar                # 启动 GUI（jar 自举：自动开控制台、自动探测/切换 JDK 8；双击 jar 亦可）
-    软件运行位置: D:\javame\code2\minion\run\minion-0.1.0.jar
-    代码位置为工作空间
+    mvn package   # 构建（产物 target/minion-0.1.0.jar，含依赖；必须 JDK8 含 JavaFX）
+    mvn test      # 运行测试
+    软件运行位置: 工作空间\minion-0.1.0.jar   # 启动 GUI（jar 自举：自动开控制台、自动探测/切换 JDK 8；双击 jar 亦可）
+    代码位置: 工作空间
 
 ## 包结构（详见 docs/ARCHITECTURE.md）
 
@@ -32,10 +31,10 @@ JDK 8 + Maven 单模块。GUI 为唯一界面（JavaFX 8，JDK 自带 jfxrt）�
         ├── llm/     DeepSeekClient（SSE 流式，close() 释放 okhttp）、LlmClient 接口（cancel/close 默认空实现）、Message（reasoningContent 原样回传）
         ├── tools/   Tool 接口 + 13 个工具 + ToolRegistry + browser/（CDP 浏览器）、mcp/（McpProxyTool）、SchemaGenerator、ConfirmGate、PathsGuard
         ├── mcp/     MCP 客户端核心：McpManager（状态机/惰性连接/路由）、StdioMcpClient、SseMcpClient、McpStore（mcp.json）、McpServer、JsonRpc
-        ├── skills/  SkillManager（skills/<名>/SKILL.md 自动发现）
+        ├── skills/  SkillManager（scanTree 递归扫描）、SkillSet（内置+项目合并快照）、Skill（YAML frontmatter 解析）
         ├── context/ 上下文压缩、token 统计
         ├── storage/ 会话落盘（原子写）
-        └── config/  Config（config.properties）、WorkspaceManager（workspace.json 原子写）、ModelManager（model.json）
+        └── config/  Config（config.properties）、WorkspaceManager（workspace.json 原子写）、ModelManager（model.json）、WorkspacePaths（相对路径按项目路径解析）
 
 ## 扩展点
 

@@ -13,7 +13,8 @@ import javafx.scene.shape.StrokeLineCap;
 
 /** 上下文环形进度圈（参考 Claude VSCode context 指示器）：
  *  Canvas 自绘背景环+进度弧；悬停显示"上下文大小xk,占比y%,剩余z%自动压缩"，
- *  超过 30% 第二行浅色提示"点击立即压缩"（点击动作在环形圈本体，InputView 注入 onCompress）。
+ *  超 30% 第二行浅色提示"点击立即压缩"（点击动作在环形圈本体，InputView 注入 onCompress）；
+ *  压缩中显示"正在压缩中"且不可点击，环体旋转动画。
  *  组件本体需 FX toolkit 不单测，纯静态逻辑（arcAngle/compressable/formatInfo）由 ContextRingTest 覆盖。 */
 public class ContextRing extends Canvas {
 
@@ -57,7 +58,7 @@ public class ContextRing extends Canvas {
         // hover 微亮：重绘时按 isHover() 取亮色
         hoverProperty().addListener((obs, ov, nv) -> repaint(-1));
         setOnMouseClicked(e -> {
-            if (compressable(running, pct()) && onCompress != null) onCompress.run();
+            if (compressable(compressing, running, pct()) && onCompress != null) onCompress.run();
         });
         repaint(-1);
     }
@@ -82,6 +83,7 @@ public class ContextRing extends Canvas {
     /** 压缩中状态：true 启动旋转动画，false 停止并重绘静态进度 */
     public void setCompressing(boolean compressing) {
         this.compressing = compressing;
+        refreshTooltip(); // 压缩中文案切换（"正在压缩中" ↔ 原文案）
         if (compressing) spinner.start();
         else {
             spinner.stop();
@@ -94,13 +96,18 @@ public class ContextRing extends Canvas {
 
     private double pct() { return max > 0 ? (double) used / max : 0; }
 
-    /** 悬停信息刷新：第一行大小/占比/剩余；第二行超 30% 才显示（运行中提示不可压缩） */
+    /** 悬停信息刷新：第一行大小/占比/剩余；第二行文案优先级：压缩中 > 运行中不可压缩 > 点击立即压缩；
+     *  可见性 over || compressing（手动 /compact 可能在 ≤30% 时触发，压缩中必须显示文案） */
     private void refreshTooltip() {
         infoLine.setText(formatInfo(used, max, threshold));
         boolean over = pct() > COMPRESS_HINT_PCT;
-        hintLine.setText(over ? (running ? "运行中不可压缩" : "点击立即压缩") : "");
-        hintLine.setVisible(over);
-        hintLine.setManaged(over);
+        if (compressing) {
+            hintLine.setText("正在压缩中");
+        } else {
+            hintLine.setText(over ? (running ? "运行中不可压缩" : "点击立即压缩") : "");
+        }
+        hintLine.setVisible(over || compressing);
+        hintLine.setManaged(over || compressing);
     }
 
     private void repaint(long nowMs) {
@@ -133,9 +140,9 @@ public class ContextRing extends Canvas {
         return p * 360;
     }
 
-    /** 可点击压缩判定：非运行中且占比 > 30%（严格超过；静态可单测） */
-    static boolean compressable(boolean running, double pct) {
-        return !running && pct > COMPRESS_HINT_PCT;
+    /** 可点击压缩判定：非压缩中、非运行中且占比 > 30%（严格超过；静态可单测） */
+    static boolean compressable(boolean compressing, boolean running, double pct) {
+        return !compressing && !running && pct > COMPRESS_HINT_PCT;
     }
 
     /** 悬停第一行文案：上下文大小98k,占比70%,剩余10%自动压缩（k 格式复用 StatsLine.formatTokens；

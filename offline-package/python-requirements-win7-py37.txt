@@ -1,0 +1,8 @@
+# Python 3.7.6 / Win7 compatible PDF modules
+PyPDF2==3.0.1
+pdfminer.six==20221105
+charset-normalizer==3.5.1
+# 38.x 保留旧版 Windows/Python 兼容性，避免 pip 离线误选较新的 ABI3 wheel
+cryptography==38.0.4
+cffi==1.15.1
+pycparser==2.21

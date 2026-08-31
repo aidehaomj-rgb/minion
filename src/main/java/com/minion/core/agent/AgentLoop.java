@@ -58,10 +58,14 @@ public class AgentLoop {
     public int roundLimit = DEFAULT_ROUND_LIMIT;
     /** 瞬时错误长重试策略（429/500/502；默认固定 5s/次，总时长 20 分钟；测试可覆写小参数） */
     public RetryPolicy retryPolicy = RetryPolicy.transientErrors();
+    /** 工具空输出占位（配置 agent.emptyOutput.placeholder 注入；开启时成功空输出发「输出内容为空」占位） */
+    public boolean emptyOutputPlaceholder = false;
     /** 连续工具失败止损阈值：达到后注入提醒让模型停止尝试并请求用户补充信息 */
     private static final int STUCK_THRESHOLD = 30;
     /** 连续失败工具计数（成功即清零；注入提醒后重置） */
     private int consecutiveToolErrors = 0;
+    /** 本回合自动压缩失败/无收益时的 token 水位；至少再增长 1024 才重试，防止每个工具轮反复调用压缩模型。 */
+    private int lastIneffectiveAutoCompressTokens = -1;
     public int threads = 4;
     private final ExecutorService pool;
     /** AskUserQuestion 工具实例（构造注册；answerAskUser 经其送达回答） */
@@ -95,11 +99,17 @@ public class AgentLoop {
         registry.register(new com.minion.core.tools.TodoWriteTool(session.todos));
         this.askUserTool = new com.minion.core.tools.AskUserQuestionTool(ui);
         registry.register(askUserTool);
+        // 模型热切换回归修复：lambda 写在构造器内，简单名 llm 会按作用域规则捕获「构造器形参」
+        // （创建会话时的旧客户端引用），导致 setLlm 切模型后主 agent 用新模型、子 agent 仍用旧模型
+        // （事故：选 qwen 却由子 agent 烧光 deepseek 额度并报 402 余额不足）。
+        // 必须显式 this.llm 读 volatile 字段，才与主循环请求路径（456/485 行）同源。
         setSubAgentRunner(args -> {
             String desc = args.has("description") ? args.get("description").getAsString() : "无描述";
             ui.onSubAgentStart(desc);
-            return new SubAgentLoop(buildSystemPrompt(), desc, workspace.workDir(),
-                    llm, registry, confirmGate, ui).run();
+            SubAgentLoop sub = new SubAgentLoop(buildSystemPrompt(), desc, workspace.workDir(),
+                    this.llm, registry, confirmGate, ui);
+            sub.emptyOutputPlaceholder = emptyOutputPlaceholder; // 与主循环同开关（子 agent 同请求体风险）
+            return sub.run();
         });
     }
 
@@ -276,10 +286,15 @@ public class AgentLoop {
         }
         ui.onCompressingChanged(true);
         try {
-            int before = session.messages.size();
+            int beforeTokens = contextManager.estimate(session.messages);
+            List<Message> beforeMessages = session.messages;
             session.messages = contextManager.compress(session.messages);
-            if (session.messages.size() < before) {
-                ui.onWarning("已压缩上下文（历史摘要已置前）");
+            int afterTokens = contextManager.estimate(session.messages);
+            if (session.messages != beforeMessages) {
+                ui.onWarning("已压缩上下文（" + beforeTokens + " → " + afterTokens + " token，历史摘要已置前）");
+            } else if (contextManager.lastCompressAttempted()) {
+                // take>0 但压缩 LLM 调用失败（网络/超窗）原样返回：与"无可压缩"区分开，避免误导
+                ui.onWarning("压缩失败（模型调用异常），请稍后重试");
             } else {
                 ui.onWarning("暂无可压缩内容");
             }
@@ -371,6 +386,7 @@ public class AgentLoop {
 
     public void runUserTurn(String input, List<ImagePart> images) {
         interrupted = false;
+        lastIneffectiveAutoCompressTokens = -1;
         long start = System.currentTimeMillis(); // 统计行：轮次耗时
         // 上次回合遗留的挂起补充先入历史（模型提问自然收尾/中断遗留），与本次输入拼接发送
         drainSupplements();
@@ -386,16 +402,30 @@ public class AgentLoop {
                     ui.onWarning("达到工具轮数上限(" + roundLimit + ")，已停止本轮");
                     break;
                 }
-                if (contextManager != null && contextManager.shouldCompress(session.messages)) {
+                int currentTokens = contextManager == null ? 0 : contextManager.estimate(session.messages);
+                if (contextManager != null && contextManager.shouldCompress(session.messages)
+                        && (lastIneffectiveAutoCompressTokens < 0
+                        || currentTokens >= lastIneffectiveAutoCompressTokens + 1024)) {
                     ui.onCompressingChanged(true);
                     try {
-                        int before = session.messages.size();
+                        int beforeTokens = currentTokens;
+                        List<Message> beforeMessages = session.messages;
+                        ui.onWarning("上下文接近安全上限，正在自动压缩（" + beforeTokens + "/"
+                                + contextManager.maxTokens() + " token）");
                         session.messages = contextManager.compress(session.messages);
-                        if (session.messages.size() < before) {
-                            int pct = (int) (contextManager.estimate(session.messages) * 100
+                        int afterTokens = contextManager.estimate(session.messages);
+                        if (session.messages != beforeMessages) {
+                            lastIneffectiveAutoCompressTokens = -1;
+                            int pct = (int) (afterTokens * 100
                                     / contextManager.maxTokens());
-                            ui.onWarning("自动压缩已完成，上下文降低至" + pct + "%");
+                            ui.onWarning("自动压缩已完成（" + beforeTokens + " → " + afterTokens
+                                    + " token，当前 " + pct + "%）");
                             pushContextStats(); // 压缩完成：进度圈回落
+                        } else {
+                            lastIneffectiveAutoCompressTokens = beforeTokens;
+                            ui.onWarning(contextManager.lastCompressAttempted()
+                                    ? "自动压缩本次未成功，将在上下文继续增长后重试"
+                                    : "近期消息需要保留，暂时没有可自动压缩的历史");
                         }
                     } finally {
                         ui.onCompressingChanged(false);
@@ -567,7 +597,8 @@ public class AgentLoop {
                             consecutiveToolErrors++;
                         }
                         session.messages.add(Message.toolResult(
-                                calls.get(i).id, calls.get(i).name, result.output));
+                                calls.get(i).id, calls.get(i).name,
+                                ToolResult.outputForApi(result.output, emptyOutputPlaceholder)));
                         ui.onToolResult(calls.get(i).name, result);
                     }
                 } finally {

@@ -57,6 +57,12 @@
     -fx-border-radius: 6;
 }
 .btn-ghost:hover { -fx-text-fill: #f0f2f6; -fx-border-color: #4f8cff; }
+.btn-jump-latest {
+    -fx-background-color: #2a2f3a; -fx-text-fill: #e8ebf0;
+    -fx-background-radius: 16; -fx-border-radius: 16; -fx-border-color: #4f8cff;
+    -fx-padding: 6 12 6 12; -fx-cursor: hand;
+}
+.btn-jump-latest:hover { -fx-background-color: #343b49; }
 
 /* ===== SVG 图标（IconFactory 统一 24×24 Material 线性图标；SVGPath 填充不继承 -fx-text-fill，须显式指定） =====
    通用色 #a8b0bb（同按钮文字色）；hover 由所在按钮容器联动变白/变色 */

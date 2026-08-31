@@ -6,6 +6,7 @@ import com.minion.core.config.WorkspaceConfig;
 import com.minion.gui.chat.ChatView;
 import com.minion.gui.dialog.ConfirmSheet;
 import com.minion.gui.dialog.SettingsDialog;
+import com.minion.gui.dialog.WorkspaceFormDialog;
 import com.minion.gui.input.InputView;
 import com.minion.gui.session.AutoScrollPolicy;
 import com.minion.gui.session.SessionHandle;
@@ -24,12 +25,10 @@ import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
-import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
-import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.BorderPane;
@@ -41,7 +40,6 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.RowConstraints;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
-import javafx.stage.DirectoryChooser;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
@@ -70,6 +68,8 @@ public class MainWindow {
     private InputView inputView;
     /** 运行状态指示器（正文区左下角悬浮齿轮+动态文案；仅当前激活会话运行时显示） */
     private RunningIndicator runningIndicator;
+    /** 用户浏览历史消息时显示，点击立即回到最新对话并恢复流式跟随。 */
+    private Button jumpLatestButton;
     private TitleBar titleBar; // 自绘标题栏（openSettings 刷新顶部模型名用）
     private HBox tabsBar; // 右侧顶部页签栏（无会话时整行隐藏）
     /** 已打开会话 id 集合：页签存在性的唯一权威（页签 ⇔ openedIds 含 id）；切工作空间保留 */
@@ -180,11 +180,20 @@ public class MainWindow {
         inputView = new InputView(manager, MinionApp.config());
         // 运行状态指示器：正文区左下角悬浮（齿轮+动态文案），StackPane 叠加于消息区之上，不占布局
         runningIndicator = new RunningIndicator();
-        StackPane chatHost = new StackPane(chatScroll, runningIndicator);
+        jumpLatestButton = new Button("↓ 最新对话");
+        jumpLatestButton.getStyleClass().add("btn-jump-latest");
+        jumpLatestButton.setTooltip(new Tooltip("直达对话底部并继续跟随新消息"));
+        jumpLatestButton.setVisible(false);
+        jumpLatestButton.setManaged(false);
+        jumpLatestButton.setOnAction(e -> jumpToLatest());
+        StackPane chatHost = new StackPane(chatScroll, runningIndicator, jumpLatestButton);
         StackPane.setAlignment(runningIndicator, Pos.BOTTOM_LEFT);
         StackPane.setMargin(runningIndicator, new Insets(0, 0, 10, 14));
         // JavaFX 8 无 StackPane.setFillWidth/Height（12+ 才有）：用 max 钳制防默认 fill 拉伸铺满
         runningIndicator.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
+        StackPane.setAlignment(jumpLatestButton, Pos.BOTTOM_RIGHT);
+        StackPane.setMargin(jumpLatestButton, new Insets(0, 18, 14, 0));
+        jumpLatestButton.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
         VBox.setVgrow(chatHost, Priority.ALWAYS); // 原 chatScroll 的 vgrow 约束移交 chatHost
         // 页签栏（右侧顶部，下带 1px 分隔线；页签为空时整行隐藏）
         tabsBar = new HBox(tabs);
@@ -432,6 +441,20 @@ public class MainWindow {
         scrollThrottle.playFromStart();
     }
 
+    private void jumpToLatest() {
+        policy.forceFollow();
+        chatScroll.setVvalue(1.0);
+        updateJumpLatestVisibility();
+        Platform.runLater(() -> chatScroll.setVvalue(1.0));
+    }
+
+    private void updateJumpLatestVisibility() {
+        if (jumpLatestButton == null) return;
+        boolean show = chatView != null && policy.shouldShowJumpButton();
+        jumpLatestButton.setVisible(show);
+        jumpLatestButton.setManaged(show);
+    }
+
     /** 需求：消息区自动滚动——贴底时随新内容滚到底，离开底部即暂停，拖回底部恢复。
      *  vmax 恒 1.0 不可用（vvalue 为归一化比例），内容增长改监听内容节点高度变化；
      *  会话切换时内容节点被替换，须随 contentProperty 重挂监听 */
@@ -447,9 +470,12 @@ public class MainWindow {
         });
         javafx.beans.value.ChangeListener<javafx.geometry.Bounds> contentGrew = (obs, o, n) -> {
             if (policy.shouldFollow()) requestAutoScroll();
+            updateJumpLatestVisibility();
         };
-        chatScroll.vvalueProperty().addListener((obs, ov, nv) ->
-                policy.sync(nv.doubleValue(), eps()));
+        chatScroll.vvalueProperty().addListener((obs, ov, nv) -> {
+            policy.sync(nv.doubleValue(), eps());
+            updateJumpLatestVisibility();
+        });
         chatScroll.contentProperty().addListener((obs, ov, nv) -> {
             if (ov != null) ov.layoutBoundsProperty().removeListener(contentGrew);
             if (nv != null) nv.layoutBoundsProperty().addListener(contentGrew);
@@ -473,86 +499,25 @@ public class MainWindow {
         // 会话激活后，onSessionActivated 回调在 show() 注册的监听器中绑定消息区与输入区
     }
 
-    /** 新建工作空间弹窗（Task 9 从 show() 抽取）：work.dir 支持系统文件夹选择框 */
+    /** 新建工作空间弹窗（表单抽到 WorkspaceFormDialog：项目路径/主说明文件/技能路径 + 名称预校验） */
     private void onNewWorkspace(WorkspaceListView wsList) {
-        Dialog<WorkspaceConfig> d = new Dialog<WorkspaceConfig>();
-        d.setTitle("新建工作空间");
-        Theme.style(d);
-        d.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
-        GridPane g = new GridPane();
-        g.setHgap(8); g.setVgap(8); g.setPadding(new Insets(10));
-        TextField n = new TextField();
-        n.setPromptText("名称");
-        HBox wdBox = new HBox(6);
-        TextField wd = new TextField();
-        wd.setPromptText("work.dir");
-        HBox.setHgrow(wd, Priority.ALWAYS);
-        Button browse = new Button("浏览…");
-        browse.getStyleClass().add("btn-ghost");
-        browse.setOnAction(e -> {
-            DirectoryChooser dc = new DirectoryChooser();
-            java.io.File dir = dc.showDialog(d.getOwner());
-            if (dir != null) wd.setText(dir.getAbsolutePath());
-        });
-        wdBox.getChildren().addAll(wd, browse);
-        HBox pmBox = new HBox(6);
-        TextField pm = new TextField();
-        pm.setPromptText("project.md（可空）");
-        HBox.setHgrow(pm, Priority.ALWAYS);
-        Button pmBrowse = new Button("浏览…");
-        pmBrowse.getStyleClass().add("btn-ghost");
-        pmBrowse.setOnAction(e -> {
-            javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
-            fc.setTitle("选择 project.md");
-            fc.getExtensionFilters().add(
-                    new javafx.stage.FileChooser.ExtensionFilter("Markdown", "*.md", "*.markdown"));
-            java.io.File file = fc.showOpenDialog(d.getOwner());
-            if (file != null) pm.setText(file.getAbsolutePath());
-        });
-        pmBox.getChildren().addAll(pm, pmBrowse);
-        g.addRow(0, new Label("名称:"), n);
-        g.addRow(1, new Label("work.dir:"), wdBox);
-        g.addRow(2, new Label("project.md:"), pmBox);
-        // 名称预校验（同 WorkspaceManager.isValidName：非空/无非法字符/不重名）：非法时 OK 禁用 + 行内红字提示，
-        // 不再"先提交后弹错"。existing 为打开弹窗时的名称快照（模态弹窗期间 UI 无法改列表，快照足够）
-        final java.util.List<String> existing = new java.util.ArrayList<String>();
+        java.util.List<String> existing = new java.util.ArrayList<String>();
         for (WorkspaceConfig w : manager.workspaces().list()) existing.add(w.workSpaceName);
-        Label nameErr = new Label();
-        nameErr.getStyleClass().add("log-error"); // 红字提示（theme.css 已挂载）
-        nameErr.setVisible(false);
-        g.add(nameErr, 1, 3);
-        d.getDialogPane().setContent(g);
-        Button okBtn = (Button) d.getDialogPane().lookupButton(ButtonType.OK);
-        okBtn.disableProperty().bind(javafx.beans.binding.Bindings.createBooleanBinding(
-                () -> !com.minion.core.config.WorkspaceManager.isValidName(n.getText().trim(), existing),
-                n.textProperty()));
-        n.textProperty().addListener((obs, ov, nv) -> nameErr.setVisible(false)); // 继续编辑即清旧提示
-        // 兜底：校验不过不关弹窗（正常路径 OK 已禁用，此处防绕过与快照过期竞态）
-        okBtn.addEventFilter(javafx.event.ActionEvent.ACTION, e -> {
-            if (!com.minion.core.config.WorkspaceManager.isValidName(n.getText().trim(), existing)) {
-                e.consume();
-                nameErr.setText("名称非法或已存在");
-                nameErr.setVisible(true);
-            }
-        });
-        d.setResultConverter(bt -> {
-            if (bt != ButtonType.OK) return null;
-            WorkspaceConfig out = new WorkspaceConfig();
-            out.workSpaceName = n.getText().trim();
-            out.workDir = wd.getText().trim();
-            out.projectMd = pm.getText().trim();
-            return out;
-        });
+        WorkspaceFormDialog d = new WorkspaceFormDialog("新建工作空间",
+                "新建工作空间", null, existing);
         Optional<WorkspaceConfig> r = d.showAndWait();
-        if (r.isPresent()) {
-            if (!manager.addWorkspace(r.get().workSpaceName, r.get().workDir, r.get().projectMd)) {
-                Alert a = new Alert(Alert.AlertType.ERROR, "名称非法或已存在", ButtonType.OK);
-                Theme.style(a);
-                a.setTitle("新建失败");
-                a.showAndWait();
-            }
-            wsList.refresh();
+        if (!r.isPresent()) return;
+        WorkspaceConfig v = r.get();
+        if (!manager.addWorkspace(v.workSpaceName, v.workDir, v.projectMd, v.projectSkillsDir)) {
+            Alert a = new Alert(Alert.AlertType.ERROR,
+                    "名称非法或已存在；或路径不合法：项目路径须为已存在文件夹、"
+                            + "主说明文件须为已存在文件、技能路径须为已存在文件夹"
+                            + "（后两项留空视为合法）", ButtonType.OK);
+            Theme.style(a);
+            a.setTitle("新建失败");
+            a.showAndWait();
         }
+        wsList.refresh();
     }
 
     private static final int TAB_TITLE_MAX = 16; // 页签标题截取长度（过长撑宽页签栏致标题栏错乱）

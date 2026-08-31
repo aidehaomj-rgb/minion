@@ -40,7 +40,8 @@ public class WorkspaceManager {
             }
         }
         if (!loaded) {
-            m.workspaces.add(new WorkspaceConfig(DEFAULT_NAME, ".", "./project.md"));
+            // 主说明文件留空（null = 不使用）：不预置 ./project.md 这种可能不存在的路径
+            m.workspaces.add(new WorkspaceConfig(DEFAULT_NAME, ".", null, null));
             m.currentName = DEFAULT_NAME;
             m.save();
         }
@@ -78,13 +79,34 @@ public class WorkspaceManager {
 
     public String currentName() { return currentName; }
 
-    public boolean add(String name, String workDir, String projectMd) {
+    /**
+     * 新建工作空间。false = 名称非法/重名，或路径不合法（校验见 {@link #pathsUsable}：
+     * 项目路径**必填且必须是已存在的文件夹**——它是文件工具与 Bash 的守卫边界；
+     * 主说明文件可选，填了必须是已存在的文件；技能路径可选，填了必须是文件夹）。
+     */
+    public boolean add(String name, String workDir, String projectMd, String projectSkillsDir) {
         if (name == null) return false;
         name = name.trim(); // 先 trim 再校验/存储
         if (!isValidName(name, names())) return false;
-        workspaces.add(new WorkspaceConfig(name, workDir, projectMd));
+        WorkspaceConfig c = new WorkspaceConfig(name, trimOrNull(workDir), trimOrNull(projectMd),
+                trimOrNull(projectSkillsDir));
+        if (!pathsUsable(c)) return false;
+        workspaces.add(c);
         save();
         return true;
+    }
+
+    /**
+     * 路径字段合法性：项目路径必须是已存在文件夹；主说明文件可选，填了必须是**已存在的文件**
+     * （指向文件夹或不存在都让提示词静默失效，宁可拒绝）；项目级技能路径可选，填了也必须是文件夹。
+     */
+    private static boolean pathsUsable(WorkspaceConfig c) {
+        if (!WorkspacePaths.isExistingDir(c.workDir, null)) return false;
+        if (c.projectMd != null && !WorkspacePaths.isExistingFile(c.projectMd, WorkspacePaths.workDirAbs(c))) {
+            return false;
+        }
+        return c.projectSkillsDir == null
+                || WorkspacePaths.isExistingDir(c.projectSkillsDir, WorkspacePaths.workDirAbs(c));
     }
 
     public boolean rename(String oldName, String newName) {
@@ -110,12 +132,22 @@ public class WorkspaceManager {
         return true;
     }
 
-    public void update(String name, String workDir, String projectMd) {
+    /**
+     * 覆盖式更新三个路径字段。false = 空间不存在，或路径不合法（校验同 {@link #pathsUsable}：
+     * 项目路径必须是已存在文件夹，主说明文件填了必须是已存在文件，技能路径填了也必须是文件夹）；
+     * 拒绝时不落盘，原配置不变。
+     */
+    public boolean update(String name, String workDir, String projectMd, String projectSkillsDir) {
         WorkspaceConfig w = get(name);
-        if (w == null) return;
-        w.workDir = workDir;
-        w.projectMd = projectMd;
+        if (w == null) return false;
+        WorkspaceConfig c = new WorkspaceConfig(name, trimOrNull(workDir), trimOrNull(projectMd),
+                trimOrNull(projectSkillsDir));
+        if (!pathsUsable(c)) return false;
+        w.workDir = c.workDir;
+        w.projectMd = c.projectMd;
+        w.projectSkillsDir = c.projectSkillsDir;
         save();
+        return true;
     }
 
     public boolean remove(String name) {
@@ -154,6 +186,13 @@ public class WorkspaceManager {
         List<String> n = new ArrayList<String>();
         for (WorkspaceConfig w : workspaces) n.add(w.workSpaceName);
         return n;
+    }
+
+    /** 空白→null：三个路径字段统一走这里，空白等价未配置 */
+    private static String trimOrNull(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
     }
 
     private List<String> namesExcept(String name) {

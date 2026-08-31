@@ -48,6 +48,16 @@ public class AutoScrollPolicyTest {
         assertFalse(p.shouldFollow());
         p.forceFollow();
         assertTrue(p.shouldFollow());
+        assertFalse(p.shouldShowJumpButton());
+    }
+
+    @Test public void jumpButton_visibleOnlyWhenUserLeavesBottom() {
+        AutoScrollPolicy p = new AutoScrollPolicy();
+        assertFalse(p.shouldShowJumpButton());
+        p.sync(0.2, 0.1);
+        assertTrue(p.shouldShowJumpButton());
+        p.forceFollow();
+        assertFalse(p.shouldShowJumpButton());
     }
 
     @Test public void sync_afterForceFollow_tracksVvalue() {

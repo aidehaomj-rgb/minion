@@ -221,6 +221,7 @@ public class InputView extends VBox {
             @Override public void run() {
                 SessionHandle h = current;
                 if (h == null || h.running) return;
+                contextRing.setCompressing(true); // 提交后立即防重；onCompressingChanged(false) 自然恢复
                 h.pool.execute(new Runnable() {
                     @Override public void run() { h.loop.compactNow(); }
                 });
@@ -390,11 +391,11 @@ public class InputView extends VBox {
             CompletionParser.Token t = CompletionParser.parse(input.getText(), input.getCaretPosition());
             switch (t.mode) {
                 case SLASH:
-                    popup.show(frame, SlashSuggester.all(manager.skills()), t.query);
+                    popup.show(frame, SlashSuggester.all(manager.currentSkills()), t.query);
                     lastToken = t;
                     break;
                 case SLASH_SKILL:
-                    popup.show(frame, SlashSuggester.skillEntries(manager.skills()), t.query);
+                    popup.show(frame, SlashSuggester.skillEntries(manager.currentSkills()), t.query);
                     lastToken = t;
                     break;
                 case FILE: {

@@ -35,7 +35,7 @@ public final class DiagnosticsTool implements Tool {
     }
 
     @Override public String name() { return "Diagnostics"; }
-    @Override public String description() { return "检查 Win7 Agent 的 Java、Python/Anaconda、pandas、Office 库、Chrome、Git、Node、配置和目录，并可导出脱敏报告"; }
+    @Override public String description() { return "检查 Win7 Agent 的 Java、Python/Anaconda、SQLite DLL、PyPDF2、pdfminer、PDFBox、Office 库、Chrome、Git、Node、配置和目录，并可导出脱敏报告"; }
     @Override public JsonObject schema() {
         return SchemaGenerator.objectSchema("本机离线诊断", new String[]{"action", "outputPath"}, new String[]{"action"});
     }
@@ -69,6 +69,8 @@ public final class DiagnosticsTool implements Tool {
         sb.append("Java: ").append(System.getProperty("java.version")).append(" | ")
                 .append(System.getProperty("java.home")).append('\n');
         sb.append("JavaFX: ").append(classAvailable("javafx.application.Application") ? "ok" : "missing").append('\n');
+        sb.append("Java PDFBox: ").append(classAvailable("org.apache.pdfbox.pdmodel.PDDocument")
+                ? "ok（内置 PDF 解析可用，不依赖 Python）" : "missing").append('\n');
         sb.append("jarDir: ").append(jarDir.toAbsolutePath()).append('\n');
         sb.append("工作区: ").append(workspace.workDir()).append(" | ")
                 .append(Files.isDirectory(workspace.cwd()) ? "ok" : "missing").append('\n');

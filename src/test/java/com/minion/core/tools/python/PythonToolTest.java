@@ -8,10 +8,25 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import java.nio.file.Files;
+import java.util.HashMap;
+import java.util.Map;
 import java.nio.file.Path;
 import static org.junit.Assert.*;
 
 public class PythonToolTest {
+    @Test public void condaDllDirectories_arePrependedToChildPath() throws Exception {
+        java.nio.file.Path root = tmp.newFolder("Anaconda3").toPath();
+        Files.createDirectories(root.resolve("DLLs"));
+        Files.createDirectories(root.resolve("Library/bin"));
+        Files.createDirectories(root.resolve("Scripts"));
+        Map<String,String> env = new HashMap<String,String>();
+        env.put("PATH", "C:\\Windows");
+        PythonRuntime.configurePythonEnvironment(env, root.resolve("python.exe"));
+        String path = env.get("PATH");
+        assertTrue(path.contains(root.resolve("DLLs").toString()));
+        assertTrue(path.contains(root.resolve("Library/bin").toString()));
+        assertTrue(path.endsWith("C:\\Windows"));
+    }
     @Rule public TemporaryFolder tmp=new TemporaryFolder();
 
     @Test public void configuredExecutableIsResolved() throws Exception {

@@ -22,4 +22,7 @@ public class AutoScrollPolicy {
     public boolean shouldFollow() {
         return pinned;
     }
+
+    /** 离开底部时显示“最新对话”按钮；作为纯逻辑方法便于无 JavaFX 环境测试。 */
+    public boolean shouldShowJumpButton() { return !pinned; }
 }
