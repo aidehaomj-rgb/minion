@@ -48,8 +48,7 @@ choice /C YN /N /M "Start update? [Y/N]: "
 if errorlevel 2 goto :cancelled
 
 set "EXPECTED="
-set /p EXPECTED=<"%HASH_FILE%"
-set "EXPECTED=%EXPECTED: =%"
+for /f "usebackq tokens=1" %%H in ("%HASH_FILE%") do if not defined EXPECTED set "EXPECTED=%%H"
 if not defined EXPECTED goto :bad_hash
 
 set "ACTUAL="
