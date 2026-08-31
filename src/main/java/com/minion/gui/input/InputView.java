@@ -72,6 +72,8 @@ public class InputView extends VBox {
     /** reconcile 重入锁：清理占位残片改文本会再触发文本监听 */
     private boolean reconciling;
     private VBox frame; // 大框（弹层锚点）
+    /** 输入区三列布局；第 0 列用于运行状态提示，第 1 列保持输入框 61.8% 宽。 */
+    private final GridPane root = new GridPane();
     private CompletionParser.Token lastToken; // 弹层可见时待替换的词
     private volatile SessionHandle current;
     // FX 线程缓存的状态（bindSession/onRunningChanged/onAskChanged 维护）
@@ -238,7 +240,6 @@ public class InputView extends VBox {
         });
 
         // 黄金比例 0.618 宽居中（占正文部分总宽度）：3 列百分比（19.1% / 61.8% / 19.1%）
-        GridPane root = new GridPane();
         ColumnConstraints left = new ColumnConstraints();
         left.setPercentWidth(19.1);
         ColumnConstraints center = new ColumnConstraints();
@@ -250,6 +251,15 @@ public class InputView extends VBox {
         getChildren().add(root);
         updatePrompt(); // askPending 默认 false，显示正常发送键提示
         applyGuideState(); // 首次启动无会话：先点引导再输入
+    }
+
+    /** 把运行/重试/压缩提示挂到输入框左边，避免覆盖消息滚动区。 */
+    public void setLeftStatusNode(Node node) {
+        if (node == null) return;
+        root.add(node, 0, 0);
+        GridPane.setHalignment(node, javafx.geometry.HPos.RIGHT);
+        GridPane.setValignment(node, javafx.geometry.VPos.CENTER);
+        GridPane.setMargin(node, new Insets(0, 12, 0, 0));
     }
 
     /** 确认插入的最终文本：@ 文件补全补回 @ 前缀（FileSuggester 的 insertText 为纯路径）。

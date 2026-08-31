@@ -14,11 +14,11 @@ import javafx.util.Duration;
 import java.util.Random;
 
 /**
- * 运行状态指示器：正文区左下角悬浮（齿轮旋转 + 文案轮换）。
+ * 运行状态指示器：输入框左侧显示（齿轮旋转 + 文案轮换）。
  * 齿轮 2s/圈旋转；文案每 10s 随机轮换（正在加载中.../可随时补充信息...）；
  * 上下文压缩中固定显示「上下文压缩中...」（不参与轮换，压缩结束恢复）。
  * 动画规约同 StatusDot：隐藏前必须停全部 Timeline，防动画引用节点泄漏。
- * 挂载方式：放入 StackPane 并 setAlignment(BOTTOM_LEFT)（本组件不管理布局）。
+ * 挂载方式：由 InputView.setLeftStatusNode 放入输入区左侧列（本组件不管理布局）。
  */
 public class RunningIndicator extends HBox {
 

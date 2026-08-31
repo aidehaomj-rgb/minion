@@ -178,17 +178,16 @@ public class MainWindow {
         setupAutoScroll();
         WheelScrollAccelerator.attach(chatScroll); // 滚轮加速：每格固定像素滚动（替换 JavaFX 8 默认慢速比例滚动）
         inputView = new InputView(manager, MinionApp.config());
-        // 运行状态指示器：正文区左下角悬浮（齿轮+动态文案），StackPane 叠加于消息区之上，不占布局
+        // 运行状态指示器：挂到输入框左侧，不再覆盖流式思考/回复内容
         runningIndicator = new RunningIndicator();
+        inputView.setLeftStatusNode(runningIndicator);
         jumpLatestButton = new Button("↓ 最新对话");
         jumpLatestButton.getStyleClass().add("btn-jump-latest");
         jumpLatestButton.setTooltip(new Tooltip("直达对话底部并继续跟随新消息"));
         jumpLatestButton.setVisible(false);
         jumpLatestButton.setManaged(false);
         jumpLatestButton.setOnAction(e -> jumpToLatest());
-        StackPane chatHost = new StackPane(chatScroll, runningIndicator, jumpLatestButton);
-        StackPane.setAlignment(runningIndicator, Pos.BOTTOM_LEFT);
-        StackPane.setMargin(runningIndicator, new Insets(0, 0, 10, 14));
+        StackPane chatHost = new StackPane(chatScroll, jumpLatestButton);
         // JavaFX 8 无 StackPane.setFillWidth/Height（12+ 才有）：用 max 钳制防默认 fill 拉伸铺满
         runningIndicator.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
         StackPane.setAlignment(jumpLatestButton, Pos.BOTTOM_RIGHT);
