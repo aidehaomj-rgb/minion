@@ -63,12 +63,20 @@
     -fx-padding: 6 12 6 12; -fx-cursor: hand;
 }
 .btn-jump-latest:hover { -fx-background-color: #343b49; }
-.btn-guide {
-    -fx-background-color: #24344d; -fx-text-fill: #dce8ff;
-    -fx-background-radius: 6; -fx-border-radius: 6; -fx-border-color: #4f8cff;
-    -fx-padding: 6 12 6 12; -fx-cursor: hand;
+.pending-guide-row {
+    -fx-background-color: #202a3a; -fx-background-radius: 6;
+    -fx-border-color: #4f8cff; -fx-border-radius: 6; -fx-padding: 6 8 6 10;
 }
-.btn-guide:hover { -fx-background-color: #2d4263; }
+.pending-guide-label { -fx-text-fill: #dce8ff; -fx-font-size: 12px; }
+.btn-guide-now {
+    -fx-background-color: #4f8cff; -fx-text-fill: white; -fx-background-radius: 5;
+    -fx-padding: 5 10 5 10; -fx-cursor: hand;
+}
+.btn-guide-now:hover { -fx-background-color: #5d98ff; }
+.btn-guide-cancel {
+    -fx-background-color: transparent; -fx-text-fill: #9da5b4; -fx-padding: 5 8 5 8; -fx-cursor: hand;
+}
+.btn-guide-cancel:hover { -fx-text-fill: #f0f2f6; }
 
 /* ===== SVG 图标（IconFactory 统一 24×24 Material 线性图标；SVGPath 填充不继承 -fx-text-fill，须显式指定） =====
    通用色 #a8b0bb（同按钮文字色）；hover 由所在按钮容器联动变白/变色 */

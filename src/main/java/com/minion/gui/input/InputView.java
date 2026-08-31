@@ -44,7 +44,7 @@ import java.util.Map;
 /** 底部输入区：4/9 宽居中大框（上=块行+输入框，下=底部操作行：上传按钮左 + 发送按钮右）+ /命令与 @文件补全弹层。
  *  按钮语义：上箭头=发送/补充/回答、变淡箭头=空输入或等待回答、方块=终止（提问挂起时改 Esc 终止）；
  *  背景按状态取色（btn-send-empty #f48771 / btn-send-full #ff947c）。上传按钮（回形针）支持图片和常用文档。
- *  运行中 + 有内容 → 补充；等待回答 + 有内容 → 回答；运行中 + 空 → 终止。 */
+ *  运行中 + 有内容 → 放入待引导区，点击“立即引导”后才补充；等待回答 + 有内容 → 回答；运行中 + 空 → 终止。 */
 public class InputView extends VBox {
 
     /** 按钮模式：图标/透明度/背景类/动作的判定依据（ANSWER_DIM=提问挂起且空输入，变淡箭头等待输入回答） */
@@ -55,7 +55,10 @@ public class InputView extends VBox {
     private final TextArea input = new TextArea();
     private final Button sendButton = new Button();
     private final Button uploadButton = new Button();
-    private final Button guideButton = new Button("开始引导");
+    private final HBox pendingGuideRow = new HBox(8);
+    private final Label pendingGuideLabel = new Label();
+    private final Button guideNowButton = new Button("立即引导");
+    private final Button cancelGuideButton = new Button("取消");
     private final ContextRing contextRing = new ContextRing();
     private final SVGPath arrowIcon = IconFactory.send();
     private final SVGPath stopIcon = IconFactory.stop();
@@ -80,10 +83,10 @@ public class InputView extends VBox {
     private boolean running;
     private boolean askPending;
     private String askQuestion;
-    /** 空白新会话必须先点“开始引导”；只控制编辑入口，不自动向模型发送内容。 */
-    private boolean guideRequired = true;
-    /** 无会话首页已点过引导；首次发送自动创建会话时继承解锁状态，避免异步激活又锁回去。 */
-    private boolean unboundGuideOpened;
+    /** 运行中用户先暂存、尚未点击“立即引导”的内容；不得提前进入模型或聊天事件流。 */
+    private String pendingGuideText;
+    private final List<ImagePart> pendingGuideImages = new ArrayList<ImagePart>();
+    private SessionHandle pendingGuideSession;
 
     public InputView(final SessionManager manager, final Config config) {
         this.manager = manager;
@@ -118,9 +121,19 @@ public class InputView extends VBox {
         uploadButton.setTooltip(new Tooltip("添加附件（图片、PDF、Word、Excel、PPT、文本/代码）"));
         uploadButton.setOnAction(e -> chooseAttachments());
 
-        guideButton.getStyleClass().add("btn-guide");
-        guideButton.setTooltip(new Tooltip("点击后开始输入，由 Agent 根据你的目标逐步引导"));
-        guideButton.setOnAction(e -> openGuideInput());
+        pendingGuideRow.getStyleClass().add("pending-guide-row");
+        pendingGuideRow.setAlignment(Pos.CENTER_LEFT);
+        pendingGuideLabel.getStyleClass().add("pending-guide-label");
+        pendingGuideLabel.setTextOverrun(javafx.scene.control.OverrunStyle.ELLIPSIS);
+        pendingGuideLabel.setMinWidth(0);
+        HBox.setHgrow(pendingGuideLabel, Priority.ALWAYS);
+        guideNowButton.getStyleClass().add("btn-guide-now");
+        guideNowButton.setOnAction(e -> sendPendingGuide());
+        cancelGuideButton.getStyleClass().add("btn-guide-cancel");
+        cancelGuideButton.setOnAction(e -> clearPendingGuide());
+        pendingGuideRow.getChildren().addAll(pendingGuideLabel, guideNowButton, cancelGuideButton);
+        pendingGuideRow.setVisible(false);
+        pendingGuideRow.setManaged(false);
 
         sendButton.setMinSize(36, 36);
         sendButton.setPrefSize(36, 36);
@@ -220,8 +233,8 @@ public class InputView extends VBox {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         HBox bottomRow = new HBox(8);
-        bottomRow.getChildren().addAll(guideButton, uploadButton, contextRing, spacer, sendButton);
-        frame.getChildren().addAll(composer, bottomRow);
+        bottomRow.getChildren().addAll(uploadButton, contextRing, spacer, sendButton);
+        frame.getChildren().addAll(pendingGuideRow, composer, bottomRow);
 
         // 启动/未选会话：环形圈初始隐藏（bindSession(null) 与 onContextStats 无数据时均不显示，避免空白 Tooltip 颜色块）
         contextRing.setVisible(false);
@@ -250,7 +263,6 @@ public class InputView extends VBox {
         root.add(frame, 1, 0);
         getChildren().add(root);
         updatePrompt(); // askPending 默认 false，显示正常发送键提示
-        applyGuideState(); // 首次启动无会话：先点引导再输入
     }
 
     /** 把运行/重试/压缩提示挂到输入框左边，避免覆盖消息滚动区。 */
@@ -477,21 +489,13 @@ public class InputView extends VBox {
             boolean changed = previous != h;
             if (changed) {
                 clearComposer(); // 草稿属于旧会话，禁止串入新会话
-                if (previous == null && h != null && unboundGuideOpened) {
-                    guideRequired = false;
-                    unboundGuideOpened = false;
-                } else {
-                    guideRequired = requiresGuideForTarget(h != null,
-                            h != null && h.titlePending,
-                            h == null ? 0 : h.session.messages.size());
-                }
+                clearPendingGuide();
             }
             running = h != null && h.running;
             askPending = h != null && h.askPending;
             askQuestion = h == null ? null : h.askQuestion;
             updateButton();
             updatePrompt();
-            applyGuideState();
             // 环形圈：切会话先隐藏，初始估算放会话线程（全量估算较重，防卡 UI），完成后 runLater 填充
             contextRing.setCompressing(false);
             contextRing.setVisible(false);
@@ -516,6 +520,8 @@ public class InputView extends VBox {
         Platform.runLater(() -> {
             this.running = running;
             updateButton();
+            updatePrompt();
+            refreshPendingGuideRow();
             contextRing.setRunning(running);
         });
     }
@@ -577,11 +583,11 @@ public class InputView extends VBox {
     }
 
     private void updatePrompt() {
-        if (guideRequired) {
-            input.setPromptText("点击“开始引导”后描述你想完成的事情");
-        } else if (askPending) {
+        if (askPending) {
             String q = askQuestion == null ? "" : askQuestion;
             input.setPromptText("回答: " + (q.length() > 40 ? q.substring(0, 40) + "…" : q));
+        } else if (running) {
+            input.setPromptText("输入补充指令，发送后进入待引导区");
         } else {
             input.setPromptText("输入消息…  (@ 引用文件  / 命令  " + sendKeyLabel(config.enterSends()) + " 发送)");
         }
@@ -617,34 +623,60 @@ public class InputView extends VBox {
         switch (mode) {
             case SEND:       applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "发送 (" + sendKey + ")"); break;
             case SEND_DIM:   applyStyle(arrowIcon, buttonStyleClass(mode), 0.35, "输入消息后发送 (" + sendKey + ")"); break;
-            case SUPPLEMENT: applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "补充信息给正在运行的模型 (" + sendKey + ")"); break;
+            case SUPPLEMENT: applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "加入待引导区，确认后再发送 (" + sendKey + ")"); break;
             case ANSWER:     applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "回答模型的提问 (" + sendKey + ")"); break;
             case ANSWER_DIM: applyStyle(arrowIcon, buttonStyleClass(mode), 0.35, "输入回答后发送 (" + sendKey + ")"); break;
             case STOP:       applyStyle(stopIcon, buttonStyleClass(mode), 1.0, "终止当前运行 (Esc)"); break;
         }
-        sendButton.setDisable(guideRequired);
     }
 
-    /** 会话绑定是否进入引导锁定；同一会话的状态刷新不能把正在输入的内容重新锁住。 */
-    static boolean requiresGuideForTarget(boolean hasSession, boolean titlePending, int messageCount) {
-        return !hasSession || (titlePending && messageCount == 0);
+    /** 多次暂存按输入顺序追加；纯逻辑供单测。 */
+    static String mergePendingGuide(String existing, String added) {
+        String next = added == null ? "" : added.trim();
+        if (existing == null || existing.trim().isEmpty()) return next;
+        if (next.isEmpty()) return existing.trim();
+        return existing.trim() + "\n" + next;
     }
 
-    private void openGuideInput() {
-        if (!guideRequired) return;
-        guideRequired = false;
-        if (current == null) unboundGuideOpened = true;
-        applyGuideState();
-        input.requestFocus();
+    static String pendingGuidePreview(String text) {
+        if (text == null) return "";
+        String oneLine = text.replace('\r', ' ').replace('\n', ' ').trim();
+        return oneLine.length() > 80 ? oneLine.substring(0, 80) + "…" : oneLine;
     }
 
-    private void applyGuideState() {
-        input.setDisable(guideRequired);
-        uploadButton.setDisable(guideRequired);
-        guideButton.setVisible(guideRequired);
-        guideButton.setManaged(guideRequired);
-        updatePrompt();
-        updateButton();
+    private void stagePendingGuide(String text, List<ImagePart> images) {
+        if (current == null || text == null || text.trim().isEmpty()) return;
+        pendingGuideSession = current;
+        pendingGuideText = mergePendingGuide(pendingGuideText, text);
+        if (images != null) pendingGuideImages.addAll(images);
+        refreshPendingGuideRow();
+    }
+
+    private void refreshPendingGuideRow() {
+        boolean show = pendingGuideText != null && !pendingGuideText.trim().isEmpty();
+        pendingGuideRow.setVisible(show);
+        pendingGuideRow.setManaged(show);
+        if (!show) return;
+        String suffix = pendingGuideImages.isEmpty() ? "" : "（附件 " + pendingGuideImages.size() + " 个）";
+        pendingGuideLabel.setText("待引导：" + pendingGuidePreview(pendingGuideText) + suffix);
+        guideNowButton.setText(running ? "立即引导" : "作为新消息发送");
+    }
+
+    private void sendPendingGuide() {
+        SessionHandle target = pendingGuideSession;
+        String text = pendingGuideText;
+        List<ImagePart> images = new ArrayList<ImagePart>(pendingGuideImages);
+        if (target == null || text == null || text.trim().isEmpty()) return;
+        clearPendingGuide();
+        if (target.running) manager.sendSupplement(target, text, images);
+        else manager.send(target, text, images);
+    }
+
+    private void clearPendingGuide() {
+        pendingGuideText = null;
+        pendingGuideImages.clear();
+        pendingGuideSession = null;
+        refreshPendingGuideRow();
     }
 
     private void applyStyle(SVGPath graphic, String styleClass, double opacity, String tip) {
@@ -664,8 +696,9 @@ public class InputView extends VBox {
             case SUPPLEMENT: {
                 String text = composedText();
                 if (text == null || text.trim().isEmpty()) return;
+                List<ImagePart> images = composedImages();
                 clearComposer();
-                if (current != null) manager.sendSupplement(current, text);
+                stagePendingGuide(text, images); // 只暂存；“立即引导”才真正注入
                 break;
             }
             case ANSWER: {

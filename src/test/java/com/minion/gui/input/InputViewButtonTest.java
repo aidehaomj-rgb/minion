@@ -7,14 +7,16 @@ import static org.junit.Assert.*;
 /** 按钮状态机纯函数测试：图标/透明度/背景类/动作的判定依据 */
 public class InputViewButtonTest {
 
-    @Test public void guideRequired_withoutActiveSession() {
-        assertTrue(InputView.requiresGuideForTarget(false, false, 0));
+    @Test public void pendingGuide_multipleInputsAreAppended() {
+        assertEquals("先检查数据\n不要覆盖原文件",
+                InputView.mergePendingGuide("先检查数据", " 不要覆盖原文件 "));
     }
 
-    @Test public void guideRequired_forBlankNewSessionOnly() {
-        assertTrue(InputView.requiresGuideForTarget(true, true, 0));
-        assertFalse(InputView.requiresGuideForTarget(true, true, 1));
-        assertFalse(InputView.requiresGuideForTarget(true, false, 0));
+    @Test public void pendingGuide_previewIsSingleLineAndTruncated() {
+        assertEquals("第一行 第二行", InputView.pendingGuidePreview("第一行\n第二行"));
+        String longText = new String(new char[90]).replace('\0', '字');
+        assertEquals(81, InputView.pendingGuidePreview(longText).length());
+        assertTrue(InputView.pendingGuidePreview(longText).endsWith("…"));
     }
 
     @Test
