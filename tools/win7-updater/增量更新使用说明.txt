@@ -39,3 +39,13 @@ skills\
 1. 关闭 Minion。
 2. 双击更新包中的 Rollback-Minion.cmd。
 3. 确认安装目录后自动恢复 backup\minion-0.1.0.jar.bak。
+
+五、可选安装 Python PDF 模块
+
+如果 `/diagnostics` 显示 PyPDF2 或 pdfminer 缺失：
+
+1. 保留更新包内 `python-wheels` 文件夹。
+2. 双击 `安装Python-PDF模块.cmd`；默认查找 `C:\ProgramData\Anaconda3\python.exe`。
+3. 如果 Anaconda 位于其他目录，在命令行运行：
+   安装Python-PDF模块.cmd "D:\Anaconda3\python.exe"
+4. 安装过程完全离线，不访问互联网。

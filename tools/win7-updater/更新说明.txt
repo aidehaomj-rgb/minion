@@ -1,23 +1,23 @@
-Minion custom.3 增量更新
+Minion custom.4 增量更新
 ========================
 
-发布日期：2026-08-28
+发布日期：2026-08-31
 兼容环境：Windows 7、JDK 8、Python 3.7.6/Anaconda3、Qwen3 27B
+代码提交：39c6e4e
+已合并 GitHub upstream/main：58b7951
 
-本包包含 2026-08-28 当天全部本地开发内容，并已合并 GitHub upstream/main 至 400a894。
+本包包含 custom.3 之后至 2026-08-31 的全部本地开发和上游更新。
 
-主要新增：
+主要更新：
 
-1. 稳定性：Qwen 工具参数 JSON 容错、环境诊断、脱敏滚动日志、后台任务队列、文件检查点与恢复。
-2. Excel/Office：Excel 清洗、筛选、画像、合并、透视、图表、导出；DOCX/PPTX/PDF 提取与生成；PDF 合并拆分。
-3. 数据库：SQLite、ODBC/SQL Server、MySQL、PostgreSQL 的结构、查询、执行和 CSV/XLSX 导出。
-4. 知识库：文件夹批量导入、增量同步、来源引用和本地离线搜索。
-5. 附件：普通文件、图片、拖放、剪贴板文件和截图粘贴。
-6. 开发工作台：Git、文件树与大文件分段/摘要缓存、后台进程、项目模板、自动测试/构建/服务启动。
-7. 浏览器：元素等待、网络空闲、文件上传、下载目录、多页抓取、标签页管理和人工接管。
-8. 会话与上下文：搜索、置顶、归档、分叉、导入导出、项目记忆、handoff、上下文策略和统计。
-9. 安全与扩展：read-only/workspace-write/full 三档权限、审计日志、本机用户绑定加密密钥库、Skills 管理。
-10. 更新器：不再要求 JDK 必须位于安装目录；新增一键 Rollback-Minion.cmd。
+1. 合并上游工作空间、项目级技能、AskUserQuestion 容错、子 Agent 模型热切换等更新。
+2. Anaconda SQLite：Python 子进程自动补齐 Conda 根目录、DLLs、Library\bin、Scripts，诊断改为真正导入 sqlite3。
+3. PDF：保留内置 Java PDFBox；附带 Python 3.7.6 可离线安装的 PyPDF2、pdfminer.six 及固定依赖 wheel。
+4. 对话滚动：增加“最新对话”按钮，一键回到底部并恢复流式跟随。
+5. 上下文：模型调用前主动自动压缩，保留任务状态并显示压缩前后 token，失败时防重复压缩。
+6. 新会话引导：新会话清空跨会话草稿，点击“开始引导”后才开放输入，不会自动发送。
+7. 运行提示：“正在加载中/可随时补充信息”移动到输入框左侧，不再遮挡思考和回复。
+8. 会话状态点：黄色呼吸表示执行中，绿色常亮表示执行完成未查看，点击查看后消失。
 
 更新安全：
 
@@ -26,4 +26,9 @@ Minion custom.3 增量更新
 - 可双击 Rollback-Minion.cmd 一键回退。
 - 不覆盖 model.json、workspace.json、config.properties、mcp.json、session、skills、知识库、Python 或 JDK。
 
-验证结果将在包内 BUILD-INFO.txt 中记录。
+Python PDF 模块：
+
+- Agent 的普通 PDF 文本解析不依赖 Python，更新 JAR 后即可使用。
+- Python 数据分析代码若需要 PyPDF2/pdfminer，请运行“安装Python-PDF模块.cmd”，路径可作为第一个参数传入。
+
+验证：JDK 8 完整测试 798 项通过，0 失败；JAR 打包成功。
