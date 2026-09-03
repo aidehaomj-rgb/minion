@@ -11,10 +11,10 @@ com.minion
 ├── Main                    入口：装配配置/技能/浏览器/MCP/GUI，启动 JavaFX 主窗口（GUI 为唯一界面，CLI 已移除）
 ├── gui/                    JavaFX 界面：主窗口、侧栏、聊天渲染、输入、弹窗、确认、图标、会话管理
 └── core/
-    ├── agent/              AgentLoop（主循环）、SubAgentLoop（子 agent）、Session、TodoList、SystemPromptBuilder、TitleGenerator
+    ├── agent/              AgentLoop（主循环）、SubAgentLoop（子 agent）、Session、TodoList、SystemPromptBuilder、TitleGenerator、RetryPolicy（长重试策略）、RetryProgress（重试进度值对象）
     ├── llm/                DeepSeekClient（SSE 流式，内置 deepseek/qwen 思考参数适配）、Message、ImagePart（图片内容块，content 数组化）、ToolCall、Usage、UsageTracker
     ├── tools/              Tool 接口、ToolRegistry、13 个工具、SchemaGenerator、confirm/、browser/、mcp/（McpProxyTool）、PathsGuard
-    ├── mcp/                MCP 客户端核心：McpManager（状态机/惰性连接/路由）、StdioMcpClient、SseMcpClient、McpStore（mcp.json）、McpServer、JsonRpc
+    ├── mcp/                MCP 客户端：McpManager（状态机/惰性连接/路由）、AjMcpClient（aj-mcp-client 包装，stdio/SSE/Streamable 三传输）、McpCommands、McpJson、McpStore（mcp.json）、McpServer
     ├── skills/             SkillManager（scanTree 递归扫描）、SkillSet（内置+项目合并快照）、Skill（YAML frontmatter 解析）
     ├── context/            ContextManager、TokenCounter
     ├── storage/            SessionStore
@@ -40,7 +40,7 @@ com.minion
 | sidebar/TimeFormatter | 消息时间格式化：ts 与 now 的相对距离（<1min→"1m"、<1h→"Nm"、<24h→"Nh"、≥24h→"Nd"），ts<=0（旧数据）返回 null 不显示 |
 | chat/ChatView（控制台输出流：每条消息 HBox = 彩色加粗标签 Label + 白色正文 MessageTextArea，段间无缝；正文高度自适应无内部滚动条）、MarkdownRenderer、BlockNodeFactory | 每会话一个 ChatView 绑定其 EventList（重建 + bind 重放存量）；Markdown 渲染（BlockNodeFactory 对段落/列表/表格内 Text 显式 setFill，保证深色主题下可读）；AskUserQuestion 提问渲染委托 core `AskUserQuestionTool.normalize`（键名写错/数组退化成字符串/参数标记吞正文皆可救回，永不产出空白），摘要行带 header，提问段无视 500 字折叠阈值恒展开（超 4000 才折叠），`toolResultBody(name,data)` 对 AskUserQuestion 成功态抑制正文（回答已由【输入】段渲染，失败态仍显示） |
 | input/InputView | 输入区 0.618 黄金比例宽居中大框（占正文面板宽 61.8%，上=块行+输入框、下=底部操作行：上传按钮左+发送按钮右，LCD 抗锯齿）：Ctrl+Enter 发送、Enter 换行、Esc 关闭补全弹层/终止运行；键盘经 capture 过滤器处理（弹层 ↑↓/Enter/Tab 选择优先于 TextArea 默认行为）；按钮状态机（提问挂起空输入=变淡回答箭头），发送/补充/回答/终止统一 btn-danger 红底；回形针上传按钮（FileChooser 选图→5MB/3 张校验→base64 建 IMAGE 块），带图消息跳过斜杠命令直发 send，回答模式带图拦截提示；发送走 SessionManager.dispatchCommand（斜杠命令本地分发） |
-| input/SuggestionPopup、CompletionParser、Slash/FileSuggester | 补全弹层（Popup+ListView 锚定大框上方同宽；↑↓/Enter/Tab/Esc/鼠标）：触发解析（/、@ 词首、/skill 前一词三模式）+ 数据提供（5 内置命令+技能条目、工作空间文件遍历 10 秒缓存）+ 过滤排序（前缀优先→短路径→字典序） |
+| input/SuggestionPopup、CompletionParser、Slash/FileSuggester | 补全弹层（Popup+ListView 锚定大框上方同宽；↑↓/Enter/Tab/Esc/鼠标 cell 级确认）+ 触发解析（/、@ 词首、/skill 前一词三模式）+ 数据提供（5 内置命令+技能条目、工作空间全量文件遍历：跳过点目录与 .gitignore 忽略、字典序、每工作空间独立 5 分钟缓存，会话绑定预热/过期先用旧缓存异步刷新）+ 过滤排序（前缀优先→短路径→字典序） |
 | input/InputChip | 输入块模型与纯逻辑（compose 组装发送文本、粘贴 >1000 字符变块阈值、粘贴块光标处占位符原位展开、弹层模式→块类型映射） |
 | command/CommandDispatcher | 斜杠命令本地分发（/help /skills /skill /compact /tokens）：结果经 SYSTEM 事件渲染，永不发给 LLM；/compact 提交会话工作线程执行 |
 | dialog/SettingsDialog、ConfirmSheet | 设置窗（左列 ListView 导航：基础设置/模型/MCP/关于 + StackPane 内容切换；导航列 minWidth 120 防 HBox 空间不足时被 HGrow 内容压塌；基础设置 HBox 行布局标签固定 160 宽（去 ScrollPane——裁剪内灰阶 AA 致发虚），skills.dir 可浏览选取）；MCP 页：服务器列表（状态点（SVG 圆点）绿/橙/红/灰 + 传输 + 工具数/失败原因 + 启用开关）+ 新建/编辑/删除/重连，表单支持 stdio 命令/参数/环境变量与 sse URL/请求头（传输切换联动禁用）；模型页已激活模型名称右侧主色圆点标记（SVG）；连接线程回调经 Platform.runLater 刷新列表；高危操作确认底部卡片（右侧底部两行紧凑小卡滑入，距底 1 行（24px），遮罩仅右侧，Esc 拒绝/Enter 同意，并发串行排队）；基础页按钮栏「应用」（保存不关窗）与 browser.path 文件浏览 |
@@ -89,14 +89,16 @@ com.minion
 - `core/tools/mcp/` 子包：`McpProxyTool`（MCP 工具适配器——元数据透传 + 调用委托 McpManager 路由，失败映射 ToolResult.error 给模型自调；不弹高危确认）
 - `example/ExampleTool`：新工具模板示例（未注册）
 
-### core/mcp/（MCP 客户端核心，JDK8 自研，无官方 SDK 依赖）
+### core/mcp/（MCP 客户端核心，基于 aj-mcp-client 1.5 标准实现，JDK8）
 
-- `McpManager`：状态机（DISCONNECTED/CONNECTING/CONNECTED/FAILED）+ 惰性连接（首次 ensureConnectedAsync 才 spawn 进程，幂等去重）+ 全局工具表 + call 路由（未连接先同步重连 ≤10s）+ `save()`（配置持久化）+ shutdown；`addListener` 连接线程回调（GUI 层 Platform.runLater 刷新）
-- `StdioMcpClient`：spawn 子进程 + stdin/stdout 按行 JSON-RPC（`.cmd/.bat` 自动 `cmd /c` 包装）；按 id 关联 pending 队列同步等待响应；调用超时 120s
-- `SseMcpClient`：okhttp-sse EventSource（GET /sse 流）+ POST 响应体作为 JSON-RPC 响应
+- `McpManager`：状态机（DISCONNECTED/CONNECTING/CONNECTED/FAILED）+ 惰性连接（幂等去重）+ 全局工具表 + call 路由（未连接先同步重连 ≤10s，连接层异常自动断开待下次重建）+ `save()` + shutdown；`addListener` 连接线程回调（GUI 层 Platform.runLater 刷新）
+- `AjMcpClient`：包装库客户端——`McpClient.builder().transport(t)` 完成握手/版本协商/JSON-RPC 帧；`tools/list`（游标分页）与 `tools/call` 走同一 transport 的原始请求取 JsonNode 转 gson（inputSchema 零损耗；非 text 内容序列化为 JSON 文本）；传输失败抛 `McpConnectionException`（区别于工具业务错误）
+- `McpTransports` 工厂逻辑在 `McpManager.transportOf`：stdio → `StdioTransport`（命令经 `McpCommands` 组装，Windows npx→cmd /c）；sse → `HttpMcpTransport`（旧版 endpoint 事件握手）；streamable → `StreamableHttpTransport`（`Mcp-Session-Id`/`MCP-Protocol-Version` 头 + 请求头）
+- `McpCommands`：stdio 命令组装（Windows `.cmd/.bat` 自动 `cmd /c` 包装，PATH 探测 npx→npx.cmd）
+- `McpJson`：Jackson JsonNode → gson 转换（仅转换不解析）
 - `McpStore`：jarDir/mcp.json 单文件多服务器（原子写，损坏备份 .bak）
-- `McpServer`：配置字段（name/transport/command/args/env/url/headers/enabled，gson 落盘）+ transient 运行时状态（state/failReason/tools/skippedTools）
-- `McpToolInfo` / `JsonRpc`：工具元数据 / JSON-RPC 2.0 消息编解码（request/response/responseError/notification）
+- `McpServer`：配置字段（name/transport(stdio|sse|streamable)/command/args/env/url/headers/enabled）+ transient 状态
+- `McpToolInfo` / `McpException` / `McpConnectionException`：工具元数据 / 业务异常 / 连接层异常
 
 ### core/skills/ · core/context/ · core/storage/ · core/config/
 
@@ -121,7 +123,7 @@ com.minion
 - **每会话一个 AgentLoop + 独占工作线程**（真并行，切换工作空间/会话不打断后台运行）
 - **每工作空间一套上下文**（WorkspaceCtx：Workspace/SessionStore/ConfirmGate 空间级共享），恢复/新建会话时经 `SessionManager.newRegistry` 注册工具——**每会话独立 ToolRegistry**（TaskTool 绑定本会话 loop，防 task 事件串流）
 - **会话级技能快照**：`Main` 启动扫内置技能 → `SessionManager` 建/恢复会话时 `SkillSet.resolve(项目级技能目录)`（项目覆盖同名内置，`WorkspacePaths` 按各空间 workDir 解析相对路径；结果按空间缓存，配置变更时失效）→ **不可变快照**塞进 `AgentLoop.setAllSkills` → `SystemPromptBuilder` 每轮渲染快照（`[项目]/[内置]` 标注 + 目录行）。快照随会话固化，切换工作空间/改配置互不串台、只对新会话生效；`/skills` 与 `@`/`/` 补全读 `SessionManager.currentSkills()`（激活会话快照；无会话时按当前空间缓存结果实算）
-- **MCP 接线**：newRegistry 对每个启用服务器触发 `ensureConnectedAsync`（首次建会话即后台预连接，不阻塞界面）；连接完成（McpManager.Listener）补注册该服务器工具进所有存活会话的 registry（AgentLoop 每轮动态 `registry.schemas()`，下一轮即可被模型调用）；与内置工具重名跳过并计数 skippedTools；新建/恢复会话另有兜底补注册（覆盖连接完成于会话注册前毫秒级竞态）
+- **MCP 接线**：newRegistry 对每个启用服务器触发 `ensureConnectedAsync`（首次建会话即后台预连接，不阻塞界面）；连接完成（McpManager.Listener）补注册该服务器工具进所有存活会话的 registry（AgentLoop 每轮动态 `registry.schemas()`，下一轮即可被模型调用）；与内置工具/其它服务器重名跳过并计数 skippedTools——重连/兜底重复注册时本服务器已注册工具幂等跳过不计跳过数（否则设置页「N 工具」误显示 0）；新建/恢复会话另有兜底补注册（覆盖连接完成于会话注册前毫秒级竞态）
 - **事件缓冲**：工作线程只写 EventList，FX 线程读取渲染（UI 不被工具执行阻塞）
 - **确认交互**：GuiConfirmUi 经 Platform.runLater 投递 ConfirmSheet，工具线程 take() 无限等点击（不阻塞 FX 线程；点击结果即决策，无超时竞态）；无 GUI 环境防御性 REJECT
 - 会话落盘：`loop.setSessionStore(store)` 每轮/退出兜底落盘；关闭窗口 `shutdown()` 终止全部运行中会话（有运行中会话先弹确认）
@@ -176,6 +178,11 @@ com.minion
 | Grep 单行截断 LINE_MAX | 1000 字符 | GrepTool |
 | Grep 结果条数 MAX_RESULTS / 显示层 DISPLAY_CHARS | 250 条 / 30k 字符 | GrepTool |
 | HTTP 连接超时 CONNECT_TIMEOUT | 30s | DeepSeekClient.java |
+| HTTP 读取超时 READ_TIMEOUT | 300s | DeepSeekClient.java |
+| CdpClient 连接超时 | 10000ms | Main.java |
+
+> 改动以上常量须在设计阶段说明理由，不随手改。
+
 | HTTP 读取超时 READ_TIMEOUT | 300s | DeepSeekClient.java |
 | CdpClient 连接超时 | 10000ms | Main.java |
 

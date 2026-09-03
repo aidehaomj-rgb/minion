@@ -1,6 +1,6 @@
 # minion
 
-win7&jdk8 本地 Agent，使用 Java 8 开发，面向 Qwen 等 OpenAI Chat Completions 兼容模型。含代码开发、浏览器自动化、Anaconda/Python、Excel/Office、SQL 数据库、本地知识库、项目记忆、会话管理、离线更新、风险审计和 Skills。
+win7&jdk8 本地 Agent，使用 Java 8 开发，面向 Qwen 等 OpenAI Chat Completions 兼容模型。含子 agent、MCP 工具扩展（stdio/SSE/Streamable HTTP）、代码开发、浏览器自动化、Anaconda/Python、Excel/Office、SQL 数据库、本地知识库、项目记忆、上下文压缩、会话管理、离线更新、风险审计和 Skills。
 
 ## 启动（GUI）
 
@@ -46,8 +46,8 @@ jar 自举行为（启动器内置，双击 / 命令行同样生效）：
 ## 快捷操作
 
 - 发送键两种模式（基础设置「发送键」勾选即生效，默认开启）：默认 Enter 发送、Ctrl+Enter 换行；取消勾选后 Ctrl+Enter 发送、Enter 换行；Esc 关闭补全弹层 / 终止当前运行
-- `@` 引用工作空间文件：按文件名反显（↑↓/鼠标选择、滚轮滚动），Enter/Tab 插入工作区根相对路径
-- 补全确认反显为输入块：弹层选中的 /命令、@文件 与粘贴的大于 1000 字符长文本变为输入框上方不可编辑块，块右上角关闭按钮或空输入时 Backspace 删除；长文本粘贴在光标处插入「[粘贴块N]」占位符，发送时占位符原位展开为全文（落位 = 光标位置）；其余块与文本按顺序组合（/命令仍须在消息开头）
+- `@` 引用工作空间文件：按文件名反显（↑↓/鼠标选择、滚轮滚动），Enter/Tab/鼠标点击把 `@路径` 内联进输入框（所见即所得，非输入块）；列表跳过 .gitignore 忽略与点目录（无条数上限、字典序），每工作空间独立缓存 5 分钟——首次打开会话即后台预热扫描，切回项目直接命中；缓存过期时先用旧列表即时显示、后台异步刷新后免闪替换（新建文件最迟 5 分钟后可见）
+- 补全确认反显为输入块：弹层选中的 /命令、/技能 与粘贴的大于 1000 字符长文本变为输入框上方不可编辑块，块右上角关闭按钮或空输入时 Backspace 删除；长文本粘贴在光标处插入「[粘贴块N]」占位符，发送时占位符原位展开为全文（落位 = 光标位置）；其余块与文本按顺序组合（/命令仍须在消息开头）
 - `/` 斜杠命令与技能补全：/help /skills /skill <名> [参数] /compact /tokens；`/skill ` 后按技能名过滤，命令后尾随文字作为技能参数（以「用户参数: 」紧跟 `<skill>` 技能块之后注入）；命令由客户端本地执行，结果以系统行显示在聊天区，不发给模型
 - `/capabilities`：显示 Python、Excel、SQLite、知识库、浏览器和开发构建能力入口
 - `/diagnostics`、`/logs`、`/update`、`/checkpoints`：环境诊断、脱敏日志、离线更新检查和文件修改恢复点
@@ -138,19 +138,23 @@ jar 同目录 `session/<workSpaceName>/`，每会话一个 JSON 文件（每轮�
 
 登录示例:对话里告知账号密码 → 模型用 BrowserEval 填表提交 → 登录态保存在 userDataDir,下次会话保留。
 
-## MCP 工具扩展（stdio / SSE）
+## MCP 工具扩展（stdio / SSE / Streamable HTTP）
 
 对接 MCP（Model Context Protocol）服务器，把服务器上的工具暴露给模型调用。标准 JSON-RPC 2.0 协议，兼容 Claude Code / 千问等生态的 MCP 服务器。配置在设置窗「MCP」页管理（服务器列表 + 状态点 + 启用开关 + 新建/编辑/删除/重连），落盘 `mcp.json`。
 
 字段：
 
     name=playwright            # 服务器名（工具名前缀区分来源）
-    transport=stdio            # stdio 或 sse
-    command=npx                # stdio：可执行命令（Windows 下 .cmd/.bat 自动以 cmd /c 包装）
+    transport=stdio            # stdio（本地进程）| sse（旧版 HTTP+SSE）| streamable（Streamable HTTP，推荐远程）
+    command=npx                # stdio：可执行命令（Windows 下 npx 自动解析为 npx.cmd 并以 cmd /c 包装）
     args=@playwright/mcp       # 参数，每行一个
-    env=KEY=VALUE              # 环境变量，每行一个
-    url=                       # sse：服务端点（此时命令/参数区禁用）
-    headers=K:V                # sse：请求头，每行一个
+    env=KEY=VALUE              # 环境变量，每行一个（仅 stdio：传给子进程，如 GITHUB_PERSONAL_ACCESS_TOKEN）
+    url=                       # sse：SSE 端点（如 http://host:port/sse）；streamable：MCP 端点（如 http://host:port/mcp）
+    headers=K:V                # 请求头，每行一个（仅 streamable；旧版 SSE 传输不支持自定义头，需鉴权请用 streamable）
+
+传输方式为单选：选中一种后其余字段隐藏并清空（表单按传输类型裁剪保存）。
+
+实现说明：MCP 客户端基于 aj-mcp-client 1.5 标准实现（JDK8 兼容）：握手、协议版本协商（2024-11-05/2025-03-26/2025-06-18）、stdio/SSE/Streamable 三传输由库完成；tools/list 与 tools/call 取原始 JSON（inputSchema 原样透传，非文本内容不丢）。依赖变化：okhttp 升 4.12（与库对齐，单份 okhttp + kotlin-stdlib），新增 jackson、slf4j-simple（warn 级日志），产物体积约 2.75 MB → 8 MB。
 
 连接时机：启用服务器后首次新建/恢复会话时后台预连接（不阻塞界面），连接完成后该服务器的工具自动补充注册进所有会话（下一轮请求即可被模型调用）；与内置工具重名的自动跳过并在列表标注。
 
