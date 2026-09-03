@@ -56,5 +56,31 @@ public class NewCapabilityToolsTest {
         Path root=temp.newFolder("skills-work").toPath(),skills=temp.newFolder("skills").toPath();SkillAdminTool tool=new SkillAdminTool(skills.toString(),new Workspace(root.toString()));JsonObject create=args("action","create");create.addProperty("name","excel-review");create.addProperty("description","复核表格");create.addProperty("content","先检查列名，再输出结论。");assertTrue(tool.execute(create).ok);JsonObject validate=args("action","validate");validate.addProperty("name","excel-review");assertTrue(tool.execute(validate).output.contains("有效"));
     }
 
+    @Test public void skillAdminCapturesWorkflowWithReusableAssets()throws Exception{
+        Path root=temp.newFolder("capture-work").toPath(),skills=temp.newFolder("capture-skills").toPath();
+        Files.write(root.resolve("analyse.py"),"import pandas as pd\n".getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("query.sql"),"select 1;\n".getBytes(StandardCharsets.UTF_8));
+        SkillAdminTool tool=new SkillAdminTool(skills.toString(),new Workspace(root.toString()));
+        JsonObject capture=args("action","capture");capture.addProperty("name","monthly-analysis");
+        capture.addProperty("description","月度 Excel 数据分析与复核");
+        capture.addProperty("content","## 适用场景\n月度分析\n## 步骤\n运行 assets/analyse.py\n## 校验\n核对合计");
+        capture.addProperty("resourcePaths","analyse.py;query.sql");
+        ToolResult result=tool.execute(capture);
+        assertTrue(result.output,result.ok);assertTrue(result.output.contains("2 个资源文件"));
+        assertTrue(Files.exists(skills.resolve("monthly-analysis/assets/analyse.py")));
+        assertTrue(Files.exists(skills.resolve("monthly-analysis/assets/query.sql")));
+    }
+
+    @Test public void skillAdminImportCopiesWholeSkillDirectory()throws Exception{
+        Path root=temp.newFolder("import-work").toPath(),source=root.resolve("portable-skill"),skills=temp.newFolder("import-skills").toPath();
+        Files.createDirectories(source.resolve("assets"));
+        Files.write(source.resolve("SKILL.md"),"---\nname: portable-skill\ndescription: portable\n---\nsteps".getBytes(StandardCharsets.UTF_8));
+        Files.write(source.resolve("assets/template.csv"),"a,b\n".getBytes(StandardCharsets.UTF_8));
+        SkillAdminTool tool=new SkillAdminTool(skills.toString(),new Workspace(root.toString()));
+        JsonObject in=args("action","import");in.addProperty("path","portable-skill");
+        assertTrue(tool.execute(in).ok);
+        assertTrue(Files.exists(skills.resolve("portable-skill/assets/template.csv")));
+    }
+
     private static JsonObject args(String key,String value){JsonObject o=new JsonObject();o.addProperty(key,value);return o;}
 }
