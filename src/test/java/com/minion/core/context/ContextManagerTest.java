@@ -515,4 +515,44 @@ public class ContextManagerTest {
         assertTrue(cm2.lastCompressAttempted());
         assertSame(big, bigResult); // 失败原样返回
     }
+
+    /** 配置窗口大于服务端真实窗口时，常规判断不会触发；服务端超限恢复仍须压缩单条进行中的工具链。 */
+    @Test
+    public void compressForRecovery_forcesSingleActiveChain() {
+        FakeLlmClient llm = new FakeLlmClient();
+        llm.compressResult = "保留任务目标和当前进度";
+        ContextManager cm = new ContextManager(900000, 0.8, 50, llm, 0);
+        List<Message> msgs = new ArrayList<Message>();
+        msgs.add(Message.user("执行一个复杂任务"));
+        msgs.add(assistantWithTools("Read"));
+        msgs.add(Message.toolResult("c_Read", "Read", "大量工具结果"));
+
+        assertFalse(cm.shouldCompress(msgs));
+        List<Message> result = cm.compressForRecovery(msgs);
+
+        assertNotSame(msgs, result);
+        assertEquals(1, result.size());
+        assertTrue(result.get(0).summary);
+        assertTrue(cm.lastCompressAttempted());
+    }
+
+    /** 摘要请求自身不得原样携带巨型工具输出，否则恢复压缩也会再次撞上窗口上限。 */
+    @Test
+    public void compressForRecovery_truncatesHugeFieldSentToSummarizer() {
+        FakeLlmClient llm = new FakeLlmClient();
+        ContextManager cm = new ContextManager(900000, 0.8, 50, llm, 0);
+        StringBuilder huge = new StringBuilder();
+        for (int i = 0; i < 30000; i++) huge.append('数');
+        List<Message> msgs = new ArrayList<Message>();
+        msgs.add(Message.user("分析数据"));
+        msgs.add(assistantWithTools("Python"));
+        msgs.add(Message.toolResult("c_Python", "Python", huge.toString()));
+
+        cm.compressForRecovery(msgs);
+
+        assertEquals(1, llm.completeChatRequests.size());
+        String sent = llm.completeChatRequests.get(0);
+        assertTrue(sent.contains("压缩时已省略"));
+        assertTrue(sent.length() < 20000);
+    }
 }

@@ -47,6 +47,15 @@ public class LlmExceptionTest {
     }
 
     @Test
+    public void of_413_payloadTooLarge_keepsBodyForContextRecovery() {
+        LlmException e = LlmException.of(413, "maximum context length exceeded");
+        assertEquals(LlmException.Type.BAD_REQUEST, e.type);
+        assertFalse(e.retryable);
+        assertEquals(413, e.httpCode);
+        assertEquals("maximum context length exceeded", e.body);
+    }
+
+    @Test
     public void of_404_other_notRetryable() {
         LlmException e = LlmException.of(404, null);
         assertFalse(e.retryable);

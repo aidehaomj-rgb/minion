@@ -16,10 +16,12 @@ public class ContextManager {
           + "相关文件路径、代码约定、用户偏好、当前进度、失败尝试和明确的下一步。"
           + "不要省略仍待执行的用户要求；只输出结构清晰的摘要正文，不要客套，3000 字以内。";
 
-    private static final int KEEP_MIN = 12;          // 保留区下限（条数）
+    private static final int KEEP_MIN = 12;          // 常规压缩保留区下限（条数）
+    private static final int EMERGENCY_KEEP = 4;     // 服务端已报超限时只保留最近消息
     private static final double KEEP_RATIO = 0.5;    // 保留区占比目标
 
     private static final int SEGMENT_MIN = 30; // 段内消息数下限：以下不再递归
+    private static final int COMPRESS_FIELD_CHARS = 16000; // 单字段送摘要模型的上限，防巨型工具输出拖垮压缩请求
 
     // FX 线程 update/setLlm 写入、会话工作线程 shouldCompress/compress 读取——volatile 防 JMM 数据竞争
     private volatile int maxContextTokens;      // final 移除
@@ -68,14 +70,14 @@ public class ContextManager {
     }
 
     /**
-     * 除用户配置比例外，至少预留 4096 token 或窗口的 8% 给下一次模型输出和工具结果，
+     * 除用户配置比例外，至少预留 8192 token 或窗口的 20% 给下一次模型输出和工具结果，
      * 避免刚低于比例阈值却因一次大工具输出直接撞上服务端上限。
      */
     public int autoCompressAtTokens() {
         int ratioLimit = (int) Math.floor(maxContextTokens * threshold);
         // 极小测试/本地模型窗口不额外扣 4096，否则触发线会失真；常见 32k+ 模型启用余量。
         int reserve = maxContextTokens < 16384 ? 0
-                : Math.max(4096, (int) Math.ceil(maxContextTokens * 0.08));
+                : Math.max(8192, (int) Math.ceil(maxContextTokens * 0.20));
         return Math.max(1, Math.min(ratioLimit, maxContextTokens - reserve));
     }
 
@@ -144,10 +146,26 @@ public class ContextManager {
 
     /** 压缩：链为单位，摘要置前；保留最近 keepRecent 条原文。失败分段递归降级，全部失败原样返回。 */
     public List<Message> compress(List<Message> messages) {
+        return compress(messages, keepRecent, false);
+    }
+
+    /**
+     * 服务端明确返回上下文超限后的强制压缩。它不依赖本地窗口估算（配置值可能大于
+     * 内网模型真实窗口），并允许压缩当前尚未结束的工具链，只保留最近少量原文。
+     */
+    public List<Message> compressForRecovery(List<Message> messages) {
+        return compress(messages, EMERGENCY_KEEP, true);
+    }
+
+    private List<Message> compress(List<Message> messages, int requestedKeep, boolean force) {
         // 超长单链先按消息均分拆成 ≤ SEGMENT_MIN 的子链：否则单链段无法在链边界二分，
         // splitByTokens 会把 mid 钳回 from，产生同参数递归 → 无限递归栈溢出
         List<List<Message>> chains = splitOversizedChains(chunkChains(messages));
-        int take = takeChains(chains, keepRecent, messages);
+        int take = takeChains(chains, requestedKeep, messages);
+        if (force && take == 0 && !chains.isEmpty()) {
+            // 单条未结束链也必须可恢复：将其纳入摘要，而不是因“近期消息需保留”原样返回。
+            take = chains.size();
+        }
         if (take == 0) {
             lastCompressAttempted = false; // 真无可压缩（未达压缩条件）
             return messages; // 全部要保留，无需压缩
@@ -254,8 +272,9 @@ public class ContextManager {
         for (int i = from; i < to; i++) {
             for (Message m : chains.get(i)) {
                 batch.append('[').append(m.role).append(']');
-                if (m.content != null) batch.append(' ').append(m.content);
-                if (m.reasoningContent != null) batch.append(" (思考: ").append(m.reasoningContent).append(')');
+                if (m.content != null) batch.append(' ').append(compactField(m.content));
+                if (m.reasoningContent != null) batch.append(" (思考: ")
+                        .append(compactField(m.reasoningContent)).append(')');
                 if (m.toolCalls != null && !m.toolCalls.isEmpty()) {
                     batch.append(" [工具: ");
                     for (com.minion.core.llm.ToolCall tc : m.toolCalls) {
@@ -267,6 +286,16 @@ public class ContextManager {
             }
         }
         return batch.toString();
+    }
+
+    /** 巨型文件/SQL/命令输出只取首尾，保留错误结尾和关键开头，并明确告知摘要模型发生过截断。 */
+    private static String compactField(String text) {
+        if (text == null || text.length() <= COMPRESS_FIELD_CHARS) return text;
+        int head = COMPRESS_FIELD_CHARS * 2 / 3;
+        int tail = COMPRESS_FIELD_CHARS - head;
+        return text.substring(0, head) + "\n...[中间内容过长，压缩时已省略 "
+                + (text.length() - COMPRESS_FIELD_CHARS) + " 字符]...\n"
+                + text.substring(text.length() - tail);
     }
 
     private int countMessages(List<List<Message>> chains, int from, int to) {

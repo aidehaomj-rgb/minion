@@ -396,6 +396,7 @@ public class AgentLoop {
         pushContextStats(); // 用户消息入历史：进度圈即时刷新
         int rounds = 0;
         int retries = 0;
+        int contextRecoveryAttempts = 0;
         try {
             while (!interrupted) {
                 if (rounds >= roundLimit) {
@@ -485,7 +486,10 @@ public class AgentLoop {
                         appendPartialAssistant(content, thinking);
                         break;
                     }
-                    if (isTransientError(e) && noOutputYet(content, thinking)) {
+                    if (isContextOverflow(e) && noOutputYet(content, thinking)
+                            && recoverFromContextOverflow(contextRecoveryAttempts++)) {
+                        continue;
+                    } else if (isTransientError(e) && noOutputYet(content, thinking)) {
                         // 瞬时错误长重试（内网模型资源差）：固定 5s/次，墙钟总时长 20 分钟（RetryPolicy.transientErrors）；
                         // 覆盖 429/500/502 + 网络超时 + 可恢复网络错误；进度经 onRetryProgress 进左下角指示器，
                         // 成功/首个流式增量静默恢复，超时一次性总结停止。
@@ -545,6 +549,11 @@ public class AgentLoop {
 
                 if (usage[0] != null) session.usage.record(usage[0]);
                 if ("error".equals(finish[0])) {
+                    if (err[0] != null && isContextOverflow(err[0])
+                            && noOutputYet(content, thinking)
+                            && recoverFromContextOverflow(contextRecoveryAttempts++)) {
+                        continue;
+                    }
                     if (noOutputYet(content, thinking) && degradeImagesOnFailure()) continue; // 同上：onError 回调路径（如 API 400）——闸门在前，degrade 有清图+警告副作用
                     ui.onError(err[0] == null ? "请求失败" : err[0].getMessage());
                     break;
@@ -659,6 +668,41 @@ public class AgentLoop {
                 || e.type == LlmException.Type.TIMEOUT
                 || (e.type == LlmException.Type.NETWORK && e.retryable)
                 || e.httpCode == 500 || e.httpCode == 502;
+    }
+
+    /** OpenAI 兼容服务对上下文超限没有统一 code，只能兼容常见中英文错误正文。 */
+    private boolean isContextOverflow(LlmException e) {
+        if (e == null || (e.httpCode != 400 && e.httpCode != 413)) return false;
+        String text = ((e.getMessage() == null ? "" : e.getMessage()) + " "
+                + (e.body == null ? "" : e.body)).toLowerCase(java.util.Locale.ROOT);
+        return text.contains("context length") || text.contains("context window")
+                || text.contains("maximum context") || text.contains("max context")
+                || text.contains("too many tokens") || text.contains("token limit")
+                || text.contains("上下文") && (text.contains("超") || text.contains("长度"));
+    }
+
+    /** 超限后压缩并让 while 循环重建请求；最多两次，避免错误配置导致无限循环。 */
+    private boolean recoverFromContextOverflow(int attempt) {
+        if (contextManager == null || attempt >= 2) return false;
+        int before = contextManager.estimate(session.messages);
+        ui.onCompressingChanged(true);
+        try {
+            ui.onWarning("模型返回上下文超限，正在强制压缩并自动继续任务（第 "
+                    + (attempt + 1) + " 次）");
+            List<Message> old = session.messages;
+            session.messages = contextManager.compressForRecovery(session.messages);
+            int after = contextManager.estimate(session.messages);
+            if (session.messages == old || after >= before) {
+                ui.onWarning("强制压缩没有释放足够上下文，无法自动恢复");
+                return false;
+            }
+            ui.onWarning("强制压缩完成（" + before + " → " + after + " token），正在继续执行");
+            pushContextStats();
+            persistSession();
+            return true;
+        } finally {
+            ui.onCompressingChanged(false);
+        }
     }
 
     /** 零增量闸门：本次请求是否还没吐出任何可见内容。tool_calls 不参与判定——

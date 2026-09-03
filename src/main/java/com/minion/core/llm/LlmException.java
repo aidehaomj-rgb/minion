@@ -30,11 +30,11 @@ public class LlmException extends Exception {
         if (httpCode == 429) {
             return new LlmException(Type.RATE_LIMIT, "请求过于频繁(" + httpCode + ")，限流中，请稍后重试", true, httpCode, body);
         }
-        if (httpCode == 400) {
+        if (httpCode == 400 || httpCode == 413) {
             // 带 body：400 根因（如上下文超限、tool_call 配对）只在响应体里，
             // 曾只给通用文案导致无法诊断
             String detail = truncate(body);
-            String msg = "请求被拒绝(400)";
+            String msg = "请求被拒绝(" + httpCode + ")";
             if (!detail.isEmpty()) msg += "：\n" + detail;
             return new LlmException(Type.BAD_REQUEST, msg, false, httpCode, body);
         }
