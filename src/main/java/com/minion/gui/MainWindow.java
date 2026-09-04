@@ -206,6 +206,8 @@ public class MainWindow {
         StackPane.setMargin(jumpLatestButton, new Insets(0, 18, 14, 0));
         jumpLatestButton.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
         workspaceSplit = new SplitPane();
+        workspaceSplit.getStyleClass().add("workspace-split");
+        workspaceSplit.setFocusTraversable(false); // 禁止 JavaFX 8 默认焦点环给整个对话区描亮边
         workspaceSplit.getItems().add(chatHost);
         artifactPreview = new ArtifactPreviewPane(this::closeArtifactPreview);
         VBox.setVgrow(workspaceSplit, Priority.ALWAYS);

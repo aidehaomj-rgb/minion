@@ -8,6 +8,22 @@
 /* 面板（左侧侧栏 rgb(25,26,27)、右侧正文 rgb(18,19,20)） */
 .panel { -fx-background-color: #191a1b; -fx-border-color: #232733; -fx-border-width: 0 1 0 0; }
 .panel-dark { -fx-background-color: #121314; }
+/* 对话/报告工作区：覆盖 JavaFX 8 SplitPane 的 Modena 浅色边框与 1px 内衬。
+   报告未打开时应与正文背景完全融为一体；打开后只显示低对比度分隔线。 */
+.workspace-split,
+.workspace-split:focused {
+    -fx-background-color: #121314;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
+    -fx-padding: 0;
+}
+.workspace-split > .split-pane-divider {
+    -fx-background-color: #232733;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+    -fx-padding: 0 1 0 0;
+}
 .card {
     -fx-background-color: #1a1d24;
     -fx-background-radius: 8;
