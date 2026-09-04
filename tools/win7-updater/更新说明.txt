@@ -1,34 +1,31 @@
-Minion custom.4 增量更新
-========================
+Minion 2026-09-04 项目能力增量更新
+=================================
 
-发布日期：2026-08-31
 兼容环境：Windows 7、JDK 8、Python 3.7.6/Anaconda3、Qwen3 27B
-代码提交：39c6e4e
-已合并 GitHub upstream/main：58b7951
+基线：已安装 minion-win7-skill-update-fixed-20260904
+代码提交：56301ae
+已合并 GitHub upstream/main：38c1460
 
-本包包含 custom.3 之后至 2026-08-31 的全部本地开发和上游更新。
+本包仅包含上述基线之后的应用更新，不重复携带 JDK、Python、PDF wheels 或其他依赖。
 
 主要更新：
 
-1. 合并上游工作空间、项目级技能、AskUserQuestion 容错、子 Agent 模型热切换等更新。
-2. Anaconda SQLite：Python 子进程自动补齐 Conda 根目录、DLLs、Library\bin、Scripts，诊断改为真正导入 sqlite3。
-3. PDF：保留内置 Java PDFBox；附带 Python 3.7.6 可离线安装的 PyPDF2、pdfminer.six 及固定依赖 wheel。
-4. 对话滚动：增加“最新对话”按钮，一键回到底部并恢复流式跟随。
-5. 上下文：模型调用前主动自动压缩，保留任务状态并显示压缩前后 token，失败时防重复压缩。
-6. 运行中引导：执行期间输入补充指令先进入“待引导区”，点击“立即引导”后才注入；新会话可直接输入。
-7. 运行提示：“正在加载中/可随时补充信息”移动到输入框左侧，不再遮挡思考和回复。
-8. 会话状态点：黄色呼吸表示执行中，绿色常亮表示执行完成未查看，点击查看后消失。
+1. 网页/App：新增 PWA 离线 App、Flask 内网数据看板等项目模板。
+2. 数据分析：Excel 批量概览与分组汇总；文本清洗、去重、正则提取、替换、分块、合并和比较。
+3. 浏览器：页面结构快照、批量表单填写、分页抓取及结果保存。
+4. 任务报告：复杂任务结束后自动生成 Markdown 执行报告。
+5. 右侧工作区：报告自动在对话右侧打开，支持刷新、关闭和“报告”按钮再次打开。
+6. Skill 补全：输入 /skill 后显示技能候选，可按名称或中文描述过滤，方向键选择，Tab/Enter 或鼠标确认。
+7. 新建项目：新增项目向导；可选择空白、数据分析、网页、数据看板、PWA、SQLite、EXE、Java 8 模板。
+8. 项目初始化：自动创建项目目录、project.md、skills 目录，加入工作空间并打开首个会话。
+9. 合并 GitHub 更新：补全弹层常驻与低端机器防闪烁修复。
 
-更新安全：
+安装方法：
 
-- 更新前校验 SHA-256。
-- 自动备份旧 JAR，替换失败自动恢复。
-- 可双击 Rollback-Minion.cmd 一键回退。
-- 不覆盖 model.json、workspace.json、config.properties、mcp.json、session、skills、知识库、Python 或 JDK。
+1. 解压更新包。
+2. 完全关闭 Minion；更新器也会尝试自动关闭残留的 java/javaw 进程。
+3. 双击 Update-Minion.cmd。
+4. 若未自动识别，请输入现有 Minion 安装目录。
 
-Python PDF 模块：
-
-- Agent 的普通 PDF 文本解析不依赖 Python，更新 JAR 后即可使用。
-- Python 数据分析代码若需要 PyPDF2/pdfminer，请运行“安装Python-PDF模块.cmd”，路径可作为第一个参数传入。
-
-验证：JDK 8 完整测试 798 项通过，0 失败；JAR 打包成功。
+更新器会校验 SHA-256、备份旧 JAR，并在替换失败时自动恢复。
+不会覆盖 model.json、workspace.json、config.properties、mcp.json、session、skills、知识库、Python 或 JDK。
