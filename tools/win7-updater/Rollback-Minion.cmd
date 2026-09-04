@@ -21,9 +21,12 @@ goto :check_target
 :target_ok
 for %%I in ("%TARGET_DIR%") do set "TARGET_DIR=%%~fI"
 echo Installation: %TARGET_DIR%
-echo Close Minion before continuing.
+echo Minion will be closed automatically before files are restored.
 choice /C YN /N /M "Restore previous JAR? [Y/N]: "
 if errorlevel 2 goto :cancelled
+call :stop_minion
+if exist "%TARGET_DIR%\minion-0.1.0.jar.rollback" del /Q "%TARGET_DIR%\minion-0.1.0.jar.rollback" >nul 2>nul
+if exist "%TARGET_DIR%\minion-0.1.0.jar.rollback" goto :failed
 copy /Y "%TARGET_DIR%\backup\minion-0.1.0.jar.bak" "%TARGET_DIR%\minion-0.1.0.jar.rollback" >nul
 if errorlevel 1 goto :failed
 move /Y "%TARGET_DIR%\minion-0.1.0.jar.rollback" "%TARGET_DIR%\minion-0.1.0.jar" >nul
@@ -40,3 +43,12 @@ exit /b 1
 echo Rollback cancelled.
 pause
 exit /b 2
+:stop_minion
+echo Closing running Minion process...
+where wmic >nul 2>nul
+if errorlevel 1 goto :stop_wait
+wmic process where "name='java.exe' and commandline like '%%minion-0.1.0.jar%%'" call terminate >nul 2>nul
+wmic process where "name='javaw.exe' and commandline like '%%minion-0.1.0.jar%%'" call terminate >nul 2>nul
+:stop_wait
+ping 127.0.0.1 -n 3 >nul
+exit /b 0

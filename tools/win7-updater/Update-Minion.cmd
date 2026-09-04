@@ -43,7 +43,7 @@ for %%I in ("%TARGET_DIR%") do set "TARGET_DIR=%%~fI"
 echo Installation: %TARGET_DIR%
 echo Payload:      %PAYLOAD%
 echo.
-echo Close Minion before continuing.
+echo Minion will be closed automatically before files are replaced.
 choice /C YN /N /M "Start update? [Y/N]: "
 if errorlevel 2 goto :cancelled
 
@@ -55,6 +55,12 @@ set "ACTUAL="
 for /f "skip=1 tokens=*" %%H in ('certutil -hashfile "%PAYLOAD%" SHA256 2^>nul') do if not defined ACTUAL set "ACTUAL=%%H"
 set "ACTUAL=%ACTUAL: =%"
 if /I not "%ACTUAL%"=="%EXPECTED%" goto :bad_hash
+
+call :stop_minion
+
+rem A failed previous run may have left a temporary file behind.
+if exist "%TARGET_DIR%\minion-0.1.0.jar.new" del /Q "%TARGET_DIR%\minion-0.1.0.jar.new" >nul 2>nul
+if exist "%TARGET_DIR%\minion-0.1.0.jar.new" goto :file_locked
 
 if not exist "%TARGET_DIR%\backup" mkdir "%TARGET_DIR%\backup"
 copy /Y "%TARGET_DIR%\minion-0.1.0.jar" "%TARGET_DIR%\backup\minion-0.1.0.jar.bak" >nul
@@ -81,10 +87,19 @@ exit /b 0
 
 :replace_failed
 if exist "%TARGET_DIR%\minion-0.1.0.jar.new" del /Q "%TARGET_DIR%\minion-0.1.0.jar.new" >nul 2>nul
-if exist "%TARGET_DIR%\backup\minion-0.1.0.jar.bak" copy /Y "%TARGET_DIR%\backup\minion-0.1.0.jar.bak" "%TARGET_DIR%\minion-0.1.0.jar" >nul
+set "RESTORED=0"
+if exist "%TARGET_DIR%\backup\minion-0.1.0.jar.bak" copy /Y "%TARGET_DIR%\backup\minion-0.1.0.jar.bak" "%TARGET_DIR%\minion-0.1.0.jar" >nul 2>nul && set "RESTORED=1"
 echo.
-echo ERROR: Replacement failed. The previous JAR was restored.
-echo Make sure Minion is completely closed, then try again.
+if "%RESTORED%"=="1" echo ERROR: Replacement failed. The previous JAR was restored.
+if not "%RESTORED%"=="1" echo ERROR: Replacement failed and automatic restore also failed.
+echo Close VS Code and any remaining Minion process, then run this updater as administrator.
+pause
+exit /b 1
+
+:file_locked
+echo.
+echo ERROR: A Minion update file is still locked or cannot be deleted.
+echo Close VS Code and Minion, then run this updater as administrator.
 pause
 exit /b 1
 
@@ -110,3 +125,14 @@ echo.
 echo Update cancelled. Nothing was changed.
 pause
 exit /b 2
+
+:stop_minion
+echo Closing running Minion process...
+where wmic >nul 2>nul
+if errorlevel 1 goto :stop_wait
+wmic process where "name='java.exe' and commandline like '%%minion-0.1.0.jar%%'" call terminate >nul 2>nul
+wmic process where "name='javaw.exe' and commandline like '%%minion-0.1.0.jar%%'" call terminate >nul 2>nul
+:stop_wait
+rem Win7 has ping even when timeout.exe is unavailable. This waits about two seconds for file handles to close.
+ping 127.0.0.1 -n 3 >nul
+exit /b 0
