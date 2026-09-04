@@ -1,31 +1,16 @@
-Minion 2026-09-04 项目能力增量更新
-=================================
+Minion 对话区白边修复更新
+=========================
 
-兼容环境：Windows 7、JDK 8、Python 3.7.6/Anaconda3、Qwen3 27B
-基线：已安装 minion-win7-skill-update-fixed-20260904
-代码提交：56301ae
-已合并 GitHub upstream/main：38c1460
+发布日期：2026-09-04
+基线：已安装 minion-win7-project-tools-update-20260904
+代码提交：3a3d47c
 
-本包仅包含上述基线之后的应用更新，不重复携带 JDK、Python、PDF wheels 或其他依赖。
+修复内容：
 
-主要更新：
+1. 移除右侧工作区 SplitPane 默认的浅色外围边框。
+2. 移除 JavaFX 8 默认背景内衬和焦点环。
+3. 对话区恢复与页面一致的深色背景。
+4. 任务报告打开时只保留低对比度深灰分隔线。
 
-1. 网页/App：新增 PWA 离线 App、Flask 内网数据看板等项目模板。
-2. 数据分析：Excel 批量概览与分组汇总；文本清洗、去重、正则提取、替换、分块、合并和比较。
-3. 浏览器：页面结构快照、批量表单填写、分页抓取及结果保存。
-4. 任务报告：复杂任务结束后自动生成 Markdown 执行报告。
-5. 右侧工作区：报告自动在对话右侧打开，支持刷新、关闭和“报告”按钮再次打开。
-6. Skill 补全：输入 /skill 后显示技能候选，可按名称或中文描述过滤，方向键选择，Tab/Enter 或鼠标确认。
-7. 新建项目：新增项目向导；可选择空白、数据分析、网页、数据看板、PWA、SQLite、EXE、Java 8 模板。
-8. 项目初始化：自动创建项目目录、project.md、skills 目录，加入工作空间并打开首个会话。
-9. 合并 GitHub 更新：补全弹层常驻与低端机器防闪烁修复。
-
-安装方法：
-
-1. 解压更新包。
-2. 完全关闭 Minion；更新器也会尝试自动关闭残留的 java/javaw 进程。
-3. 双击 Update-Minion.cmd。
-4. 若未自动识别，请输入现有 Minion 安装目录。
-
-更新器会校验 SHA-256、备份旧 JAR，并在替换失败时自动恢复。
-不会覆盖 model.json、workspace.json、config.properties、mcp.json、session、skills、知识库、Python 或 JDK。
+安装方法：完全关闭 Minion，解压本包并双击 Update-Minion.cmd。
+本包只替换应用 JAR，不修改模型、工作空间、会话、技能、Python、JDK 或其他依赖。
