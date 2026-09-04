@@ -43,6 +43,12 @@ public class NewCapabilityToolsTest {
         BuildTool build=new BuildTool(ws,new PythonRuntime(""));JsonObject detect=args("action","detect");detect.addProperty("path","demo");assertTrue(build.execute(detect).output.contains("web"));
     }
 
+    @Test public void projectCreatesPwaAndOfflineDashboardTemplates()throws Exception{
+        Path root=temp.newFolder("app-templates").toPath();ProjectTool project=new ProjectTool(new Workspace(root.toString()));
+        JsonObject pwa=args("action","create");pwa.addProperty("template","pwa");pwa.addProperty("path","mobile");assertTrue(project.execute(pwa).ok);assertTrue(Files.exists(root.resolve("mobile/manifest.json")));assertTrue(Files.exists(root.resolve("mobile/sw.js")));
+        JsonObject dashboard=args("action","create");dashboard.addProperty("template","flask-dashboard");dashboard.addProperty("path","dashboard");assertTrue(project.execute(dashboard).ok);assertTrue(Files.exists(root.resolve("dashboard/app.py")));assertTrue(Files.exists(root.resolve("dashboard/static/app.js")));
+    }
+
     @Test public void fileSummaryCreatesCache()throws Exception{
         Path root=temp.newFolder("files").toPath();Files.write(root.resolve("big.txt"),"开头\n内容\n结尾".getBytes(StandardCharsets.UTF_8));FilesTool tool=new FilesTool(new Workspace(root.toString()));JsonObject summary=args("action","summary");summary.addProperty("path","big.txt");assertTrue(tool.execute(summary).output.contains("摘要已缓存"));assertTrue(tool.execute(summary).output.contains("缓存命中"));
     }

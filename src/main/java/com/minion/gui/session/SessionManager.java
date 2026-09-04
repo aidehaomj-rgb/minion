@@ -51,6 +51,7 @@ import com.minion.core.tools.checkpoint.CheckpointTool;
 import com.minion.core.tools.data.ExcelTool;
 import com.minion.core.tools.data.DatabaseTool;
 import com.minion.core.tools.data.DocumentTool;
+import com.minion.core.tools.data.TextProcessTool;
 import com.minion.core.tools.data.SqliteTool;
 import com.minion.core.tools.dev.BuildTool;
 import com.minion.core.tools.dev.FilesTool;
@@ -365,6 +366,7 @@ public class SessionManager {
         registry.register(new SqliteTool(workspace, python));
         registry.register(new DatabaseTool(workspace, python, checkpoints, secretStore));
         registry.register(new DocumentTool(workspace, python, checkpoints));
+        registry.register(new TextProcessTool(workspace, checkpoints));
         registry.register(new KnowledgeTool(workspace));
         registry.register(new MemoryTool(workspace, checkpoints));
         registry.register(new ContextTool(session, models.current().maxContextTokens, config));

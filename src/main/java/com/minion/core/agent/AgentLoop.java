@@ -388,6 +388,9 @@ public class AgentLoop {
         interrupted = false;
         lastIneffectiveAutoCompressTokens = -1;
         long start = System.currentTimeMillis(); // 统计行：轮次耗时
+        int reportFromIndex = session.messages.size();
+        List<String> reportTools = new ArrayList<String>();
+        boolean taskCompleted = false;
         // 上次回合遗留的挂起补充先入历史（模型提问自然收尾/中断遗留），与本次输入拼接发送
         drainSupplements();
         drainPendingSkillLoads();
@@ -575,6 +578,7 @@ public class AgentLoop {
 
                 if (toolCalls[0] == null || toolCalls[0].isEmpty()
                         || !"tool_calls".equals(finish[0])) {
+                    taskCompleted = content.length() > 0;
                     break;
                 }
                 rounds++;
@@ -608,6 +612,7 @@ public class AgentLoop {
                         session.messages.add(Message.toolResult(
                                 calls.get(i).id, calls.get(i).name,
                                 ToolResult.outputForApi(result.output, emptyOutputPlaceholder)));
+                        reportTools.add(calls.get(i).name + " — " + (result.ok ? "成功" : "失败"));
                         ui.onToolResult(calls.get(i).name, result);
                     }
                 } finally {
@@ -650,6 +655,15 @@ public class AgentLoop {
         }
         // 所有退出路径的兜底落盘：正常结束 / 轮数上限 / 错误 / 中断 / 异常
         persistSession();
+        if (!reportTools.isEmpty()) {
+            try {
+                java.nio.file.Path report=TaskReportWriter.write(workspace,session,reportFromIndex,
+                        reportTools,taskCompleted,System.currentTimeMillis()-start);
+                ui.onWarning("本轮执行记录已保存: "+report);
+            } catch (Exception e) {
+                ui.onWarning("生成任务执行记录失败: "+e.getMessage());
+            }
+        }
         // 每轮结束统计行（置于 scrubHalfTurn/persistSession 之后：中断路径的 ctx 估算是清洗半轮后的准确值）
         long elapsed = System.currentTimeMillis() - start;
         int currentCtx = contextManager != null

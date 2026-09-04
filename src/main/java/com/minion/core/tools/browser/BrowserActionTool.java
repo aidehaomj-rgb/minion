@@ -9,6 +9,7 @@ import com.minion.core.tools.ToolResult;
 import com.minion.core.tools.Workspace;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -24,7 +25,7 @@ public class BrowserActionTool implements Tool {
     @Override public String name(){return "BrowserAction";}
     @Override public String description(){return "语义化网页操作：元素交互、等待/网络空闲、上传/下载、多页抓取、标签页管理与人工接管；selector 使用 CSS";}
     @Override public JsonObject schema(){return SchemaGenerator.objectSchema("网页元素操作",
-            new String[]{"action","selector","value","path","targetId","timeoutMs","pages"},new String[]{"action"});}
+            new String[]{"action","selector","nextSelector","value","path","outputPath","targetId","timeoutMs","pages"},new String[]{"action"});}
     @Override public ToolResult execute(JsonObject args){
         String action=text(args,"action").toLowerCase(Locale.ROOT),selector=text(args,"selector"),value=text(args,"value");
         try{
@@ -36,7 +37,9 @@ public class BrowserActionTool implements Tool {
             if("manual_takeover".equals(action))return ToolResult.success("已暂停自动操作。请在 Chrome 中手工完成验证码、登录或敏感确认，完成后再让 Agent 执行 status/继续。");
             if("download_setup".equals(action))return configureDownloads(text(args,"path"));
             if("upload".equals(action))return upload(selector,text(args,"path"));
-            if("paginate".equals(action))return paginate(selector,integer(args,"pages",5),integer(args,"timeoutMs",1000));
+            if("paginate".equals(action))return paginate(args);
+            if("snapshot".equals(action))return ok(session.evaluate("JSON.stringify({title:document.title,url:location.href,headings:[...document.querySelectorAll('h1,h2,h3')].slice(0,100).map(e=>(e.innerText||'').trim()),forms:[...document.forms].map(f=>[...f.elements].slice(0,100).map(e=>({tag:e.tagName,type:e.type||'',name:e.name||'',id:e.id||'',label:e.getAttribute('aria-label')||'',value:e.value||''}))),buttons:[...document.querySelectorAll('button,input[type=submit]')].slice(0,100).map(e=>({text:(e.innerText||e.value||'').trim(),id:e.id||'',name:e.name||''}))})"));
+            if("form".equals(action))return fillForm(value);
             if("links".equals(action))return ok(session.evaluate("JSON.stringify([...document.querySelectorAll('a[href]')].slice(0,200).map(a=>({text:(a.innerText||a.textContent||'').trim(),href:a.href})))"));
             if("scroll".equals(action)){String amount=value.isEmpty()?"window.innerHeight":value;return ok(session.evaluate("window.scrollBy(0,"+numeric(amount)+"); '已滚动'"));}
             if(selector.isEmpty())return ToolResult.error(action+" 需要 selector 参数");
@@ -51,7 +54,7 @@ public class BrowserActionTool implements Tool {
             if("text".equals(action))return ok(session.evaluate("(()=>{let e="+q+";if(!e)throw Error('未找到元素');return e.innerText||e.textContent||''})()"));
             if("table".equals(action))return ok(session.evaluate("(()=>{let e="+q+";if(!e)throw Error('未找到表格');return JSON.stringify([...e.querySelectorAll('tr')].map(r=>[...r.querySelectorAll('th,td')].map(c=>(c.innerText||'').trim())))})()"));
             if("wait".equals(action)||"wait_selector".equals(action))return waitFor(selector,integer(args,"timeoutMs",10000));
-            return ToolResult.error("未知 action: "+action+"（支持 click/type/select/text/table/links/scroll/wait_selector/network_idle/upload/download_setup/paginate/tabs/new_tab/switch_tab/close_tab/manual_takeover）");
+            return ToolResult.error("未知 action: "+action+"（支持 click/type/select/text/table/links/snapshot/form/scroll/wait_selector/network_idle/upload/download_setup/paginate/tabs/new_tab/switch_tab/close_tab/manual_takeover）");
         }catch(IOException e){return ToolResult.error(e.getMessage());}
     }
     private ToolResult configureDownloads(String raw)throws IOException{
@@ -62,10 +65,15 @@ public class BrowserActionTool implements Tool {
         for(String item:raw.split("[,\\n]")){if(item.trim().isEmpty())continue;Path p=workspace.cwd().resolve(item.trim()).normalize().toAbsolutePath();ToolResult g=PathsGuard.errorIfOutside(workspace.workDir(),p);if(g!=null)return g;if(!Files.isRegularFile(p))return ToolResult.error("上传文件不存在: "+p);files.add(p.toString());}
         return files.isEmpty()?ToolResult.error("没有可上传文件"):ok(session.upload(selector,files));
     }
-    private ToolResult paginate(String selector,int pages,int delay)throws IOException{
-        pages=Math.max(1,Math.min(pages,50));delay=Math.max(100,Math.min(delay,5000));StringBuilder out=new StringBuilder();
-        for(int i=0;i<pages;i++){String script=selector.trim().isEmpty()?"document.body.innerText":"(()=>{let e=document.querySelector("+js(selector)+");return e?(e.innerText||e.textContent||''):''})()";out.append("--- 第 ").append(i+1).append(" 页 ---\n").append(session.evaluate(script)).append('\n');session.evaluate("window.scrollBy(0,window.innerHeight); 'ok'");try{Thread.sleep(delay);}catch(InterruptedException e){Thread.currentThread().interrupt();break;}}
-        return ToolResult.success(out.length()>60000?out.substring(0,60000)+"\n[输出已截断]":out.toString());
+    private ToolResult fillForm(String value)throws IOException{
+        JsonObject fields;try{fields=new Gson().fromJson(value,JsonObject.class);}catch(Exception e){return ToolResult.error("form 的 value 必须是 JSON 对象：CSS选择器到填写值的映射");}
+        if(fields==null||fields.size()==0)return ToolResult.error("form 的 value 不能为空");
+        return ok(session.evaluate("(()=>{let fields="+fields.toString()+",done=[];Object.keys(fields).forEach(s=>{let e=document.querySelector(s);if(!e)throw Error('未找到元素: '+s);let v=fields[s];if(e.type==='checkbox'||e.type==='radio'){e.checked=!!v;e.dispatchEvent(new Event('change',{bubbles:true}))}else{e.focus();__minion_set_value(e,String(v))}done.push(s)});return '已填写 '+done.length+' 个字段'})()"));
+    }
+    private ToolResult paginate(JsonObject args)throws IOException{
+        String selector=text(args,"selector"),next=text(args,"nextSelector"),outputPath=text(args,"outputPath");int pages=Math.max(1,Math.min(integer(args,"pages",5),100)),delay=Math.max(100,Math.min(integer(args,"timeoutMs",1000),10000));StringBuilder out=new StringBuilder();
+        for(int i=0;i<pages;i++){String script=selector.trim().isEmpty()?"document.body.innerText":"(()=>{let e=document.querySelector("+js(selector)+");return e?(e.innerText||e.textContent||''):''})()";out.append("--- 第 ").append(i+1).append(" 页 ---\n").append(session.evaluate(script)).append('\n');if(i+1>=pages)break;if(next.trim().isEmpty()){session.evaluate("window.scrollBy(0,window.innerHeight); 'ok'");}else{String clicked=session.evaluate("(()=>{let e=document.querySelector("+js(next)+");if(!e||e.disabled||e.getAttribute('aria-disabled')==='true')return 'STOP';e.click();return 'NEXT'})()");if(!"NEXT".equals(clicked))break;session.waitForPage(Math.max(3000,delay*3));}try{Thread.sleep(delay);}catch(InterruptedException e){Thread.currentThread().interrupt();break;}}
+        String full=out.toString();if(!outputPath.trim().isEmpty()){if(workspace==null)return ToolResult.error("分页结果落盘未配置工作区");Path p=workspace.cwd().resolve(outputPath).normalize().toAbsolutePath();ToolResult g=PathsGuard.errorIfOutside(workspace.workDir(),p);if(g!=null)return g;if(p.getParent()!=null)Files.createDirectories(p.getParent());Files.write(p,full.getBytes(StandardCharsets.UTF_8));return ToolResult.success("分页抓取结果已保存: "+p+"\n字符数: "+full.length());}return ToolResult.success(full.length()>60000?full.substring(0,60000)+"\n[输出已截断；可用 outputPath 保存完整结果]":full);
     }
     private ToolResult waitFor(String selector,int timeout)throws IOException{
         long end=System.currentTimeMillis()+Math.max(100,Math.min(timeout,60000));
