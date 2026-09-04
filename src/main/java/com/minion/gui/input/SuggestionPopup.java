@@ -31,8 +31,10 @@ public class SuggestionPopup {
      *  按下即触发窗口滑动。行高变化不改变内容行数——弹窗高度随行高伸缩 */
     private static final int VISIBLE_ITEMS = 6;
 
-    /** 弹层：重建时换新实例（强制新 scene+skin；hide+show 复用旧 scene，
-     *  行高变化时残留旧 cell 高度会错乱——见 rebuild()） */
+    /** 弹层窗口：实例常驻，从不 hide/show 重建——rebuild 只替换窗口内内容节点
+     *  （Popup.getContent() 即 scene 根 children 动态视图），原生窗口全程存在，
+     *  无 hide→show 的关闭/重建间隙（低端机上该间隙即弹层"先消失再重现"的闪烁源）。
+     *  窗口尺寸自动跟随内容（实测：root pref 高变化后 popup 高度同步伸缩） */
     private Popup popup = new Popup();
     private ListView<Suggestion> list = createList();
     private Consumer<String> onConfirm;
@@ -149,34 +151,46 @@ public class SuggestionPopup {
         lastAnchor = anchor;
         lastX = b.getMinX();
         lastY = y;
-        rebuild(); // 重建为新 ListView 实例
+        // 宽/高先设在旧 list 上：rebuild 继承后新内容一次到位，窗口尺寸随内容同步
+        // （直接以校准/估算高度起步，与校准结果一致时 calibrate 跳过，不重建）
         list.setPrefWidth(w);
         list.setMinWidth(w);
-        list.setPrefHeight(h); // 直接以校准/估算高度起步（与校准结果一致时 calibrate 跳过，不重建）
+        list.setPrefHeight(h);
+        rebuild(); // 换新 ListView 实例并替换窗口内容
         calibrate(); // 首帧后按实际行高取整，避免末行只显示一半
     }
 
-    /** 重建弹层窗口：换新 Popup + 新 ListView 实例，强制重建 scene 与 skin/VirtualFlow。
-     *  popup.show 的 hide+show 复用旧 scene 与旧 Control——实测行高变化时残留
-     *  旧 cell 高度，出现行高混合、行距错位、内容裁剪；新实例保证与首开完全一致。
-     *  新 ListView 沿用当前 items 与选中项（调用方在 rebuild 前/后设置的选中均生效）。 */
+    /** 重建弹层内容：换新 ListView 实例（JDK8 中 Control 的 skin/VirtualFlow 随实例
+     *  存在——复用 cell 会残留旧高度，出现混合行高/行距错位/内容裁剪，新实例保证
+     *  VirtualFlow 从零布局）。items 与选中项沿用旧 list 上调用方设置的状态。
+     *  复用同一 Popup 窗口：仅替换场景内容节点（getContent() 即 scene 根 children
+     *  动态视图，实测替换即时生效），原生窗口从不 hide/show——彻底消除窗口重建间隙
+     *  导致的弹层"先消失再重现"闪烁（选中项在窗口边缘按键触发滑动时尤为明显）。
+     *  窗口尺寸自动跟随新内容（root pref 高变化后 popup 同步伸缩，实测）；调用方
+     *  高度/锚点变化时先更新 lastX/lastY，此处重定位保持锚点。首开（未显示）时
+     *  预置内容后 show（show 内部按 lastX/lastY 定位并算窗口尺寸） */
     private void rebuild() {
         List<Suggestion> items = new ArrayList<Suggestion>(list.getItems());
         int sel = Math.max(0, list.getSelectionModel().getSelectedIndex());
         // 继承旧 list 的宽度/高度：校准后的 prefHeight 若被 createList 默认值覆盖，
         // 重建后弹层高度回落（行高不变但窗口缩小，末行被裁剪）
         double pw = list.getPrefWidth(), mw = list.getMinWidth(), ph = list.getPrefHeight();
-        if (popup.isShowing()) popup.hide();
-        popup = new Popup();
+        boolean wasShowing = popup.isShowing();
         list = createList();
         list.setPrefWidth(pw);
         list.setMinWidth(mw);
         list.setPrefHeight(ph);
         list.getItems().setAll(items);
         list.getSelectionModel().select(sel);
-        popup.getContent().add(list);
-        popup.setAutoHide(false);
-        popup.show(lastOwner, lastX, lastY);
+        // 替换窗口内容：旧 ListView 移出场景销毁（其 skin/VirtualFlow/cell 池随之释放）
+        popup.getContent().setAll(Collections.singletonList(list));
+        if (wasShowing) {
+            // 复用窗口：尺寸已自动跟随新内容，重定位保持锚点（同 hide+show 重建的落位）
+            popup.setX(lastX);
+            popup.setY(lastY);
+        } else {
+            popup.show(lastOwner, lastX, lastY);
+        }
     }
 
     /** 首帧后校准弹层高度：按实际渲染行高取整到整行（末行不再只显示一半）。
@@ -202,6 +216,7 @@ public class SuggestionPopup {
                 }
                 // 收缩窗口到内容行 + 1 项：初始窗口按 MAX_VISIBLE 估算（最多 8 项）超出
                 // 视口行数，底部多出半截项并触发垂直滚动条；首帧实测行高后收缩
+                int countBefore = list.getItems().size(); // 收缩前后数量变化 = 需要重建
                 list.getItems().setAll(window());
                 list.getSelectionModel().select(0);
                 // 弹窗高度 = 内容行 + 1 行余量：第 7 行显示窗口下一项作预览（光标不可达），
@@ -213,6 +228,7 @@ public class SuggestionPopup {
                 double h = (visibleRows() + 1) * rowH + 3;
                 // 非整高才减半像素：防窗口向上取整后多出残行（整高如 280.0 保持精确，不裁剪末行）
                 if (Math.abs(h - Math.rint(h)) > 0.05) h -= 0.5;
+                boolean resized = false;
                 if (Math.abs(h - list.getPrefHeight()) >= 0.6) {
                     list.setPrefHeight(h);
                     calibratedH = h;
@@ -220,10 +236,14 @@ public class SuggestionPopup {
                     double y = b.getMinY() - h; // 上方优先
                     if (y < 0) y = b.getMaxY(); // 屏幕顶部空间不足时放下方
                     lastY = y;
+                    resized = true;
                 }
-                // 收缩后强制重建：换新 ListView 清除 items 收缩（8→6）残留的旧 cell——
-                // VirtualFlow 复用 cell 池不移除多余 cell，行高变化时出现混合高度/行距错位
-                rebuild();
+                // 仅在确有变化时重建：items 收缩（8→7）后须换新 ListView 清除残留旧
+                // cell（VirtualFlow 复用 cell 池不移除多余 cell，行高变化时出现混合
+                // 高度/行距错位），或高度调整需重定位。内容与高度都未变的再次校准
+                // （重试帧/重复 show 同内容）直接跳过——避免每次 show 后多一次
+                // 内容替换重建
+                if (resized || list.getItems().size() != countBefore) rebuild();
             }
         };
         Platform.runLater(task[0]);
@@ -245,9 +265,9 @@ public class SuggestionPopup {
     /** 键盘上下移动选中：光标先在窗口内走，到窗口底/顶后再按向下/上则滑动窗口
      *  （向下：最顶项滑出、底部补下一项；向上：恢复最顶上一项，被移除项可找回）。
      *  窗口滑到列表两端后光标停住——不再移除项、不关弹层（只剩 1 项也保留显示）。
-     *  窗口滑动时重建弹层：直接 setAll 的复用 VirtualFlow 布局会错乱（cell 高度
-     *  突变、行距错位、行重叠）；popup.show 内部先 hide 再 show，重建 window+
-     *  VirtualFlow，与打字时 show() 路径一致，行高重新正确计算。
+     *  窗口滑动时重建弹层内容：直接 setAll 的复用 VirtualFlow 布局会错乱（cell 高度
+     *  突变、行距错位、行重叠），rebuild() 换新 ListView 实例从零布局——窗口实例
+     *  常驻仅替换内容（无 hide+show 重建，见 rebuild()）。
      *  不用 scrollTo：JavaFX 8 的 scrollTo 会把目标项钉到视口顶部。 */
     public void move(int delta) {
         if (all.isEmpty()) return;
@@ -266,7 +286,7 @@ public class SuggestionPopup {
         }
         if (slide) {
             list.getItems().setAll(window());
-            // 重建弹层（新 Popup + 新 ListView，VirtualFlow 从零布局）；内容行数固定，
+            // 重建弹层内容（新 ListView，VirtualFlow 从零布局）；内容行数固定，
             // 不随按键连发重测，窗口始终 = 内容行 + 1 项
             rebuild();
         }
