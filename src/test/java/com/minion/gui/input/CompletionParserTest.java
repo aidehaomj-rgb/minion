@@ -43,6 +43,8 @@ public class CompletionParserTest {
         Token t = p("/skill bran", 11);
         assertEquals(Mode.SLASH_SKILL, t.mode);
         assertEquals("bran", t.query);
+        assertEquals(0, t.start);
+        assertEquals(11, t.end);
     }
 
     @Test public void skillArgEmpty_afterSpaceShowsAllSkills() {
@@ -50,6 +52,8 @@ public class CompletionParserTest {
         Token t = p("/skill ", 7);
         assertEquals(Mode.SLASH_SKILL, t.mode);
         assertEquals("", t.query);
+        assertEquals(0, t.start);
+        assertEquals(7, t.end);
     }
 
     @Test public void atTriggers_fileMode() {

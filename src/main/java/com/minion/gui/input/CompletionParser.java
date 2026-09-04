@@ -44,7 +44,9 @@ public final class CompletionParser {
         while (pe > 0 && !isSep(text.charAt(pe - 1))) pe--;
         String prev = pe == ps ? "" : text.substring(pe, ps);
         if ("/skill".equalsIgnoreCase(prev)) {
-            return new Token(Mode.SLASH_SKILL, word, s, e);
+            // 确认候选时要把「/skill + 当前名称片段」整体替换为完整命令。
+            // 只替换当前词会残留前缀，最终组成「/skill-name /skill」之类的重复命令。
+            return new Token(Mode.SLASH_SKILL, word, pe, e);
         }
         return new Token(Mode.NONE, "", s, e);
     }

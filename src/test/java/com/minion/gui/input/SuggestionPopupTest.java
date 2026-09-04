@@ -25,6 +25,14 @@ public class SuggestionPopupTest {
         assertEquals("/skills", out.get(0).label);
     }
 
+    @Test public void filter_skillByChineseDescription() {
+        Suggestion analysis = new Suggestion("/skill sales-analysis", "/skill sales-analysis",
+                "[项目] Excel 销售数据分析", Suggestion.Type.SKILL);
+        List<Suggestion> out = SuggestionPopup.filter(Arrays.asList(analysis, s("/help")), "销售");
+        assertEquals(1, out.size());
+        assertEquals("/skill sales-analysis", out.get(0).insertText);
+    }
+
     @Test public void prefixMatch_ranksBeforeContains() {
         // "/skill" 前缀命中排第一；"/skills" 为包含命中排后（技能名条目同属包含命中）
         List<Suggestion> out = SuggestionPopup.filter(

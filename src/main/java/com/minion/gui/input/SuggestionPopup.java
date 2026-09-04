@@ -92,12 +92,14 @@ public class SuggestionPopup {
      *  hide + 插入，保证与键盘确认同一时序，规避事件派发期间改输入区的竞争） */
     public void setOnConfirm(Consumer<String> c) { this.onConfirm = c; }
 
-    /** 过滤+排序（纯静态，可单测）：大小写不敏感 contains；前缀匹配优先 → 标签短优先 → 字典序 */
+    /** 过滤+排序（纯静态，可单测）：名称或描述大小写不敏感 contains；名称前缀匹配优先。 */
     public static List<Suggestion> filter(List<Suggestion> all, String query) {
         final String q = query == null ? "" : query.trim().toLowerCase();
         List<Suggestion> out = new ArrayList<Suggestion>();
         for (Suggestion s : all) {
-            if (q.isEmpty() || s.label.toLowerCase().contains(q)) out.add(s);
+            String label = s.label == null ? "" : s.label.toLowerCase();
+            String desc = s.desc == null ? "" : s.desc.toLowerCase();
+            if (q.isEmpty() || label.contains(q) || desc.contains(q)) out.add(s);
         }
         Collections.sort(out, new Comparator<Suggestion>() {
             @Override public int compare(Suggestion a, Suggestion b) {
