@@ -27,6 +27,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.SplitPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.Tooltip;
@@ -70,6 +71,11 @@ public class MainWindow {
     private RunningIndicator runningIndicator;
     /** 用户浏览历史消息时显示，点击立即回到最新对话并恢复流式跟随。 */
     private Button jumpLatestButton;
+    /** 对话与生成报告共用的右侧工作区。 */
+    private SplitPane workspaceSplit;
+    private StackPane chatHost;
+    private ArtifactPreviewPane artifactPreview;
+    private Button reportButton;
     private TitleBar titleBar; // 自绘标题栏（openSettings 刷新顶部模型名用）
     private HBox tabsBar; // 右侧顶部页签栏（无会话时整行隐藏）
     /** 已打开会话 id 集合：页签存在性的唯一权威（页签 ⇔ openedIds 含 id）；切工作空间保留 */
@@ -187,15 +193,27 @@ public class MainWindow {
         jumpLatestButton.setVisible(false);
         jumpLatestButton.setManaged(false);
         jumpLatestButton.setOnAction(e -> jumpToLatest());
-        StackPane chatHost = new StackPane(chatScroll, jumpLatestButton);
+        chatHost = new StackPane(chatScroll, jumpLatestButton);
         // JavaFX 8 无 StackPane.setFillWidth/Height（12+ 才有）：用 max 钳制防默认 fill 拉伸铺满
         runningIndicator.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
         StackPane.setAlignment(jumpLatestButton, Pos.BOTTOM_RIGHT);
         StackPane.setMargin(jumpLatestButton, new Insets(0, 18, 14, 0));
         jumpLatestButton.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
-        VBox.setVgrow(chatHost, Priority.ALWAYS); // 原 chatScroll 的 vgrow 约束移交 chatHost
+        workspaceSplit = new SplitPane();
+        workspaceSplit.getItems().add(chatHost);
+        artifactPreview = new ArtifactPreviewPane(this::closeArtifactPreview);
+        VBox.setVgrow(workspaceSplit, Priority.ALWAYS);
         // 页签栏（右侧顶部，下带 1px 分隔线；页签为空时整行隐藏）
-        tabsBar = new HBox(tabs);
+        reportButton = new Button("报告");
+        reportButton.setTooltip(new Tooltip("在右侧工作区打开本会话最近生成的任务报告"));
+        reportButton.setVisible(false);
+        reportButton.setManaged(false);
+        reportButton.setOnAction(e -> {
+            SessionHandle h = manager.currentSession();
+            if (h != null) openArtifactPreview(h.lastArtifactPath);
+        });
+        tabsBar = new HBox(8, tabs, reportButton);
+        HBox.setHgrow(tabs, Priority.ALWAYS);
         tabsBar.getStyleClass().add("tabs-bar");
         tabs.getTabs().addListener((ListChangeListener<Tab>) c -> {
             boolean empty = tabs.getTabs().isEmpty();
@@ -205,7 +223,7 @@ public class MainWindow {
         // 启动时无页签（懒加载）；注册监听后立即同步一次初始可见性
         tabsBar.setVisible(!tabs.getTabs().isEmpty());
         tabsBar.setManaged(!tabs.getTabs().isEmpty());
-        right.getChildren().setAll(tabsBar, chatHost, inputView);
+        right.getChildren().setAll(tabsBar, workspaceSplit, inputView);
 
         // 右侧面板外包 StackPane：ConfirmSheet 遮罩与卡片挂其顶层（遮罩范围即右侧，不越分隔线）
         StackPane rightStack = new StackPane(right);
@@ -269,6 +287,14 @@ public class MainWindow {
             @Override public void onContextStatsChanged(SessionHandle h, int used, int max) {
                 if (inputView != null) inputView.onContextStats(h, used, max);
             }
+            @Override public void onArtifactCreated(SessionHandle h, String path) {
+                Platform.runLater(() -> {
+                    if (chatView != null && chatView.handle() == h) {
+                        updateReportButton(h);
+                        openArtifactPreview(path);
+                    }
+                });
+            }
             @Override public void onSessionAskChanged(SessionHandle h, boolean asking, String question) {
                 if (inputView != null) inputView.onAskChanged(h, asking, question);
                 // AskUserQuestion 挂起等待回答期间会话 running 仍为 true（AgentLoop 阻塞等待），
@@ -287,6 +313,8 @@ public class MainWindow {
                         addTab(h);
                     }
                     selectTab(h);
+                    closeArtifactPreview(); // 预览属于原会话；新会话可通过“报告”再次打开自己的报告
+                    updateReportButton(h);
                     if (chatView != null) chatView.rememberVvalue(chatScroll.getVvalue()); // 切走前记滚动位置
                     ChatView cached = viewCache.get(h.id);
                     if (cached != null) {
@@ -424,6 +452,30 @@ public class MainWindow {
         if (inputView != null) inputView.bindSession(null); // current=null → 下次发送自动建会话
         runningIndicator.setRunning(false); // 无活动会话：指示器隐藏并停动画
         runningIndicator.setCompressing(false);
+        updateReportButton(null);
+        closeArtifactPreview();
+    }
+
+    private void updateReportButton(SessionHandle h) {
+        if (reportButton == null) return;
+        boolean available = h != null && h.lastArtifactPath != null && !h.lastArtifactPath.trim().isEmpty();
+        reportButton.setVisible(available);
+        reportButton.setManaged(available);
+    }
+
+    private void openArtifactPreview(String path) {
+        if (path == null || path.trim().isEmpty()) return;
+        if (!workspaceSplit.getItems().contains(artifactPreview)) {
+            workspaceSplit.getItems().add(artifactPreview);
+        }
+        artifactPreview.open(path);
+        workspaceSplit.setDividerPositions(0.56);
+    }
+
+    private void closeArtifactPreview() {
+        if (workspaceSplit != null && artifactPreview != null) {
+            workspaceSplit.getItems().remove(artifactPreview);
+        }
     }
 
     /** 自动滚动节流：流式增长触发的 setVvalue(1.0) 合并为每 150ms 至多一次。

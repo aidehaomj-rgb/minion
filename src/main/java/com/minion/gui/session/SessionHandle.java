@@ -12,6 +12,8 @@ import java.util.concurrent.Executors;
 
 /** 会话句柄：GUI 层持有的会话视图状态（后台运行实体为 AgentLoop） */
 public class SessionHandle {
+    /** 最近生成的任务报告，供主窗口关闭后再次打开。 */
+    public volatile String lastArtifactPath;
 
     public final String id;
     /** 所属工作空间名：工作空间重命名时同步更新（非 final，否则 activate/send/persist 按旧名查 ctx 全部失效） */

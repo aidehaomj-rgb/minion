@@ -299,4 +299,16 @@ public class SessionControllerTest {
         assertEquals(98000, got[0]);
         assertEquals(900000, got[1]);
     }
+
+    /** 任务报告生成事件：路径完整转发给窗口工作区。 */
+    @Test
+    public void artifactCreated_forwardsPathToListener() {
+        SessionController c = new SessionController();
+        final String[] got = new String[1];
+        c.setArtifactListener(new java.util.function.Consumer<String>() {
+            @Override public void accept(String path) { got[0] = path; }
+        });
+        c.onArtifactCreated("D:\\workspace\\.minion\\reports\\task.md");
+        assertEquals("D:\\workspace\\.minion\\reports\\task.md", got[0]);
+    }
 }

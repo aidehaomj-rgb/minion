@@ -106,6 +106,8 @@ public class SessionManager {
         default void onRetryProgress(SessionHandle h, RetryProgress p) { }
         /** 上下文统计变化（used/max 估算 token；GUI 环形进度圈，仅当前激活会话显示） */
         default void onContextStatsChanged(SessionHandle h, int used, int max) { }
+        /** 会话生成了报告等工作区文件。 */
+        default void onArtifactCreated(SessionHandle h, String path) { }
         /** 会话被删除（deleteSession / deleteWorkspace 均通知，含非当前空间）：UI 清理页签与缓存 */
         default void onSessionDeleted(SessionHandle h) { }
     }
@@ -219,6 +221,10 @@ public class SessionManager {
     private void notifyContextStats(SessionHandle h, int used, int max) {
         for (Listener l : listeners) l.onContextStatsChanged(h, used, max);
     }
+    private void notifyArtifactCreated(SessionHandle h, String path) {
+        h.lastArtifactPath = path;
+        for (Listener l : listeners) l.onArtifactCreated(h, path);
+    }
     private void notifySessionDeleted(SessionHandle h) {
         for (Listener l : listeners) l.onSessionDeleted(h);
     }
@@ -295,6 +301,9 @@ public class SessionManager {
                     @Override public void accept(SessionController.ContextStat s) {
                         notifyContextStats(h, s.used, s.max);
                     }
+                });
+                controller.setArtifactListener(new java.util.function.Consumer<String>() {
+                    @Override public void accept(String path) { notifyArtifactCreated(h, path); }
                 });
                 ctx.sessions.add(h);
                 registerConnectedMcpTools(h); // 兜底：恢复会话也带 MCP 工具（连接已完成场景）
@@ -493,6 +502,9 @@ public class SessionManager {
             @Override public void accept(SessionController.ContextStat s) {
                 notifyContextStats(h, s.used, s.max);
             }
+        });
+        controller.setArtifactListener(new java.util.function.Consumer<String>() {
+            @Override public void accept(String path) { notifyArtifactCreated(h, path); }
         });
         ctx.sessions.add(h);
         registerConnectedMcpTools(h); // 兜底：连接已完成场景（listener 遍历不到新建会话时）

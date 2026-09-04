@@ -22,6 +22,8 @@ public interface AgentUi {
     default void onCompressingChanged(boolean compressing) { }
     /** 上下文统计推送（used/max = 估算 token；关键节点：消息入历史/回复完成/工具结果/压缩完成/轮次结束） */
     default void onContextStats(int used, int max) { }
+    /** 生成了可在工作区预览的文件（当前用于任务 Markdown 报告） */
+    default void onArtifactCreated(String path) { }
     /** 瞬时错误长重试进度（attempt ≥ 1 进入/更新重试态，httpCode/body 为最近一次失败信息；
      *  attempt == 0 退出重试态恢复轮换） */
     default void onRetryProgress(RetryProgress p) { }

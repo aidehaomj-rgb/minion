@@ -36,6 +36,10 @@ public class SessionController implements AgentUi {
 
     public void setContextStatsListener(java.util.function.Consumer<ContextStat> l) { this.contextStatsListener = l; }
 
+    private volatile java.util.function.Consumer<String> artifactListener;
+
+    public void setArtifactListener(java.util.function.Consumer<String> l) { this.artifactListener = l; }
+
     /** 上下文统计快照（used/max = 估算 token；估算线程推送，只读） */
     public static class ContextStat {
         public final int used;
@@ -160,5 +164,8 @@ public class SessionController implements AgentUi {
 
     @Override public void onContextStats(int used, int max) {
         if (contextStatsListener != null) contextStatsListener.accept(new ContextStat(used, max));
+    }
+    @Override public void onArtifactCreated(String path) {
+        if (artifactListener != null) artifactListener.accept(path);
     }
 }

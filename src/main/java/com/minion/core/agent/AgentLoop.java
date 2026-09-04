@@ -660,6 +660,7 @@ public class AgentLoop {
                 java.nio.file.Path report=TaskReportWriter.write(workspace,session,reportFromIndex,
                         reportTools,taskCompleted,System.currentTimeMillis()-start);
                 ui.onWarning("本轮执行记录已保存: "+report);
+                ui.onArtifactCreated(report.toAbsolutePath().normalize().toString());
             } catch (Exception e) {
                 ui.onWarning("生成任务执行记录失败: "+e.getMessage());
             }
