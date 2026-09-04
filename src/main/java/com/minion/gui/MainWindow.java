@@ -5,6 +5,7 @@ import com.minion.core.config.ModelConfig;
 import com.minion.core.config.WorkspaceConfig;
 import com.minion.gui.chat.ChatView;
 import com.minion.gui.dialog.ConfirmSheet;
+import com.minion.gui.dialog.NewProjectDialog;
 import com.minion.gui.dialog.SettingsDialog;
 import com.minion.gui.dialog.WorkspaceFormDialog;
 import com.minion.gui.input.InputView;
@@ -14,6 +15,7 @@ import com.minion.gui.session.SessionManager;
 import com.minion.gui.sidebar.SessionListView;
 import com.minion.gui.sidebar.WorkspaceListView;
 import com.minion.gui.theme.Theme;
+import com.minion.core.tools.dev.ProjectTool;
 import javafx.application.Platform;
 import javafx.animation.PauseTransition;
 import javafx.collections.ListChangeListener;
@@ -156,12 +158,16 @@ public class MainWindow {
         VBox.setVgrow(sessionBox, Priority.ALWAYS);
         final WorkspaceListView wsList = new WorkspaceListView(manager);
         VBox.setVgrow(wsList, Priority.ALWAYS);
-        Button newWs = new Button("＋ 新建工作空间");
+        Button newProject = new Button("＋ 新建项目");
+        newProject.getStyleClass().add("btn-ghost");
+        newProject.setMaxWidth(Double.MAX_VALUE);
+        newProject.setOnAction(e -> onNewProject(wsList));
+        Button newWs = new Button("打开已有项目");
         newWs.getStyleClass().add("btn-ghost");
         newWs.setMaxWidth(Double.MAX_VALUE);
         newWs.setOnAction(e -> onNewWorkspace(wsList));
         VBox wsBox = new VBox(6);
-        wsBox.getChildren().addAll(newWs, wsList);
+        wsBox.getChildren().addAll(newProject, newWs, wsList);
         VBox.setVgrow(wsBox, Priority.ALWAYS);
         // VBox(8) 间距自然分隔上下两区，不加分隔线
         sidebar.getChildren().setAll(sessionBox, wsBox);
@@ -553,12 +559,41 @@ public class MainWindow {
         // 会话激活后，onSessionActivated 回调在 show() 注册的监听器中绑定消息区与输入区
     }
 
-    /** 新建工作空间弹窗（表单抽到 WorkspaceFormDialog：项目路径/主说明文件/技能路径 + 名称预校验） */
+    /** 从零创建项目脚手架，注册为空间并立即进入首个会话。 */
+    private void onNewProject(WorkspaceListView wsList) {
+        java.util.List<String> existing = new java.util.ArrayList<String>();
+        for (WorkspaceConfig w : manager.workspaces().list()) existing.add(w.workSpaceName);
+        NewProjectDialog d = new NewProjectDialog(existing);
+        Optional<NewProjectDialog.Value> result = d.showAndWait();
+        if (!result.isPresent()) return;
+        NewProjectDialog.Value v = result.get();
+        try {
+            ProjectTool.createAt(v.projectDir, v.template);
+            java.nio.file.Path skills = v.projectDir.resolve("skills");
+            java.nio.file.Files.createDirectories(skills);
+            java.nio.file.Path projectMd = v.projectDir.resolve("project.md");
+            String md = "# " + v.name + "\n\n"
+                    + "## 项目目标\n\n请在首次对话中补充本项目要解决的问题、输入数据和期望产物。\n\n"
+                    + "## 技术基线\n\n- Windows 7\n- Python 3.7.6 / Java 8\n- 模板：" + v.template + "\n";
+            java.nio.file.Files.write(projectMd, md.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            if (!manager.addWorkspace(v.name, v.projectDir.toString(), projectMd.toString(), skills.toString())) {
+                throw new IllegalStateException("工作空间名称非法或已存在");
+            }
+            manager.switchWorkspace(v.name);
+            wsList.refresh();
+            onNewSession();
+        } catch (Exception ex) {
+            Alert a = new Alert(Alert.AlertType.ERROR, "创建项目失败：" + ex.getMessage(), ButtonType.OK);
+            Theme.style(a); a.setTitle("新建项目失败"); a.setHeaderText(null); a.showAndWait();
+        }
+    }
+
+    /** 打开已有项目弹窗（登记为工作空间，不创建或修改项目文件）。 */
     private void onNewWorkspace(WorkspaceListView wsList) {
         java.util.List<String> existing = new java.util.ArrayList<String>();
         for (WorkspaceConfig w : manager.workspaces().list()) existing.add(w.workSpaceName);
-        WorkspaceFormDialog d = new WorkspaceFormDialog("新建工作空间",
-                "新建工作空间", null, existing);
+        WorkspaceFormDialog d = new WorkspaceFormDialog("打开已有项目",
+                "将已有项目文件夹加入 Agent", null, existing);
         Optional<WorkspaceConfig> r = d.showAndWait();
         if (!r.isPresent()) return;
         WorkspaceConfig v = r.get();
