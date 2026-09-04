@@ -24,6 +24,29 @@
     -fx-border-color: transparent;
     -fx-padding: 0 1 0 0;
 }
+/* 聊天视口：白框实际来自 JavaFX 8 Modena 的 ScrollPane focus ring，而非外层
+   SplitPane。使用专用类覆盖 control、viewport、corner 三层，避免滚动条出现/消失
+   或正文点击后重新露出浅色边线。 */
+.chat-scroll,
+.chat-scroll:focused {
+    -fx-background-color: #121314;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
+    -fx-padding: 0;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+}
+.chat-scroll > .viewport {
+    -fx-background-color: #121314;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+}
+.chat-scroll > .corner {
+    -fx-background-color: #121314;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+}
 .card {
     -fx-background-color: #1a1d24;
     -fx-background-radius: 8;

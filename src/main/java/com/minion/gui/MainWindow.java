@@ -183,6 +183,10 @@ public class MainWindow {
         VBox right = new VBox(8);
         right.getStyleClass().add("panel-dark");
         chatScroll = new ScrollPane();
+        chatScroll.getStyleClass().add("chat-scroll");
+        // JavaFX 8 Modena 会在 ScrollPane 获得焦点后沿整个聊天视口绘制浅色 focus ring。
+        // 外层 workspaceSplit 的样式无法覆盖它，因此聊天滚动区本身也必须退出焦点遍历。
+        chatScroll.setFocusTraversable(false);
         chatScroll.setFitToWidth(true);
         chatScroll.setFitToHeight(true); // 消息区铺满正文窗口：内容少时 ChatView 拉伸到视口高（背景 #121314 铺满）
         chatScroll.setPrefHeight(200); // 固定 pref：否则 prefHeight 随消息内容增长，挤压右侧 VBox 把页签行压扁（探针验证）
