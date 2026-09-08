@@ -27,16 +27,19 @@ import java.util.zip.ZipFile;
 /** 将用户选择的常见文档在本地转换为模型可读文本；原始文件不会上传到接口。 */
 public final class AttachmentReader {
     public static final int MAX_ATTACHMENTS = 8;
-    public static final long MAX_FILE_BYTES = 10L * 1024 * 1024;
-    public static final int MAX_EXTRACTED_CHARS = 120_000;
-    private static final long MAX_ZIP_ENTRY_BYTES = 20L * 1024 * 1024;
+    /** 单个附件上限：适配中等规模 Excel/PDF，同时避免 Win7 JavaFX 一次性占用过多内存。 */
+    public static final long MAX_FILE_BYTES = 50L * 1024 * 1024;
+    /** 解压后的正文上限；超过后保留前半部分并明确提示已截断。 */
+    public static final int MAX_EXTRACTED_CHARS = 500_000;
+    /** xlsx/docx/pptx 内部 XML 条目上限，按解压后大小检查以防 ZIP 炸弹。 */
+    private static final long MAX_ZIP_ENTRY_BYTES = 100L * 1024 * 1024;
 
     private AttachmentReader() { }
 
     public static Result read(Path path) throws Exception {
         if (path == null || !Files.isRegularFile(path)) throw new IOException("文件不存在");
         long size = Files.size(path);
-        if (size > MAX_FILE_BYTES) throw new IOException("文件超过 10MB 限制");
+        if (size > MAX_FILE_BYTES) throw new IOException("文件超过 50MB 限制");
         String name = path.getFileName().toString();
         String ext = extension(name);
         String text;
