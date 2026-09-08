@@ -1,0 +1,51 @@
+Minion 增量更新包使用说明
+===========================
+
+一、第一次使用更新器
+
+1. 把整个增量更新包带入内网电脑并解压。
+2. 完全关闭 Minion。
+3. 双击 Update-Minion.cmd。
+4. 如果更新器没有自动找到 Minion，请输入安装目录，例如：
+   D:\tools\minion-win7-offline-0.1.0
+5. 确认后更新器会记住该目录，以后通常不需要再次输入。
+
+安装目录只需包含 minion-0.1.0.jar；JDK 8 可以在其他目录或由 VS Code 扩展配置。
+
+也可以把整个更新包文件夹直接放进 Minion 安装目录，更新器会自动识别父目录。
+
+二、更新器会做什么
+
+1. 校验新版 JAR 的 SHA-256。
+2. 将旧 JAR 备份到：backup\minion-0.1.0.jar.bak
+3. 校验复制后的新 JAR。
+4. 替换 minion-0.1.0.jar。
+5. 替换失败时自动恢复旧 JAR。
+
+三、不会修改的内容
+
+jdk8\
+model.json
+workspace.json
+config.properties
+mcp.json
+session\
+skills\
+
+四、回退
+
+如果新版本启动后有问题：
+
+1. 关闭 Minion。
+2. 双击更新包中的 Rollback-Minion.cmd。
+3. 确认安装目录后自动恢复 backup\minion-0.1.0.jar.bak。
+
+五、可选安装 Python PDF 模块
+
+如果 `/diagnostics` 显示 PyPDF2 或 pdfminer 缺失：
+
+1. 保留更新包内 `python-wheels` 文件夹。
+2. 双击 `安装Python-PDF模块.cmd`；默认查找 `C:\ProgramData\Anaconda3\python.exe`。
+3. 如果 Anaconda 位于其他目录，在命令行运行：
+   安装Python-PDF模块.cmd "D:\Anaconda3\python.exe"
+4. 安装过程完全离线，不访问互联网。

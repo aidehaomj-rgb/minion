@@ -1,0 +1,15 @@
+target/
+/skills/
+.idea/
+.claude/worktrees/
+*.iml
+.minion/
+claudeinit.txt
+dependency-reduced-pom.xml
+src/resource/config.properties
+/bak
+/run/
+# 本机离线依赖与临时校验文件：更新包放在下载目录，不提交到源码仓库
+/offline-deps-win7/
+/offline-deps-win7-32bit/
+/tools/win7-updater/*.sha256

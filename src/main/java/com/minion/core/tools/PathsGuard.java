@@ -1,0 +1,61 @@
+package com.minion.core.tools;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+/** 路径守卫：限制文件工具只能访问工作路径（+ 可选技能目录/会话临时目录） */
+public class PathsGuard {
+
+    /** 解析相对工作路径的绝对路径（相对路径以 workDir 为基准） */
+    public static Path resolve(String workDir, String path) {
+        Path p = Paths.get(path);
+        if (p.isAbsolute()) return p.normalize();
+        return Paths.get(workDir, path).normalize();
+    }
+
+    /** 是否在 dir 内（含 dir 本身）。dir 为 null/空或不存在（无法 toRealPath）时视为不可访问 */
+    public static boolean inside(String dir, Path p) {
+        if (dir == null || dir.isEmpty()) return false;
+        try {
+            Path root = Paths.get(dir).toRealPath();
+            // 目标不存在（写新文件/新建目录，如截图保存）时 toRealPath 抛 NoSuchFileException
+            // 会误判越界：向上找最深已存在祖先做真实路径校验（同 WriteTool.outsideGuard 的 T8 约定）。
+            // NOFOLLOW_LINKS 探活：断链（指向不存在的目录）视为已存在，toRealPath 解析失败即拒绝，
+            // 防止写穿断链逃逸到工作区外。
+            Path probe = p;
+            while (probe != null && !Files.exists(probe, LinkOption.NOFOLLOW_LINKS)) {
+                probe = probe.getParent();
+            }
+            if (probe == null) return false; // 整个祖先链缺失，无法校验
+            return probe.toRealPath().startsWith(root);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** 任一额外放行目录（项目级技能目录等）命中即放行；无配置时恒 false */
+    public static boolean insideExtra(Workspace ws, Path p) {
+        if (ws == null) return false;
+        for (String dir : ws.extraAllowedDirs()) {
+            if (inside(dir, p)) return true;
+        }
+        return false;
+    }
+
+    /** 越界守卫：工作路径 / 额外放行目录 / 内置技能目录 / 会话临时目录 任一命中即放行 */
+    public static ToolResult errorIfOutside(Workspace ws, String skillsDir, String tmpDir, Path p) {
+        if (inside(ws.workDir(), p) || insideExtra(ws, p)
+                || inside(skillsDir, p) || inside(tmpDir, p)) {
+            return null;
+        }
+        return ToolResult.error("路径在工作路径之外，已拒绝: " + p);
+    }
+
+    /** 兼容只访问工作区的工具；项目技能等额外目录仍只由新版 Workspace 重载放行。 */
+    public static ToolResult errorIfOutside(String workDir, Path p) {
+        return inside(workDir, p) ? null : ToolResult.error("路径在工作路径之外，已拒绝: " + p);
+    }
+}

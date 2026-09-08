@@ -1,0 +1,120 @@
+package com.minion.core.tools;
+
+import com.google.gson.JsonObject;
+import com.minion.core.checkpoint.CheckpointStore;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+/** 写文件。覆盖已存在文件为高危操作（需确认）。 */
+public class WriteTool implements Tool {
+
+    private final Workspace workspace;
+    private final String skillsDir;
+    private final String tmpDir;
+    private final CheckpointStore checkpoints;
+
+    public WriteTool(Workspace workspace) { this(workspace, null); }
+
+    public WriteTool(Workspace workspace, String skillsDir) { this(workspace, skillsDir, null); }
+
+    public WriteTool(Workspace workspace, String skillsDir, String tmpDir) {
+        this(workspace, skillsDir, tmpDir, null);
+    }
+
+    public WriteTool(Workspace workspace, String skillsDir, String tmpDir, CheckpointStore checkpoints) {
+        this.workspace = workspace;
+        this.skillsDir = skillsDir;
+        this.tmpDir = tmpDir;
+        this.checkpoints = checkpoints;
+    }
+
+    @Override
+    public String name() { return "Write"; }
+
+    @Override
+    public String description() { return "写入文件内容（覆盖已存在文件前会请求确认）"; }
+
+    @Override
+    public JsonObject schema() {
+        return SchemaGenerator.objectSchema("写入文件",
+                new String[]{"path", "content"}, new String[]{"path", "content"});
+    }
+
+    @Override
+    public boolean isHighRisk(JsonObject args) {
+        if (!args.has("path")) return false;
+        Path p = PathsGuard.resolve(workspace.cwd().toString(), args.get("path").getAsString());
+        return Files.exists(p);
+    }
+
+    @Override
+    public ToolResult execute(JsonObject args) throws IOException {
+        if (!args.has("path") || !args.has("content")) return ToolResult.error("缺少 path/content 参数");
+        Path p = PathsGuard.resolve(workspace.cwd().toString(), args.get("path").getAsString());
+        // T8 约定：存在性/目录检查在守卫之前；守卫的 toRealPath 对不存在的路径会误报越界
+        if (Files.exists(p) && Files.isDirectory(p)) return ToolResult.error("是目录: " + p);
+        ToolResult guard = outsideGuard(p);
+        if (guard != null) return guard;
+        if (p.getParent() != null) Files.createDirectories(p.getParent());
+        String content = args.get("content").getAsString();
+        if (checkpoints != null) {
+            try { checkpoints.create(p, "Write"); }
+            catch (IOException e) { return ToolResult.error("创建写入前检查点失败，未修改文件: " + e.getMessage()); }
+        }
+        Files.write(p, content.getBytes(StandardCharsets.UTF_8));
+        return ToolResult.success("已写入 " + p + " (" + content.length() + " 字符)");
+    }
+
+    /** 越界守卫：已存在路径交给 PathsGuard（toRealPath 防符号链接）；不存在路径向上找最深已存在祖先做真实路径校验 */
+    private ToolResult outsideGuard(Path p) {
+        if (PathsGuard.insideExtra(workspace, p)) return null;   // 额外放行目录：inside 已做真实路径校验
+        if (Files.exists(p)) return PathsGuard.errorIfOutside(workspace, skillsDir, tmpDir, p);
+        Path probe = p;
+        while (probe != null && !Files.exists(probe)) {
+            probe = probe.getParent();
+        }
+        if (probe == null) {
+            // 整个祖先链都不存在（工作路径本身缺失）：无符号链接可绕过，退回规范化词法包含检查
+            if (!insideLexical(workspace.workDir(), p) && !insideLexical(skillsDir, p)
+                    && !insideLexical(tmpDir, p)) {
+                return ToolResult.error("路径在工作路径之外，已拒绝: " + p);
+            }
+            return null;
+        }
+        try {
+            Path probeReal = probe.toRealPath();
+            if (!probeReal.startsWith(Paths.get(workspace.workDir()).toRealPath())
+                    && !insideReal(skillsDir, probeReal)
+                    && !insideReal(tmpDir, probeReal)
+                    // 词法兜底仅限 probe 不在 tmpDir 内：probe 在 tmpDir 下时链上可能有符号链接，以真实路径校验为准；
+                    // probe 在 tmpDir 外时 tmpDir 下无任何已存在成分（tmpDir 不存在），不存在路径上无符号链接可绕过
+                    && (insideLexical(tmpDir, probe) || !insideLexical(tmpDir, p))) {
+                return ToolResult.error("路径在工作路径之外，已拒绝: " + p);
+            }
+        } catch (IOException e) {
+            return ToolResult.error("无法解析路径: " + p);
+        }
+        return null;
+    }
+
+    /** 词法包含检查（dir 为 null/空时恒为 false）：不触发磁盘访问，用于祖先链全缺失的场景 */
+    private static boolean insideLexical(String dir, Path p) {
+        if (dir == null || dir.isEmpty()) return false;
+        Path root = Paths.get(dir).toAbsolutePath().normalize();
+        return p.toAbsolutePath().normalize().startsWith(root);
+    }
+
+    /** 真实路径包含检查（dir 为 null/空或不存在时恒为 false） */
+    private static boolean insideReal(String dir, Path p) {
+        if (dir == null || dir.isEmpty()) return false;
+        try {
+            return p.startsWith(Paths.get(dir).toRealPath());
+        } catch (IOException e) {
+            return false;
+        }
+    }
+}

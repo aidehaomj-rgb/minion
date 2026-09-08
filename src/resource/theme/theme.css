@@ -1,0 +1,474 @@
+/* minion 深色科技感主题 */
+.root {
+    -fx-font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    -fx-font-size: 16px;
+    -fx-background-color: #0f1115;
+}
+
+/* 面板（左侧侧栏 rgb(25,26,27)、右侧正文 rgb(18,19,20)） */
+.panel { -fx-background-color: #191a1b; -fx-border-color: #232733; -fx-border-width: 0 1 0 0; }
+.panel-dark { -fx-background-color: #121314; }
+/* 对话/报告工作区：覆盖 JavaFX 8 SplitPane 的 Modena 浅色边框与 1px 内衬。
+   报告未打开时应与正文背景完全融为一体；打开后只显示低对比度分隔线。 */
+.workspace-split,
+.workspace-split:focused {
+    -fx-background-color: #121314;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
+    -fx-padding: 0;
+}
+.workspace-split > .split-pane-divider {
+    -fx-background-color: #232733;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+    -fx-padding: 0 1 0 0;
+}
+/* 聊天视口：白框实际来自 JavaFX 8 Modena 的 ScrollPane focus ring，而非外层
+   SplitPane。使用专用类覆盖 control、viewport、corner 三层，避免滚动条出现/消失
+   或正文点击后重新露出浅色边线。 */
+.chat-scroll,
+.chat-scroll:focused {
+    -fx-background-color: #121314;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
+    -fx-padding: 0;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+}
+.chat-scroll > .viewport {
+    -fx-background-color: #121314;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+}
+.chat-scroll > .corner {
+    -fx-background-color: #121314;
+    -fx-background-insets: 0;
+    -fx-border-color: transparent;
+}
+.card {
+    -fx-background-color: #1a1d24;
+    -fx-background-radius: 8;
+    -fx-border-color: #232733;
+    -fx-border-radius: 8;
+    -fx-padding: 10 12;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 10, 0, 0, 2);
+}
+
+/* 顶部栏 */
+.topbar {
+    -fx-background-color: #12141a;
+    -fx-border-color: transparent transparent #232733 transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 8 12 8 12;
+}
+.topbar-title { -fx-text-fill: #f0f2f6; -fx-font-size: 16px; -fx-font-weight: bold; }
+.topbar-model { -fx-text-fill: #a8b0bb; -fx-font-size: 14px; }
+
+/* 按钮 */
+.btn { -fx-background-radius: 6; -fx-padding: 6 14 6 14; -fx-cursor: hand; }
+.btn-primary {
+    -fx-background-color: linear-gradient(to bottom, #4f8cff, #3b6fe0);
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+.btn-primary:hover { -fx-background-color: linear-gradient(to bottom, #5d98ff, #4f8cff); }
+/* 发送/确认按钮三态色：空内容与运行中 #f48771，有内容非运行 #ff947c（hover 向浅微调） */
+.btn-send-empty {
+    -fx-background-color: #f48771;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-background-radius: 8;
+}
+.btn-send-empty:hover { -fx-background-color: #f69b85; }
+.btn-send-full {
+    -fx-background-color: #ff947c;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-background-radius: 8;
+}
+.btn-send-full:hover { -fx-background-color: #ffa894; }
+.btn-ghost {
+    -fx-background-color: transparent;
+    -fx-text-fill: #a8b0bb;
+    -fx-border-color: #232733;
+    -fx-border-radius: 6;
+}
+.btn-ghost:hover { -fx-text-fill: #f0f2f6; -fx-border-color: #4f8cff; }
+.btn-jump-latest {
+    -fx-background-color: #2a2f3a; -fx-text-fill: #e8ebf0;
+    -fx-background-radius: 16; -fx-border-radius: 16; -fx-border-color: #4f8cff;
+    -fx-padding: 6 12 6 12; -fx-cursor: hand;
+}
+.btn-jump-latest:hover { -fx-background-color: #343b49; }
+.pending-guide-row {
+    -fx-background-color: #202a3a; -fx-background-radius: 6;
+    -fx-border-color: #4f8cff; -fx-border-radius: 6; -fx-padding: 6 8 6 10;
+}
+.pending-guide-label { -fx-text-fill: #dce8ff; -fx-font-size: 12px; }
+.btn-guide-now {
+    -fx-background-color: #4f8cff; -fx-text-fill: white; -fx-background-radius: 5;
+    -fx-padding: 5 10 5 10; -fx-cursor: hand;
+}
+.btn-guide-now:hover { -fx-background-color: #5d98ff; }
+.btn-guide-cancel {
+    -fx-background-color: transparent; -fx-text-fill: #9da5b4; -fx-padding: 5 8 5 8; -fx-cursor: hand;
+}
+.btn-guide-cancel:hover { -fx-text-fill: #f0f2f6; }
+
+/* ===== SVG 图标（IconFactory 统一 24×24 Material 线性图标；SVGPath 填充不继承 -fx-text-fill，须显式指定） =====
+   通用色 #a8b0bb（同按钮文字色）；hover 由所在按钮容器联动变白/变色 */
+.icon-send { -fx-fill: white; }
+.icon-stop { -fx-fill: white; }
+.icon-settings, .icon-min, .icon-max, .icon-restore, .icon-close { -fx-fill: #a8b0bb; }
+.btn-ghost:hover .icon-settings, .btn-ghost:hover .icon-min,
+.btn-ghost:hover .icon-max, .btn-ghost:hover .icon-restore { -fx-fill: #f0f2f6; }
+.btn-close:hover .icon-close { -fx-fill: #ffffff; }
+
+/* 侧栏行内操作图标：hover 语义色（修改→蓝、删除→红） */
+.icon-edit { -fx-fill: #a8b0bb; }
+.btn-cell:hover .icon-edit { -fx-fill: #4f8cff; }
+.icon-delete { -fx-fill: #a8b0bb; }
+.btn-cell:hover .icon-delete { -fx-fill: #e05b5b; }
+
+/* 当前标记圆点（工作空间列表/设置窗模型列表） */
+.icon-dot { -fx-fill: #4f8cff; }
+
+/* 正文工具区状态图标（ChatView 摘要行） */
+.icon-help { -fx-fill: #e6a23c; }    /* 提问问号 */
+.icon-success { -fx-fill: #4caf50; } /* 工具成功 */
+.icon-error { -fx-fill: #e05b5b; }   /* 工具失败 */
+.icon-play { -fx-fill: #4f8cff; }    /* 子任务开始 */
+.icon-check { -fx-fill: #4caf50; }   /* 子任务完成 */
+.icon-build { -fx-fill: #8a8f98; }   /* 工具调用（扳手） */
+.icon-timer { -fx-fill: #8a8f98; }   /* 统计行 */
+.icon-chevron { -fx-fill: #8a8f98; } /* 折叠箭头 */
+.log-collapse-toggle:hover .icon-chevron { -fx-fill: #f0f2f6; }
+
+/* 正文摘要行文本（图标+文字组合） */
+.log-summary-text { -fx-text-fill: #d3d7de; -fx-font-size: 13px; }
+
+/* 窗口关闭按钮（无边框窗口） */
+.btn-close {
+    -fx-background-color: transparent;
+    -fx-text-fill: #a8b0bb;
+    -fx-background-radius: 6;
+    -fx-cursor: hand;
+}
+.btn-close:hover { -fx-background-color: #c93a39; -fx-text-fill: white; }
+
+/* ===== 输入区大框（左输入右按钮+竖分割线，4/9 宽居中）；显式 LCD：JavaFX 8 默认灰阶 AA 发虚（同聊天正文修法） ===== */
+.input-frame {
+    -fx-background-color: #1a1d24;
+    -fx-background-radius: 8;
+    -fx-border-color: #232733;
+    -fx-border-radius: 8;
+    -fx-padding: 8 10 8 14;
+    -fx-font-smoothing-type: lcd;
+}
+.input-frame .input-textarea {
+    -fx-background-color: transparent;
+    -fx-control-inner-background: transparent;
+    -fx-text-fill: #f0f2f6;
+    -fx-prompt-text-fill: #7a828e;
+    -fx-highlight-fill: #3b6fe0;
+}
+.input-frame .input-textarea .content { -fx-background-color: transparent; }
+.input-frame .input-textarea .scroll-pane { -fx-background-color: transparent; }
+/* 输入框聚焦：大框边框 #f48771（InputView focus 监听切换样式类，失焦还原 #232733） */
+.input-frame-focused { -fx-border-color: #f48771; }
+.input-divider { -fx-pref-width: 1; -fx-min-width: 1; -fx-max-width: 1; -fx-background-color: #232733; }
+
+/* 上传按钮（输入框底部操作行左）：回形针图标（Material 线性填充，同 icon-settings 色系） */
+.btn-upload { -fx-background-color: transparent; -fx-background-radius: 6; -fx-cursor: hand; }
+.icon-upload { -fx-fill: #a8b0bb; }
+.btn-upload:hover .icon-upload { -fx-fill: #f0f2f6; }
+
+/* ===== 输入块（chip）：弹层确认的 /命令、@文件与粘贴长文本；不可编辑只可删除 ===== */
+.chip-row { -fx-hgap: 8; -fx-vgap: 8; }
+.input-chip {
+    -fx-background-radius: 6;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+    -fx-padding: 2 4 2 8;
+}
+.chip-label { -fx-text-fill: #d3d7de; -fx-font-size: 14px; }
+.chip-close {
+    -fx-background-color: transparent;
+    -fx-padding: 0 4 0 4;
+    -fx-background-radius: 4;
+    -fx-cursor: hand;
+}
+.chip-close .icon-close { -fx-fill: #98a0ab; }
+.chip-close:hover { -fx-background-color: rgba(248, 81, 73, 0.15); }
+.chip-close:hover .icon-close { -fx-fill: #f85149; }
+.input-chip-command, .input-chip-skill { -fx-background-color: #1f2f55; -fx-border-color: #3b6fe0; }
+.input-chip-file { -fx-background-color: #14301f; -fx-border-color: #2ea043; }
+.input-chip-paste { -fx-background-color: #2a2f3a; -fx-border-color: #3a4150; }
+.input-chip-image { -fx-background-color: #241f38; -fx-border-color: #7c5cd6; }
+
+/* ===== 补全弹层（/命令、@文件；锚定输入大框上方同宽） ===== */
+.suggest-list {
+    -fx-background-color: #1a1d24;
+    -fx-background-radius: 8;
+    -fx-border-color: #2a2f3a;
+    -fx-border-radius: 8;
+    -fx-font-smoothing-type: lcd;
+    /* padding 归零：ListView 默认 padding 4 会把 VirtualFlow 视口再吃 8px，
+       末行恰好占满时仍判溢出、残留垂直滚动条（computeBarVisiblity 比较
+       lastCell 超出视口）。高度校准已含 +3（border 2px + 保险 1px） */
+    -fx-padding: 0;
+}
+.suggest-list .list-cell { -fx-background-color: transparent; -fx-padding: 6 10 6 10; }
+.suggest-list .list-cell:hover { -fx-background-color: #20242e; }
+.suggest-list .list-cell:selected { -fx-background-color: #2a3344; }
+.suggest-label { -fx-text-fill: #d3d7de; }
+.suggest-list .list-cell:selected .suggest-label { -fx-text-fill: #f0f2f6; }
+.suggest-desc { -fx-text-fill: #7a828e; -fx-font-size: 14px; }
+
+/* 列表 */
+.list-view { -fx-background-color: transparent; -fx-background-radius: 6; }
+/* 抄 Claude VSCode 插件侧栏页签：背景内缩成胶囊（上下 1px、左右 2px）+ 圆角；
+   hover/selected 只对 filled cell 生效——列表底部空白区域由空 cell 填充，保持透明不变色 */
+.list-view .list-cell {
+    -fx-background-color: transparent;
+    -fx-background-insets: 1 4 1 4;
+    -fx-background-radius: 8;
+    -fx-text-fill: #d3d7de;
+    -fx-padding: 9 12 9 12;
+}
+.list-view .list-cell:filled { -fx-background-color: #1a1d24; }
+.list-view .list-cell:filled:hover { -fx-background-color: #20242e; }
+.list-view .list-cell:filled:selected { -fx-background-color: #232a38; -fx-text-fill: #f0f2f6; }
+
+/* 页签 */
+.tab-pane .tab-header-area .tab-header-background { -fx-background-color: transparent; }
+.tab-pane > .tab-content-area { -fx-min-height: 0; -fx-pref-height: 0; -fx-max-height: 0; }
+/* 抄 Claude VSCode 插件页签：椭圆圆角 左右 2px / 上下 1px（须显式 8 值：JavaFX 8 对 `2 / 1` 简写丢垂直半径） */
+.tab-pane .tab { -fx-background-color: #1a1d24; -fx-background-radius: 2 2 2 2 / 1 1 1 1; -fx-padding: 4 12; }
+.tab-pane .tab:hover { -fx-background-color: #1a1d24; } /* 去掉未选中页签 hover 变色（固定底色） */
+.tab-pane .tab:selected { -fx-background-color: #232a38; }
+.tab-pane .tab:selected:hover { -fx-background-color: #232a38; } /* 选中页签 hover 同样固定 */
+.tab-pane .tab-label { -fx-text-fill: #a8b0bb; }
+.tab-pane .tab:selected .tab-label { -fx-text-fill: #f0f2f6; }
+
+/* 页签溢出：隐藏控制按钮（下拉箭头/滚动），超出宽度由 header 裁剪，不显示滚动条 */
+.tab-pane > .tab-header-area > .control-buttons-tab { visibility: hidden; }
+.tab-pane .tab { -fx-min-width: 0; }
+
+/* 消息 */
+.msg-user {
+    -fx-background-color: #23408f;
+    -fx-background-radius: 10 10 2 10;
+    -fx-padding: 10 14 10 14;
+    -fx-text-fill: #eaf0ff;
+}
+.msg-assistant {
+    -fx-background-color: #1a1d24;
+    -fx-background-radius: 10 10 10 2;
+    -fx-padding: 10 14 10 14;
+    -fx-text-fill: #f0f2f6;
+}
+.msg-thinking { -fx-background-color: #13161c; -fx-background-radius: 6; -fx-text-fill: #98a0ab; -fx-font-size: 14px; }
+.code-block {
+    -fx-background-color: #0d1117;
+    -fx-background-radius: 6;
+    -fx-border-color: #232733;
+    -fx-border-radius: 6;
+    -fx-padding: 10 14 10 14;
+    -fx-font-family: "Consolas", monospace;
+    -fx-font-size: 15px;
+    -fx-text-fill: #c9d1d9;
+}
+.msg-error { -fx-background-color: #3d1d1d; -fx-background-radius: 6; -fx-text-fill: #f85149; }
+.msg-warning { -fx-background-color: #3d2f14; -fx-background-radius: 6; -fx-text-fill: #e3b341; }
+
+/* 运行中补充气泡的小徽标 */
+.supplement-tag { -fx-text-fill: #8ab4ff; -fx-font-size: 13px; -fx-font-weight: bold; }
+
+/* ===== 消息只读 TextArea（消息本体：原生拖选/Ctrl+C/双击选词/右键菜单） =====
+   背景策略（探针 2026-08-15 实证，纠正 8-13「显式 LCD」假阳性）：
+   - JavaFX 8 Prism 对透明表面只做灰阶抗锯齿（-fx-font-smoothing-type: lcd 属性
+     在透明层上被压制），Windows 125% 缩放把灰阶柔边放大 → 正文发虚根因；
+   - .content 用不透明 #121314（与 .panel-dark 同色无缝）→ Prism 恢复 LCD 子像素
+     渲染（实测边缘彩色条纹 0% → 53%）；.scroll-pane/.viewport 保持透明即可；
+   - 自身 background transparent + control-inner-background transparent 仍保留：
+     防 modena 默认白底（-fx-text-box-border/-fx-control-inner-background）在
+     非 content 区域（边框带/内边距）透出「白色块」。 */
+.msg-textarea {
+    -fx-background-color: transparent;
+    -fx-control-inner-background: transparent;
+    -fx-highlight-fill: #232a38; /* 非聚焦选区淡灰：失焦块的残留选区不再亮蓝，消除"多块同时选中"误导 */
+    -fx-highlight-text-fill: #ffffff;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+    -fx-font-smoothing-type: lcd;
+}
+.msg-textarea:focused { -fx-highlight-fill: #3b6fe0; } /* 聚焦选区亮蓝（现状色） */
+.msg-textarea .content {
+    -fx-background-color: #121314;
+    -fx-padding: 0;
+}
+.msg-textarea .scroll-pane { -fx-background-color: transparent; }
+.msg-textarea .scroll-pane > .viewport { -fx-background-color: transparent; }
+
+/* ===== 消息区场景文字色（控制台输出流：白字为主，场景色区分；背景 #121314 由 .panel-dark 提供） ===== */
+.log-input { -fx-text-fill: #75aaff; } /* 输入 柔和蓝 */
+.log-think { -fx-text-fill: #8c8c8c; } /* 思考 灰白 */
+.log-tool { -fx-text-fill: #9C27B0; }  /* 工具 紫 */
+.log-reply { -fx-text-fill: #bfbfbf; } /* 回复 白 */
+.log-error { -fx-text-fill: #f85149; } /* 错误 红 */
+.log-warn { -fx-text-fill: #e3b341; }  /* 警告 黄 */
+.log-sys { -fx-text-fill: #16C60C; }   /* 系统/占位 灰 */
+
+/* ===== 消息区控制台样式：彩色加粗标签 + 浅色调正文 =====
+   标签：.log-tag 叠加 log-* 场景色类（深色）；正文 .log-body 默认白 + log-body-* 浅色调类
+   （与标签同色系提亮，长文本可读；系统行 log-body-error/warn/sys 无定义 → 自动回退白） */
+.log-tag { -fx-font-weight: bold; }
+.log-body { -fx-text-fill: #f0f2f6; }
+.log-body-input { -fx-text-fill: #8cbcff; } /* 输入正文 浅蓝 */
+.log-body-tool  { -fx-text-fill: #ce93d8; } /* 工具正文 浅紫 */
+.log-body-reply { -fx-text-fill: #c9c9c9; } /* 回复正文 白（AI 主输出保持白色，突出可读） */
+.log-body-think { -fx-text-fill: #9c9c9c; } /* 思考正文 灰白 */
+
+/* 状态点（呼吸动画由 StatusDot 的 Timeline 实现——JavaFX 8 不支持 CSS keyframe） */
+.status-dot { -fx-background-radius: 5; -fx-min-width: 8; -fx-min-height: 8; }
+.status-dot-running { -fx-fill: #f2c94c; }
+.status-dot-completed { -fx-fill: #3fb950; }
+
+/* ===== 运行状态指示器（正文区左下角齿轮+文案） ===== */
+.running-indicator { -fx-spacing: 8; }
+.running-indicator-gear { -fx-fill: #8a8f98; }
+.running-indicator-text { -fx-text-fill: #8a8f98; -fx-font-size: 12px; }
+
+/* 滚动条 */
+.scroll-pane { -fx-background-color: transparent; }
+.scroll-pane > .viewport { -fx-background-color: transparent; }
+.scroll-bar:vertical { -fx-background-color: transparent; -fx-pref-width: 10px; }
+.scroll-bar:vertical .thumb { -fx-background-color: #2a2f3a; -fx-background-radius: 5; }
+
+.tooltip { -fx-background-color: #232a38; -fx-text-fill: #c9cdd6; -fx-background-radius: 4; }
+
+/* 侧栏分区标题 */
+.section-title { -fx-text-fill: #a8b0bb; -fx-font-size: 14px; -fx-font-weight: bold; }
+
+/* 侧栏行内悬停小按钮（会话 重命名/删除；工作空间 修改/删除；SVG 图标，无文本） */
+.btn-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #a8b0bb;
+    -fx-background-radius: 4;
+    -fx-padding: 2 6 2 6;
+    -fx-cursor: hand;
+}
+.btn-cell:hover { -fx-background-color: #2a2f3a; }
+
+/* 侧栏消息时间（5m/3h/2d） */
+.cell-time { -fx-text-fill: #98a0ab; -fx-font-size: 13px; } /* 原 #7a828e 过暗看不清 */
+
+/* 侧栏列表项名称文字：graphic 内 Label 不响应 .list-cell 的 -fx-text-fill（继承默认黑色），须显式上色 */
+.cell-text { -fx-text-fill: #d3d7de; }
+.list-view .list-cell:selected .cell-text { -fx-text-fill: #f0f2f6; }
+
+/* 无边框窗口边缘（Task 9 拖拽用） */
+.resize-edge { -fx-background-color: transparent; }
+
+/* ===== 弹窗深色（Dialog 不继承 Scene 样式表，经 Theme.style 挂载） ===== */
+.dialog-pane {
+    -fx-background-color: #15181f;
+    -fx-border-color: #2a2f3a;
+    -fx-border-width: 1;
+}
+.dialog-pane .header-panel { -fx-background-color: #15181f; }
+.dialog-pane .label { -fx-text-fill: #e6e8ee; }
+.dialog-pane .content.label { -fx-text-fill: #f0f2f6; }
+.dialog-pane .text-field, .dialog-pane .text-area {
+    -fx-background-color: #1a1d24;
+    -fx-text-fill: #e6e8ee;
+    -fx-prompt-text-fill: #7a828e;
+    -fx-border-color: #232733;
+    -fx-control-inner-background: #1a1d24;
+}
+.dialog-pane .check-box { -fx-text-fill: #e6e8ee; }
+.dialog-pane .check-box .box { -fx-background-color: #1a1d24; -fx-border-color: #232733; }
+.dialog-pane .check-box:selected .mark { -fx-background-color: #4f8cff; }
+/* 单选按钮（MCP 表单「传输」三选项）：modena 默认 -fx-text-fill: -fx-text-background-color
+   由浅灰底派生出黑字，且 RadioButton 无 .label 类不被上面规则命中 → 深底上看不清，显式改白；
+   圆圈与选中点按 check-box 同口径上色（深底 + 蓝点） */
+.dialog-pane .radio-button { -fx-text-fill: #ffffff; }
+.dialog-pane .radio-button .radio {
+    -fx-background-color: #1a1d24;
+    -fx-border-color: #232733;
+    -fx-background-radius: 1.0em;
+    -fx-border-radius: 1.0em;
+}
+.dialog-pane .radio-button:focused .radio { -fx-border-color: #4f8cff; }
+.dialog-pane .radio-button:selected .radio .dot { -fx-background-color: #4f8cff; -fx-background-insets: 0; }
+.dialog-pane .combo-box { -fx-background-color: #1a1d24; }
+.dialog-pane .combo-box .list-cell { -fx-text-fill: #e6e8ee; }
+.dialog-pane .button {
+    -fx-background-color: transparent;
+    -fx-text-fill: #a8b0bb;
+    -fx-border-color: #232733;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-padding: 6 14 6 14;
+    -fx-cursor: hand;
+}
+.dialog-pane .button:hover { -fx-text-fill: #e6e8ee; -fx-border-color: #4f8cff; }
+.dialog-pane .button:default {
+    -fx-background-color: linear-gradient(to bottom, #4f8cff, #3b6fe0);
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-border-color: transparent;
+}
+.dialog-pane .button:default:hover { -fx-background-color: linear-gradient(to bottom, #5d98ff, #4f8cff); }
+
+/* 退出确认弹窗（MainWindow.confirmClose）：无图标无 header，正文居中 */
+.dialog-exit .content { -fx-text-alignment: center; }
+
+/* ===== 危险操作确认底部卡片（ConfirmSheet，右侧面板内） ===== */
+.sheet-scrim { -fx-background-color: rgba(0,0,0,0.55); }
+.sheet-card {
+    -fx-background-color: #1a1d24;
+    -fx-background-radius: 12;
+    -fx-border-color: #2a2f3a;
+    -fx-border-radius: 12;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.4), 24, 0, 0, 8);
+    -fx-font-size: 14px; /* 弹窗卡片：钉住字号，不随主界面 .root 放大 */
+}
+.sheet-accent { -fx-background-color: #e3b341; -fx-pref-height: 3; -fx-background-radius: 12 12 0 0; }
+.sheet-warn { -fx-text-fill: #e3b341; -fx-font-size: 16px; }
+.sheet-title { -fx-text-fill: #f0f2f6; -fx-font-size: 14px; -fx-font-weight: bold; }
+.sheet-message {
+    -fx-background-color: #13161c;
+    -fx-background-radius: 8;
+    -fx-padding: 10 12 10 12;
+    -fx-text-fill: #d3d7de;
+    -fx-font-size: 13px;
+}
+.sheet-hint { -fx-text-fill: #7a828e; -fx-font-size: 11px; }
+.btn-approve {
+    -fx-background-color: linear-gradient(to bottom, #3fb950, #2ea043);
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-background-radius: 6;
+    -fx-padding: 6 14 6 14;
+    -fx-cursor: hand;
+}
+.btn-approve:hover { -fx-background-color: linear-gradient(to bottom, #4cc95e, #3fb950); }
+
+/* ===== 右侧顶部页签栏（tabs-bar，正文上方分隔线） ===== */
+.tabs-bar {
+    -fx-padding: 4 8 0 8;
+    -fx-border-color: transparent transparent #232733 transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+/* ===== 聊天正文显式 LCD：ScrollPane 裁剪下 JavaFX 8 默认回退灰阶 AA（正文发虚根因），显式指定优先 ===== */
+.chat-content { -fx-font-smoothing-type: lcd; }
+
+/* ===== 折叠文本（CollapsibleText）：摘要行可点击切换，hover 提亮 ===== */
+.log-collapsible { -fx-padding: 0; }
+.log-collapse-toggle { -fx-text-fill: #8a8f98; -fx-cursor: hand; }
+.log-collapse-toggle:hover { -fx-text-fill: #f0f2f6; }

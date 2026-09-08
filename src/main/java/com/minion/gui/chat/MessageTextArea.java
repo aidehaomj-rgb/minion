@@ -1,0 +1,139 @@
+package com.minion.gui.chat;
+
+import javafx.application.Platform;
+import javafx.geometry.Insets;
+import javafx.scene.Node;
+import javafx.scene.control.TextArea;
+import javafx.scene.text.Text;
+
+/**
+ * 消息只读 TextArea：原生支持鼠标拖选/Ctrl+C/双击选词/右键菜单（替代 Label 的右键+双击复制）。
+ *
+ * 高度随内容自适应（手动管理），内容全部平铺展开、无内部滚动条，滚动只由外层 ScrollPane 统一负责。
+ * 三道防线（各自应对一个已实证的布局坑）：
+ *
+ * 1. 构造即设显式 prefHeight（防 Parent.prefHeightCache 缓存旧值）：prefHeightProperty 永不为
+ *    USE_COMPUTED_SIZE，布局早期 Region.prefHeight(-1) 就不会经 Parent.prefHeightCache 缓存
+ *    TextAreaSkin 的默认 10 行高度；否则缓存永不失效 → 长消息被 VBox 按旧值压缩（探针实证）。
+ * 2. 保守测量（防内部滚动条自反馈死锁）：measurer 的 wrap 宽度预留内部滚动条槽位（边框+滚动条，
+ *    实测 12px）——TextArea 内部文本 wrap 在滚动条出现时会变窄、行数变多、内容变高，
+ *    若按全宽测量则高度低估 → 滚动条出现 → wrap 更窄 → 死锁。保守窄宽测量使高度恒 ≥ 内容。
+ * 3. 布局后精校（消除保守测量的空隙）：双 runLater 在布局 pass 后读内部 Text 节点
+ *    （TextAreaSkin 实际渲染）的真实高度，setPrefHeight 精确收敛；临界 wrap 行差/行高差完全消除。
+ */
+public class MessageTextArea extends TextArea {
+
+    /** 高度余量：补偿 TextArea skin 内部偏差（目验校准点：低估→内部滚动条回归，高估→文本下方小空隙） */
+    private static final double HEIGHT_FUDGE = 4;
+
+    /** 宽度未定（构造/首次布局前）时的测量兜底；布局后宽度监听会用真实宽度更新，此值只影响早期临时高度 */
+    private static final double FALLBACK_WIDTH = 600;
+
+    /** 内部文本 wrap 比控件内容区窄的固定槽位（内部 ScrollPane 边框 1px×2 + 垂直滚动条 10px，实测 12px@modena/主题） */
+    private static final double INNER_SLOT = 12;
+
+    /** 行高比初始值：TextAreaView 内部 Text 行高与普通 Text 行高的实测比值
+     *  （1.0686@14px YaHei，探针 31 在 22 行/42 行处均复现）——measurer 直测低估约 7%/行，
+     *  流式期间 prefH 恒小于内容 → 滚动条出现 → wrap 变窄 → 死锁（探针 29/31 实证） */
+    private static final double LINE_SCALE_INIT = 1.07;
+
+    /** 测量器：与自身同字体，wrap 宽度 = 内容区宽度 - 槽位，layoutBounds 高 = 文本行高 */
+    private final Text measurer = new Text();
+
+    /** 行高自适应比例：校正时按 skin 实际渲染高度反推，补偿 measurer 行高差（随字体自适应） */
+    private double lineScale = LINE_SCALE_INIT;
+
+    /** 最近一次 relayout 的测量文本高度（与 lineScale 配对，供新鲜性检测/反推实际比例） */
+    private double lastMeasuredTextHeight = 0;
+
+    /** 布局后精校已调度（节流：流式高频 setText 只校正一次） */
+    private boolean correctScheduled = false;
+
+    /** 布局后精校重试上限：连续校正超限即放弃本轮自续（防 FX 线程被 runLater 死循环占满，
+     *  线上实证：点击会话重放历史后 FX 线程持续满核 20%+ CPU 且关会话不降）。
+     *  重试条件（ratio 超范围 / exact 偏差）在空闲时无状态变化，无限重试=纯空转；
+     *  relayout（文本/宽度/字体变化）重置计数，下一轮测量后重新校正。 */
+    private static final int MAX_CORRECT_ATTEMPTS = 3;
+
+    /** 连续校正次数（relayout 重置）：超限停止自续校正，防自续死循环 */
+    private int correctAttempts = 0;
+
+    public MessageTextArea(String text) {
+        super(text);
+        setEditable(false);
+        setWrapText(true);
+        getStyleClass().add("msg-textarea");
+        // 文本/宽度/全局字号变化 → 重算高度；首次布局前宽度未定则跳过，宽度监听兜底触发
+        textProperty().addListener((obs, ov, nv) -> relayout());
+        widthProperty().addListener((obs, ov, nv) -> relayout());
+        fontProperty().addListener((obs, ov, nv) -> relayout());
+        // 构造即设置显式 prefHeight：prefHeightProperty 永不为 USE_COMPUTED_SIZE，
+        // 绕过 Parent.prefHeightCache 缓存 TextAreaSkin 默认 10 行高度的旧值（见类注释防线 1）
+        relayout();
+    }
+
+    /** 流式增量更新：就地 setText，不重建节点（不打断用户操作/选中态） */
+    public void setStreamText(String text) {
+        setText(text);
+    }
+
+    /** 高度自适应：保守测量（按滚动条槽位窄 wrap）→ 高度恒 ≥ 内容 → 内部滚动条不出现；布局后精校消除空隙 */
+    private void relayout() {
+        correctAttempts = 0; // 新一轮测量：允许重新精校（流式/改宽/改字重算，校正机会复位）
+        double width = getWidth();
+        if (width <= 0) width = FALLBACK_WIDTH; // 构造/首次布局前宽度未定：兜底测量，稍后宽度监听用真实宽度更新
+        Insets pad = getPadding();
+        measurer.setFont(getFont());
+        measurer.setText(getText()); // 关键：测量器必须同步当前文本，否则一直按空文本测出 1 行高
+        measurer.setWrappingWidth(Math.max(width - pad.getLeft() - pad.getRight() - INNER_SLOT, 1));
+        double textH = measurer.getLayoutBounds().getHeight();
+        lastMeasuredTextHeight = textH;
+        // 行高比补偿：skin 内部 Text 行高 ≈ 普通 Text × 1.07（否则流式期间恒低估 → 滚动条死锁）
+        setPrefHeight(textH * lineScale + pad.getTop() + pad.getBottom() + HEIGHT_FUDGE);
+        scheduleCorrect(); // 布局后按 skin 实际渲染精校（消除保守测量的空隙/临界 wrap 行差）
+    }
+
+    /** 布局后精校：读内部 Text 节点（skin 渲染的真实内容高度）。双 runLater 保证在布局 pass 之后执行 */
+    private void scheduleCorrect() {
+        if (correctScheduled) return; // 节流：流式高频变化只调度一次
+        correctScheduled = true;
+        Platform.runLater(() -> Platform.runLater(() -> {
+            correctScheduled = false;
+            // 收敛保护：连续校正超限即放弃本轮（条件不满足且无状态变化时，重试=自续死循环，
+            // 线上实证 FX 线程被 runLater 占满；放弃精校仅留保守空隙，不影响高度正确性）
+            if (++correctAttempts > MAX_CORRECT_ATTEMPTS) return;
+            Text inner = innerText();
+            if (inner == null) return; // 未挂载/未渲染：宽度/文本监听会再触发
+            Insets pad = getPadding();
+            // 布局新鲜性检测：inner 的布局高度必须与「当前文本的测量高度 × 行高比」吻合，
+            // 否则说明它仍是旧文本的布局（流式窗口期）——直接精校会把新高度覆盖回旧值
+            // （探针 29 实证 box3H 持续滞后；inner.getText() 恒等于当前文本，文本比对挡不住）
+            if (lastMeasuredTextHeight > 0) {
+                double ratio = inner.getLayoutBounds().getHeight() / lastMeasuredTextHeight;
+                if (ratio < lineScale - 0.03 || ratio > lineScale + 0.05) {
+                    scheduleCorrect(); // 布局未跟上当前文本：下轮布局后重试（有界，超限自停）
+                    return;
+                }
+                if (ratio > 1.0 && Math.abs(ratio - lineScale) > 0.005) {
+                    lineScale = ratio; // 行高比自适应（随字体变化自校准）
+                }
+            }
+            double exact = inner.getLayoutBounds().getHeight() + pad.getTop() + pad.getBottom() + HEIGHT_FUDGE;
+            if (Math.abs(exact - getPrefHeight()) > 0.5) {
+                // 只增不减：高度只往大校正，永不触发「高度↓→内部滚动条出现→wrap 变窄→行数↑→
+                // 高度↑→滚动条消失→行数↓」的临界震荡（线上实证的自续死循环另一路径）；
+                // 保守测量已保证高度恒 ≥ 内容，小空隙无害（原防线 2 语义）
+                if (exact > getPrefHeight()) setPrefHeight(exact);
+                scheduleCorrect(); // 高度变化可能改变滚动条状态（wrap 宽度随之变化）→ 再校正一次（有界）
+            }
+        }));
+    }
+
+    /** 内部文本节点：TextAreaSkin 渲染内容的 TextAreaView（样式类 text），与 measurer 同字体同文本 */
+    private Text innerText() {
+        for (Node n : lookupAll(".text")) {
+            if (n instanceof Text) return (Text) n;
+        }
+        return null;
+    }
+}
