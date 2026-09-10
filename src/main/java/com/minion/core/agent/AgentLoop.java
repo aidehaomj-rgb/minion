@@ -778,7 +778,7 @@ public class AgentLoop {
         try {
             Tool tool = registry.get(call.name);
             if (tool == null) {
-                ToolResult result = ToolResult.error("未知工具: " + call.name);
+                ToolResult result = ToolResult.error("工具不存在或已停用: " + call.name);
                 DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
                 return result;
             }

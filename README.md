@@ -19,14 +19,15 @@ jar 自举行为（启动器内置，双击 / 命令行同样生效）：
 
 首次运行在 jar 同目录自动生成 `config.properties`、`workspace.json`、`model.json`（MCP 服务器配置 `mcp.json` 在设置窗首次保存时生成）。
 
-## 配置三件套（jar 同目录）
+## 配置文件（jar 同目录）
 
 | 文件 | 内容 |
 |---|---|
 | `workspace.json` | 工作空间（名称、项目路径 workDir、项目主说明文件 projectMd、项目级技能路径 projectSkillsDir）；界面「＋ 新建工作空间」创建（名称与项目路径必填且须是已存在文件夹，另两项可选、填了才校验：主说明文件须是已存在文件、技能路径须是已存在文件夹；均可浏览选取）；首次启动无本文件时生成的 default 空间只填项目路径 `.`，主说明文件与技能路径留空 |
 | `model.json` | 模型配置（多模型：url/apiKey/modelName/provider/thinking/maxContextTokens 等）；设置窗「模型」页管理 |
-| `config.properties` | browser（CDP 浏览器）、python.path（Anaconda/Python）、permission/confirm（权限模式与高危确认）、context（输出/读取策略）、agent（工具空输出占位）、paths（读逃逸）、skills.dir（技能目录）、boot.console（自举控制台窗口开关）；设置窗「基础设置」页可改并可浏览选择 Python、浏览器和技能目录 |
+| `config.properties` | python.path（Anaconda/Python）、permission/confirm（权限模式与高危确认）、context（输出/读取策略）、agent（工具空输出占位）、paths（空间外读/写）、skills.dir（技能目录）、boot.console（自举控制台窗口开关）；设置窗「基础设置」页可改并可浏览选择 Python 和技能目录；浏览器改由 `tools.json` 管理 |
 | `mcp.json` | MCP 服务器列表（名称/传输/命令/参数/环境变量/URL/请求头/启用开关）；设置窗「MCP」页管理（列表+状态点+启用开关+新建/编辑/删除/重连） |
+| `tools.json` | 可插拔工具配置：`browser`（路径/端口/用户数据目录/无头/超时 + 启用）、`mysql`/`postgresql`/`oracle`（启用 + 数据源列表 + 当前选中）、`ssh`（启用 + 连接列表 + 当前选中）；设置窗「工具」页管理，改动即落盘、全局会话下一轮生效 |
 
 工作空间弹窗（新建/修改）各字段的填写要求与含义：
 
@@ -54,7 +55,7 @@ jar 自举行为（启动器内置，双击 / 命令行同样生效）：
 - `/queue add <任务>`：当前任务完成后按 FIFO 自动执行；`/queue list|remove|clear` 管理队列
 - `/sessions [关键词]`：搜索会话；`/session pin|archive|fork|export|import` 管理会话
 - `/context`、`/memory`、`/permissions`、`/secrets`：上下文、项目记忆、权限策略和加密密钥库入口
-- 设置（右上角齿轮图标）：左列导航（基础设置 / 模型 / MCP / 关于）；模型页单击仅选中模型（查看配置用「修改」），选中后点「激活」按钮切换，选中已激活模型时按钮置灰；切换/修改参数即时生效（运行中会话下一轮生效）；基础设置页底部按钮栏「应用」（保存不关窗）与「关闭」
+- 设置（右上角齿轮图标）：左列导航（基础设置 / 模型 / MCP / 工具 / 关于）；模型页单击仅选中模型（查看配置用「修改」），选中后点「激活」按钮切换，选中已激活模型时按钮置灰；切换/修改参数即时生效（运行中会话下一轮生效）；基础设置页底部按钮栏「应用」（保存不关窗）与「关闭」
 - 无会话时直接发送自动新建会话；发送后输入框自动清空
 - 消息区发送消息强制置底；新内容增长时贴底自动跟随，向上翻过半屏暂停、翻回底半屏恢复
 - 每轮回复结束显示 token 统计行（计时器图标 · 耗时 · in/out/thinking 会话累计 · ctx 上下文占比）
@@ -119,14 +120,15 @@ jar 同目录 `session/<workSpaceName>/`，每会话一个 JSON 文件（每轮�
 
 ## 浏览器工具(登录、点击、查询、调试网页)
 
-对接本机 Chrome(CDP 协议,零额外依赖)。首次使用自动启动 Chrome(默认有头窗口,便于观察调试;
-自动化场景可配置 `browser.headless=true`)。配置项:
+对接本机 Chrome(CDP 协议,零额外依赖)。首次使用自动启动 Chrome(默认有头窗口,便于观察调试;自动化场景可配置无头)。**默认不启用**——在 设置 → 工具 勾选「浏览器操作」的启用开关并在「配置」里填好浏览器路径后，模型才看得到这几个工具（改完下一轮对话即生效；配置保存会关闭已由本软件启动的 Chrome 并按新配置重建，已打开的页面随之关闭）。
 
-    browser.path=          # Chrome 可执行文件路径,留空自动探测常见安装位置
-    browser.port=9222      # 调试端口(Chrome 默认只绑定本机,不暴露局域网)
-    browser.userDataDir=./.minion/browser-profile   # 登录状态持久化目录(清空即重置)
-    browser.headless=false
-    browser.timeoutMs=30000
+配置项（存 `tools.json`，设置窗「工具」页管理）：
+
+    path=          # Chrome 可执行文件路径,留空自动探测常见安装位置(也可改配置)
+    port=9222      # 调试端口(Chrome 默认只绑定本机,不暴露局域网)
+    userDataDir=./.minion/browser-profile   # 登录状态持久化目录(清空即重置)
+    headless=false
+    timeoutMs=30000
 
 用法(模型自动调用,也可在对话里描述操作):
 
@@ -163,7 +165,27 @@ Playwright 示例（需要 Node.js 18+，可在 [nodejs.org](https://nodejs.org)
 1. 设置 → MCP → 新建：名称 `playwright`、传输 `stdio`、命令 `npx`、参数 `@playwright/mcp`，保存后勾选「启用」
 2. 新建会话，对话里让模型「打开 https://www.baidu.com 并返回标题」→ 模型会调用 playwright 的浏览器工具完成操作
 
-与浏览器（CDP）工具的关系：MCP 是独立通道，二者可共存。`config.properties` 未配置 `browser.path` 时不加载 CDP 工具（避免未装 Chrome 环境报错），MCP 不受影响。
+与浏览器（CDP）工具的关系：MCP 是独立通道，二者可共存；浏览器工具需在 设置 → 工具 页启用并配置路径后才可用（未启用时模型看不到这些工具，MCP 不受影响）。
+
+## 可插拔工具与只读数据库工具（设置 → 工具）
+
+默认全部不启用。启用开关就是「工具描述是否注入」的开关——不启用时模型在系统提示与 schemas 里完全看不到该工具，调用返回「工具不存在或已停用」。改动即落盘 `tools.json`，全局会话下一轮请求生效，无需重启。
+
+- **浏览器操作**：启用 + 配置后可用（见上节）
+- **mysql / postgreSQL / oracle**（只读）：`DbMysql` / `DbPostgres` / `DbOracle` 三个工具，只读当前选中的数据源
+  - **只支持读操作**：SQL 白名单（SELECT/WITH/SHOW/DESC/DESCRIBE/EXPLAIN，拒绝多语句与 INTO OUTFILE / FOR UPDATE 等），连接层 setReadOnly(true)，且每次调用**新建连接、用后即关**（不落连接池）——建议给只读账号（低权限）以求纵深防御
+  - postgreSQL 仅支持 query；schema/describe 会返回禁用提示（MySQL/Oracle 支持 query+schema+describe）
+  - 结果上限 100 行（超出在表头标注「行数超上限，已截断」）、单格超 120 字符截断、超 30k 字符落盘到会话临时目录并给路径
+  - 数据源在 设置 → 工具 的行内下拉框选择当前数据源（切换即落盘生效，无需进管理弹窗），「数据源管理」里新建/修改/删除/测试连接；URL 示例：
+    - MySQL：`jdbc:mysql://127.0.0.1:3306/db?useSSL=false&allowPublicKeyRetrieval=true&useInformationSchema=true`（连 5.x 需前两项；`useInformationSchema=true` 让表注释 REMARKS 有值）
+    - PostgreSQL：`jdbc:postgresql://127.0.0.1:5432/db`
+    - Oracle：`jdbc:oracle:thin:@127.0.0.1:1521:ORCL`
+  - 密码明文存 `tools.json`（与 `model.json` 的 apiKey 同口径）；长查询 300 秒超时，超时不一定真能打断数据库侧的查询
+- **ssh**（远程运维）：`SshExec`（远程执行命令，危险命令如 rm/dd/systemctl/apt 弹确认，默认超时 120s，输出超长自动截断落盘）+ `SftpLs`/`SftpGet`/`SftpPut`/`SftpRm`/`SftpMkdir`/`SftpRename` 六文件操作（SftpPut 覆盖与 SftpRm 删除弹确认；SftpRm 不递归，递归删除用 SshExec 的 rm -rf）
+  - tools.json 段 `ssh`：`enabled` + `current` + `connections[]`（name/host/port/user/password/privateKeyPath/passphrase）；密码与私钥口令明文存（与 apiKey 同口径）
+  - 设置 → 工具 → ssh：启用开关 + 当前连接下拉 + 「连接管理」（表单先选「密码/私钥」再填对应项，保存时两套字段互斥）
+  - 认证支持密码与私钥（可选口令）；连接/命令均每次新建即关；known_hosts 指纹不校验（StrictHostKeyChecking=no，限内网/测试服务器使用）
+  - 依赖：com.github.mwiede:jsch 2.28.7（JDK8 兼容、零传递依赖）
 
 ## 模型供应商配置（deepseek / qwen）
 
