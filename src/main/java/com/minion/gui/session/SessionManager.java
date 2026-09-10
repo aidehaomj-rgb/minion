@@ -33,11 +33,9 @@ import com.minion.core.tools.ToolRegistry;
 import com.minion.core.tools.WebFetchTool;
 import com.minion.core.tools.Workspace;
 import com.minion.core.tools.WriteTool;
-import com.minion.core.tools.browser.BrowserDebugTool;
-import com.minion.core.tools.browser.BrowserEvalTool;
-import com.minion.core.tools.browser.BrowserScreenshotTool;
-import com.minion.core.tools.browser.BrowserSession;
-import com.minion.core.tools.browser.BrowserTool;
+import com.minion.core.tools.plugin.ToolContext;
+import com.minion.core.tools.plugin.ToolPlugin;
+import com.minion.core.tools.plugin.ToolPluginManager;
 import com.minion.core.tools.confirm.ConfirmGate;
 import com.minion.core.tools.confirm.ConfirmUi;
 import com.minion.gui.command.CommandDispatcher;
@@ -89,7 +87,7 @@ public class SessionManager {
     private final WorkspaceManager workspaces;
     private final ModelManager models;
     private final SkillSet skillSet; // 内置列表 + 项目实扫合并；建会话时取一次不可变快照
-    private final BrowserSession browserSession; // 可为 null（测试/未配置浏览器路径）
+    private final ToolPluginManager plugins; // 可为 null（测试）；可插拔工具的启用判定与配置来源
     private final McpManager mcp; // 可为 null（测试）；MCP 服务器管理：惰性连接 + 工具补注册
     private final CommandDispatcher dispatcher; // 斜杠命令本地分发（GUI 输入路径）
     private final List<Listener> listeners = new ArrayList<Listener>();
@@ -124,7 +122,7 @@ public class SessionManager {
 
     public SessionManager(ConfirmUi confirmUi, Config config, Path jarDir,
                           WorkspaceManager workspaces, ModelManager models,
-                          List<Skill> allSkills, BrowserSession browserSession,
+                          List<Skill> allSkills, ToolPluginManager plugins,
                           McpManager mcp) {
         this.confirmUi = confirmUi;
         this.config = config;
@@ -132,7 +130,7 @@ public class SessionManager {
         this.workspaces = workspaces;
         this.models = models;
         this.skillSet = new SkillSet(allSkills == null ? new ArrayList<Skill>() : allSkills);
-        this.browserSession = browserSession;
+        this.plugins = plugins;
         this.mcp = mcp;
         this.dispatcher = new CommandDispatcher();
         if (mcp != null) {
@@ -151,6 +149,9 @@ public class SessionManager {
     public ModelManager models() { return models; }
     /** MCP 管理器（设置窗 MCP 页/启用开关共用；Main 装配后非 null） */
     public McpManager mcpManager() { return mcp; }
+
+    /** 可插拔工具管理器（设置窗「工具」页共用；Main 装配后非 null） */
+    public ToolPluginManager plugins() { return plugins; }
 
     public void addListener(Listener l) { listeners.add(l); }
 
@@ -310,17 +311,20 @@ public class SessionManager {
         ConfirmGate gate = ctx.confirmGate;
         String tmpDir = tmpDirOf(sessionId).toString();
         registry.register(new ReadTool(workspace, skillsDir, tmpDir, gate));
-        registry.register(new WriteTool(workspace, skillsDir, tmpDir));
-        registry.register(new EditTool(workspace, skillsDir, tmpDir));
+        registry.register(new WriteTool(workspace, skillsDir, tmpDir, gate));
+        registry.register(new EditTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new GlobTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new GrepTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new BashTool(workspace, tmpDirOf(sessionId)));
         registry.register(new WebFetchTool());
-        if (browserSession != null) {
-            registry.register(new BrowserTool(browserSession));
-            registry.register(new BrowserEvalTool(browserSession));
-            registry.register(new BrowserScreenshotTool(browserSession, workspace, skillsDir, tmpDir, gate));
-            registry.register(new BrowserDebugTool(browserSession));
+        // 可插拔工具：无条件注册并打插件标签，可见性交给 gate 在 schemas()/get() 时判定
+        // （拉模式——改开关无需遍历会话，AgentLoop 下一轮 registry.schemas() 自动生效）
+        if (plugins != null) {
+            ToolContext tc = new ToolContext(workspace, skillsDir, tmpDir, gate);
+            for (ToolPlugin p : plugins.plugins()) {
+                for (Tool t : p.createTools(tc)) registry.register(p.id(), t);
+            }
+            registry.setGate(plugins);
         }
         if (mcp != null) {
             for (McpServer s : mcp.servers()) {
