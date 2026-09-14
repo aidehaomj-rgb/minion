@@ -69,6 +69,18 @@ public class AgentLoopTest {
         return loop;
     }
 
+    private AgentLoop newLoopWithContext(int maxTokens, double threshold, int keepRecent) {
+        com.minion.core.context.ContextManager cm = new com.minion.core.context.ContextManager(
+                maxTokens, threshold, keepRecent, llm, 0);
+        AgentLoop loop = new AgentLoop(llm, registry,
+                new SystemPromptBuilder(tmp.getRoot().getPath() + "/project.md"),
+                confirm, ui, cm,
+                new Workspace(tmp.getRoot().getPath()),
+                Session.create(tmp.getRoot().getPath(), "test-model"));
+        loop.roundLimit = 20;
+        return loop;
+    }
+
     @Test
     public void singleTurn_noTools() {
         llm.addTurn("好的");
@@ -1707,6 +1719,25 @@ public class AgentLoopTest {
         assertFalse(thirdHint.content.startsWith("/no_think"));
         assertTrue(thirdHint.content.contains("返回了空响应"));
         assertEquals("最终产生有效结果", loop.messages().get(loop.messages().size() - 1).content);
+    }
+
+    @Test
+    public void repeatedEmptyResponses_triggerForcedContextRecovery() {
+        llm.addTurnWithTools(null, null, null);
+        llm.addTurnWithTools(null, null, null);
+        llm.compressResult = "保留任务目标与已完成步骤的压缩摘要";
+        llm.addTurn("压缩后恢复输出");
+        AgentLoop loop = newLoopWithContext(100000, 0.8, 50);
+        for (int i = 0; i < 20; i++) {
+            loop.messages().add(Message.user("历史数据" + i));
+            loop.messages().add(Message.assistant("历史结果" + i));
+        }
+        loop.runUserTurn("继续执行");
+
+        assertNotNull("连续空响应必须调用压缩模型", llm.lastRequestMessages);
+        assertTrue(ui.warnings.toString().contains("强制压缩上下文"));
+        assertTrue(ui.warnings.toString().contains("空响应恢复压缩完成"));
+        assertEquals("压缩后恢复输出", loop.messages().get(loop.messages().size() - 1).content);
     }
 
     @Test

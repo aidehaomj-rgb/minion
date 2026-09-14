@@ -289,7 +289,9 @@ public class AgentLoop {
         try {
             int beforeTokens = contextManager.estimate(session.messages);
             List<Message> beforeMessages = session.messages;
-            session.messages = contextManager.compress(session.messages);
+            // 用户主动 /compact 不受自动阈值限制；配置窗口可能大于服务端真实窗口，
+            // 即使界面仅显示 39%，也必须能强制缩减当前活跃工具链。
+            session.messages = contextManager.compressForRecovery(session.messages);
             int afterTokens = contextManager.estimate(session.messages);
             if (session.messages != beforeMessages) {
                 ui.onWarning("已压缩上下文（" + beforeTokens + " → " + afterTokens + " token，历史摘要已置前）");
@@ -404,6 +406,7 @@ public class AgentLoop {
         int contextRecoveryAttempts = 0;
         int lengthContinuationAttempts = 0;
         int prematureStopRecoveries = 0;
+        boolean silentResponseCompressionAttempted = false;
         String lengthContinuationHint = null;
         boolean nextRequestWithoutThinking = false;
         try {
@@ -628,6 +631,14 @@ public class AgentLoop {
                     // 只有思考 -> 下一轮关思考；关思考后返回空包 -> 恢复思考。
                     // 某些 Qwen 网关在 enable_thinking=false 时无法生成任何 token，不能持续强关。
                     nextRequestWithoutThinking = hadThinking;
+                    if (!hadThinking && prematureStopRecoveries >= 2
+                            && !silentResponseCompressionAttempted && contextManager != null) {
+                        silentResponseCompressionAttempted = true;
+                        if (recoverFromSilentResponses()) {
+                            prematureStopRecoveries = 0;
+                            nextRequestWithoutThinking = false;
+                        }
+                    }
                     ui.onWarning("模型未产生可执行动作，正在自动继续任务（第 "
                             + prematureStopRecoveries + " 次）");
                     continue;
@@ -843,6 +854,31 @@ public class AgentLoop {
      *  它累积在 DeepSeekClient 方法内的局部变量里，onFinish 前既不对外暴露也不渲染，重来无重复显示风险 */
     private boolean noOutputYet(StringBuilder content, StringBuilder thinking) {
         return !hasVisibleText(content) && !hasVisibleText(thinking);
+    }
+
+    /** 服务端不报上下文超限、只静默返回空包时的恢复路径。配置的 maxContextTokens
+     *  可能高于真实模型窗口，不能再依赖百分比阈值。 */
+    private boolean recoverFromSilentResponses() {
+        int before = contextManager.estimate(session.messages);
+        ui.onCompressingChanged(true);
+        try {
+            ui.onWarning("模型连续返回空响应，正在强制压缩上下文并重建请求（当前 "
+                    + before + " token）");
+            List<Message> old = session.messages;
+            session.messages = contextManager.compressForRecovery(session.messages);
+            int after = contextManager.estimate(session.messages);
+            if (session.messages == old || after >= before) {
+                ui.onWarning("空响应恢复压缩未成功，将切换思考策略继续尝试");
+                return false;
+            }
+            ui.onWarning("空响应恢复压缩完成（" + before + " → " + after
+                    + " token），正在继续原任务");
+            pushContextStats();
+            persistSession();
+            return true;
+        } finally {
+            ui.onCompressingChanged(false);
+        }
     }
 
     /** 部分兼容服务会在正文通道只返回空格、换行、BOM 或零宽空格。 */
