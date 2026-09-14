@@ -1759,6 +1759,52 @@ public class AgentLoopTest {
         assertTrue(ui.warnings.toString().contains("最终交付尚未确认"));
     }
 
+    @Test
+    public void malformedToolArguments_areDiscardedAndRegenerated() {
+        ToolCall broken = new ToolCall();
+        broken.id = "broken-json";
+        broken.name = "example";
+        broken.arguments = "{\"text\":";
+        ToolCall valid = new ToolCall();
+        valid.id = "valid-json";
+        valid.name = "example";
+        valid.arguments = "{\"text\":\"ok\"}";
+        llm.addTurnWithTools(Collections.singletonList(broken), null);
+        llm.addTurnWithTools(Collections.singletonList(valid), null);
+        llm.addTurn("任务完成");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("执行任务");
+
+        assertEquals(3, llm.requests.size());
+        assertEquals("损坏调用不能执行", 1, ui.toolCalls.size());
+        assertTrue(ui.warnings.toString().contains("JSON 损坏"));
+        Message repair = llm.requests.get(1).messages.get(llm.requests.get(1).messages.size() - 1);
+        assertTrue(repair.content.contains("arguments 不是完整合法的 JSON"));
+    }
+
+    @Test
+    public void persistedMalformedToolArguments_areHealedBeforeNextRequest() {
+        AgentLoop loop = newLoop();
+        ToolCall broken = new ToolCall();
+        broken.id = "old-broken";
+        broken.name = "example";
+        broken.arguments = "***";
+        Message assistant = Message.assistant("旧的阶段性内容");
+        assistant.toolCalls = Collections.singletonList(broken);
+        loop.messages().add(assistant);
+        loop.messages().add(Message.toolResult("old-broken", "example", "旧结果"));
+        llm.addTurn("会话已恢复");
+        loop.runUserTurn("继续");
+
+        assertTrue(ui.warnings.toString().contains("自动清理会话历史"));
+        for (Message m : llm.requests.get(0).messages) {
+            if (m.toolCalls != null) {
+                for (ToolCall tc : m.toolCalls) assertNotEquals("old-broken", tc.id);
+            }
+            assertNotEquals("old-broken", m.toolCallId);
+        }
+    }
+
     private static String repeat(String value, int count) {
         StringBuilder out = new StringBuilder(value.length() * count);
         for (int i = 0; i < count; i++) out.append(value);

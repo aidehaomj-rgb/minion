@@ -1,6 +1,7 @@
 package com.minion.core.agent;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.minion.core.diagnostics.DiagnosticLog;
 import com.minion.core.context.ContextManager;
 import com.minion.core.context.TokenCounter;
@@ -330,6 +331,7 @@ public class AgentLoop {
         session.modelName = s.modelName;
         session.title = s.title;
         scrubHalfTurn(); // 恢复历史同样清洗半轮残留（外部/旧格式文件可能含残缺 toolCalls）
+        scrubInvalidToolArguments();
         if (s.todos != null) session.todos.replace(s.todos.items); // 原地装载（replace 内部 clear+addAll）
         if (s.usage != null) session.usage.restore(s.usage);
         workspace.restore(s.cwd);
@@ -385,11 +387,59 @@ public class AgentLoop {
         }
     }
 
+    /** 清洗旧版本落盘的非法 tool arguments；否则服务端校验历史时会让会话永久 400。 */
+    private int scrubInvalidToolArguments() {
+        List<String> invalidIds = new ArrayList<String>();
+        for (int i = session.messages.size() - 1; i >= 0; i--) {
+            Message m = session.messages.get(i);
+            if (m.role != Message.Role.ASSISTANT || m.toolCalls == null) continue;
+            List<ToolCall> valid = new ArrayList<ToolCall>();
+            for (ToolCall tc : m.toolCalls) {
+                if (normalizeAndValidateToolArguments(tc)) valid.add(tc);
+                else if (tc != null && tc.id != null) invalidIds.add(tc.id);
+            }
+            m.toolCalls = valid.isEmpty() ? null : valid;
+            if (!hasVisibleText(m.content) && (m.toolCalls == null || m.toolCalls.isEmpty())) {
+                session.messages.remove(i);
+            }
+        }
+        for (int i = session.messages.size() - 1; i >= 0; i--) {
+            Message m = session.messages.get(i);
+            if (m.role == Message.Role.TOOL && invalidIds.contains(m.toolCallId)) session.messages.remove(i);
+        }
+        return invalidIds.size();
+    }
+
+    private static boolean normalizeAndValidateToolArguments(ToolCall tc) {
+        if (tc == null) return false;
+        if (tc.arguments == null || tc.arguments.trim().isEmpty()) {
+            tc.arguments = "{}";
+            return true;
+        }
+        try {
+            return new JsonParser().parse(tc.arguments).isJsonObject();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static boolean validToolCalls(List<ToolCall> calls) {
+        if (calls == null) return true;
+        for (ToolCall tc : calls) if (!normalizeAndValidateToolArguments(tc)) return false;
+        return true;
+    }
+
     public void runUserTurn(String input) { runUserTurn(input, null); }
 
     public void runUserTurn(String input, List<ImagePart> images) {
         interrupted = false;
         lastIneffectiveAutoCompressTokens = -1;
+        int repairedToolCalls = scrubInvalidToolArguments();
+        if (repairedToolCalls > 0) {
+            ui.onWarning("已自动清理会话历史中 " + repairedToolCalls
+                    + " 个损坏的工具调用参数，正在重新发送请求");
+            persistSession();
+        }
         long start = System.currentTimeMillis(); // 统计行：轮次耗时
         int reportFromIndex = session.messages.size();
         boolean toolBackedContext = hasToolContext(session.messages);
@@ -581,11 +631,15 @@ public class AgentLoop {
                 boolean truncatedByLength = "length".equalsIgnoreCase(finish[0]);
                 boolean truncatedToolCall = truncatedByLength
                         && toolCalls[0] != null && !toolCalls[0].isEmpty();
+                boolean malformedToolCall = !truncatedByLength
+                        && toolCalls[0] != null && !toolCalls[0].isEmpty()
+                        && !validToolCalls(toolCalls[0]);
                 if (truncatedByLength) {
                     // 参数可能只收到半截 JSON；绝不能入历史或执行，否则下一轮会 400，
                     // 更严重时可能执行与模型原意不同的残缺命令。
                     toolCalls[0] = null;
                 }
+                if (malformedToolCall) toolCalls[0] = null;
 
                 // assistant 回复（含思考与工具调用）入会话历史——reasoningContent 回传硬性要求；
                 // 无正文且无工具调用的空回复不入历史（仅思考消息回传会 400）
@@ -601,6 +655,22 @@ public class AgentLoop {
                 }
 
                 if (interrupted) break;
+
+                if (malformedToolCall) {
+                    if (lengthContinuationAttempts >= 12) {
+                        ui.onError("模型连续生成非法 JSON 工具参数，已停止自动恢复");
+                        break;
+                    }
+                    lengthContinuationAttempts++;
+                    lengthContinuationHint = "[系统工具调用修复] 上一次工具调用的 arguments 不是完整合法的 JSON，"
+                            + "该调用未保存、未执行。请重新生成完整工具调用；arguments 必须是单个合法 JSON 对象，"
+                            + "不要使用 Markdown 代码块或省略内容。";
+                    nextRequestWithoutThinking = true;
+                    ui.onWarning("模型工具参数 JSON 损坏，正在要求重新生成（第 "
+                            + lengthContinuationAttempts + " 次）");
+                    persistSession();
+                    continue;
+                }
 
                 if (truncatedByLength) {
                     if (lengthContinuationAttempts >= 12) {
