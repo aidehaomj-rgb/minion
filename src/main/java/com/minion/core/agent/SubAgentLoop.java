@@ -46,6 +46,7 @@ public class SubAgentLoop {
         int retries = 0;
         int lengthContinuationAttempts = 0;
         String lengthContinuationHint = null;
+        boolean nextRequestWithoutThinking = false;
         StringBuilder completedContent = new StringBuilder();
         final boolean[] inRetry = new boolean[1]; // 瞬时错误重试循环进行中（首个流式增量到达即复位指示器）；方法级：外层 InterruptedException 需访问
         try {
@@ -96,8 +97,10 @@ public class SubAgentLoop {
                     requestMessages.add(Message.user(lengthContinuationHint));
                     lengthContinuationHint = null;
                 }
+                final boolean requestWithoutThinking = nextRequestWithoutThinking;
+                nextRequestWithoutThinking = false;
                 try {
-                    llm.streamChat(requestMessages, subAgentTools(), handler);
+                    streamChat(requestMessages, handler, requestWithoutThinking);
                 } catch (LlmException e) {
                     if (Thread.currentThread().isInterrupted()) {
                         // 已被主循环中断（cancel 引发的 Canceled 错误）：不重试
@@ -127,7 +130,7 @@ public class SubAgentLoop {
                                 break;
                             }
                             try {
-                                llm.streamChat(requestMessages, subAgentTools(), handler);
+                                streamChat(requestMessages, handler, requestWithoutThinking);
                                 // 成功后静默恢复（不打扰正文）：首个流式增量/onFinish 已复位指示器，
                                 // 若流中断（onError 回调已提示）则落下方正常路径处理
                                 break;
@@ -190,6 +193,7 @@ public class SubAgentLoop {
                     lengthContinuationHint = partialTool
                             ? "[系统续接] 上一次输出在工具调用中被截断，工具没有执行。请从头生成完整合法的工具调用并继续任务。"
                             : "[系统续接] 上一次输出达到长度上限。请紧接已有内容继续任务，不要重复或提前总结。";
+                    nextRequestWithoutThinking = true;
                     ui.onWarning("子 agent 输出达到单次上限，正在自动续接（第 "
                             + lengthContinuationAttempts + " 次）");
                     continue;
@@ -206,6 +210,7 @@ public class SubAgentLoop {
                     lengthContinuationHint = thinking.length() > 0
                             ? "[系统完成性检查] 你刚才只有思考，没有正文或工具调用。请立即生成下一步完整工具调用，或给出包含实际结果的最终答复。"
                             : "[系统完成性检查] 上一次响应为空。请继续执行并输出完整动作或实际结果。";
+                    nextRequestWithoutThinking = true;
                     ui.onWarning("子 agent 未产生可执行动作，正在自动继续（第 "
                             + lengthContinuationAttempts + " 次）");
                     continue;
@@ -250,6 +255,12 @@ public class SubAgentLoop {
                 || e.type == LlmException.Type.TIMEOUT
                 || (e.type == LlmException.Type.NETWORK && e.retryable)
                 || e.httpCode == 500 || e.httpCode == 502;
+    }
+
+    private void streamChat(List<Message> request, com.minion.core.llm.StreamHandler handler,
+                            boolean withoutThinking) throws LlmException {
+        if (withoutThinking) llm.streamChatWithoutThinking(request, subAgentTools(), handler);
+        else llm.streamChat(request, subAgentTools(), handler);
     }
 
     /** 零增量闸门：已吐过正文/思考即不可长重试（与主循环一致，防重复输出） */

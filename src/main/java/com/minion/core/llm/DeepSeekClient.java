@@ -81,13 +81,14 @@ public class DeepSeekClient implements LlmClient {
                 .build();
     }
 
-    private Request buildRequest(List<Message> messages, List<JsonObject> tools) {
+    private Request buildRequest(List<Message> messages, List<JsonObject> tools,
+                                 boolean disableThinking) {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("stream", true);
         body.addProperty("max_tokens", maxOutputTokens);
         // 按供应商生成思考参数（deepseek: thinking/reasoning_effort；qwen: enable_thinking）
-        JsonObject tp = thinkingParams(provider, thinking, reasoningEffort);
+        JsonObject tp = thinkingParams(provider, thinking && !disableThinking, reasoningEffort);
         if (tp != null) {
             for (Map.Entry<String, JsonElement> e : tp.entrySet()) body.add(e.getKey(), e.getValue());
         }
@@ -160,12 +161,24 @@ public class DeepSeekClient implements LlmClient {
     @Override
     public void streamChat(List<Message> messages, List<JsonObject> tools, StreamHandler handler)
             throws LlmException {
+        streamChatInternal(messages, tools, handler, false);
+    }
+
+    @Override
+    public void streamChatWithoutThinking(List<Message> messages, List<JsonObject> tools,
+                                          StreamHandler handler) throws LlmException {
+        streamChatInternal(messages, tools, handler, true);
+    }
+
+    private void streamChatInternal(List<Message> messages, List<JsonObject> tools,
+                                    StreamHandler handler, boolean disableThinking)
+            throws LlmException {
         List<ToolCall> acc = new ArrayList<ToolCall>();
         StringBuilder content = new StringBuilder();
         StringBuilder thinkingSb = new StringBuilder();
         Usage usage = null;
         String finish = "stop";
-        final okhttp3.Call call = http.newCall(buildRequest(messages, tools));
+        final okhttp3.Call call = http.newCall(buildRequest(messages, tools, disableThinking));
         inFlightCalls.add(call);
         // 首增量看门狗：READ_TIMEOUT 管的是"两个 SSE chunk 之间的间隔"（300s），
         // 治不了"连上了但模型迟迟不产出"。此处独立计时，到点 cancel 解除阻塞并归为 TIMEOUT。

@@ -23,6 +23,7 @@ public class FakeLlmClient implements LlmClient {
     public List<JsonObject> lastRequestTools = new ArrayList<JsonObject>();
     /** 每次 streamChat 请求的完整记录（消息 + 工具 schema），供测试断言请求序列 */
     public final List<RequestRecord> requests = new ArrayList<RequestRecord>();
+    public int withoutThinkingCalls = 0;
 
     public static class ScriptedTurn {
         public final List<ToolCall> toolCalls;
@@ -129,6 +130,13 @@ public class FakeLlmClient implements LlmClient {
                 : (turn.toolCalls != null && !turn.toolCalls.isEmpty() ? "tool_calls" : "stop");
         handler.onFinish(reason, u, turn.toolCalls == null
                 ? new ArrayList<ToolCall>() : turn.toolCalls);
+    }
+
+    @Override
+    public void streamChatWithoutThinking(List<Message> messages, List<JsonObject> tools,
+                                          StreamHandler handler) throws LlmException {
+        withoutThinkingCalls++;
+        streamChat(messages, tools, handler);
     }
 
     @Override

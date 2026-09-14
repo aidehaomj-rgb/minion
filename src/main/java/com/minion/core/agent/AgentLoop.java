@@ -403,6 +403,7 @@ public class AgentLoop {
         int lengthContinuationAttempts = 0;
         int prematureStopRecoveries = 0;
         String lengthContinuationHint = null;
+        boolean nextRequestWithoutThinking = false;
         try {
             while (!interrupted) {
                 if (rounds >= roundLimit) {
@@ -447,6 +448,8 @@ public class AgentLoop {
                     request.add(Message.user(lengthContinuationHint));
                     lengthContinuationHint = null;
                 }
+                final boolean requestWithoutThinking = nextRequestWithoutThinking;
+                nextRequestWithoutThinking = false;
 
                 final List<ToolCall>[] toolCalls = new List[1];
                 final Usage[] usage = new Usage[1];
@@ -489,7 +492,7 @@ public class AgentLoop {
                     }
                 };
                 try {
-                    llm.streamChat(request, registry.schemas(), handler);
+                    streamChat(request, handler, requestWithoutThinking);
                 } catch (LlmException e) {
                     if (interrupted) {
                         // 用户主动中断（如 DeepSeekClient.cancel → Canceled）：不重试不打警告，
@@ -522,7 +525,7 @@ public class AgentLoop {
                                 break;
                             }
                             try {
-                                llm.streamChat(request, registry.schemas(), handler);
+                                streamChat(request, handler, requestWithoutThinking);
                                 // 成功后静默恢复（不打扰正文）：首个流式增量/onFinish 已复位指示器，
                                 // 若流中断（onError 回调）则落下方 finish=="error" 检查点统一处理
                                 break;
@@ -602,6 +605,8 @@ public class AgentLoop {
                     lengthContinuationHint = truncatedToolCall
                             ? "[系统续接] 上一次输出因长度上限在工具调用生成过程中被截断，该工具没有执行。请从头重新生成一个完整、合法的工具调用，然后继续原任务；不要重复已经完成的工作。"
                             : "[系统续接] 上一次输出因达到单次输出长度上限而被截断。请紧接已完成的内容继续原任务，不要重复，不要提前总结；需要调用工具时请生成完整合法的工具调用。";
+                    // 长度用尽常由思考耗光输出预算引起；恢复轮直接要求动作。
+                    nextRequestWithoutThinking = true;
                     ui.onWarning("模型输出达到单次上限，正在自动续接（第 "
                             + lengthContinuationAttempts + " 次）");
                     persistSession();
@@ -617,6 +622,7 @@ public class AgentLoop {
                     lengthContinuationHint = thinking.length() > 0
                             ? "[系统完成性检查] 你刚才只生成了思考过程，没有给出正文或工具调用，原始任务尚未完成。请立即把思考落实为下一步完整工具调用，或在任务确已完成时给出包含实际结果的最终答复；不要再次只输出思考。"
                             : "[系统完成性检查] 上一次模型响应为空，原始任务尚未完成。请继续执行并给出完整工具调用或实际最终结果。";
+                    nextRequestWithoutThinking = true;
                     ui.onWarning("模型未产生可执行动作，正在自动继续任务（第 "
                             + prematureStopRecoveries + " 次）");
                     continue;
@@ -742,6 +748,12 @@ public class AgentLoop {
                 || e.type == LlmException.Type.TIMEOUT
                 || (e.type == LlmException.Type.NETWORK && e.retryable)
                 || e.httpCode == 500 || e.httpCode == 502;
+    }
+
+    private void streamChat(List<Message> request, com.minion.core.llm.StreamHandler handler,
+                            boolean withoutThinking) throws LlmException {
+        if (withoutThinking) llm.streamChatWithoutThinking(request, registry.schemas(), handler);
+        else llm.streamChat(request, registry.schemas(), handler);
     }
 
     /** 保守识别明确的阶段性播报；只在本轮已用过工具时启用，避免干扰普通问答。 */

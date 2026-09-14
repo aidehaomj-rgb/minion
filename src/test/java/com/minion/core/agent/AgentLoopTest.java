@@ -1662,5 +1662,6 @@ public class AgentLoopTest {
         assertEquals("纯思考不能作为 assistant 存入历史", 2, loop.messages().size());
         assertEquals("已完成并给出实际结果", loop.messages().get(1).content);
         assertTrue(ui.warnings.toString().contains("未产生可执行动作"));
+        assertEquals("恢复轮必须临时关闭思考", 1, llm.withoutThinkingCalls);
     }
 }

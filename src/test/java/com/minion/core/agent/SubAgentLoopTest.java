@@ -100,6 +100,7 @@ public class SubAgentLoopTest {
         assertEquals(2, llm.requests.size());
         assertTrue(llm.requests.get(1).messages.get(llm.requests.get(1).messages.size() - 1)
                 .content.contains("只有思考"));
+        assertEquals(1, llm.withoutThinkingCalls);
     }
 
     /** I4-① 构造 AgentLoop 后 task 工具自动注册 */
