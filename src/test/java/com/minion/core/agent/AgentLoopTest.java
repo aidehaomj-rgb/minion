@@ -1708,4 +1708,29 @@ public class AgentLoopTest {
         assertTrue(thirdHint.content.contains("返回了空响应"));
         assertEquals("最终产生有效结果", loop.messages().get(loop.messages().size() - 1).content);
     }
+
+    @Test
+    public void longToolBackedReply_withoutCompletionMarker_continuesFromCheckpoint() {
+        ToolCall tc = new ToolCall();
+        tc.id = "long-1";
+        tc.name = "example";
+        tc.arguments = "{\"text\":\"analyse\"}";
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn(repeat("半截报告内容", 180));
+        llm.addTurn("剩余结论已补齐\n" + AgentLoop.TASK_COMPLETE_MARKER);
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("完成复杂分析报告");
+
+        assertEquals(3, llm.requests.size());
+        Message hint = llm.requests.get(2).messages.get(llm.requests.get(2).messages.size() - 1);
+        assertTrue(hint.content.contains("完成握手"));
+        assertTrue(hint.content.contains("从断点继续"));
+        assertTrue(ui.warnings.toString().contains("最终交付尚未确认"));
+    }
+
+    private static String repeat(String value, int count) {
+        StringBuilder out = new StringBuilder(value.length() * count);
+        for (int i = 0; i < count; i++) out.append(value);
+        return out.toString();
+    }
 }

@@ -31,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 
 /** 主 agent 循环：请求 → 工具执行 → 回传，直到模型不再调用工具。 */
 public class AgentLoop {
+    static final String TASK_COMPLETE_MARKER = "[[MINION_TASK_COMPLETE]]";
 
     public static final int DEFAULT_ROUND_LIMIT = 1000;
 
@@ -389,6 +390,7 @@ public class AgentLoop {
         lastIneffectiveAutoCompressTokens = -1;
         long start = System.currentTimeMillis(); // 统计行：轮次耗时
         int reportFromIndex = session.messages.size();
+        boolean toolBackedContext = hasToolContext(session.messages);
         List<String> reportTools = new ArrayList<String>();
         boolean taskCompleted = false;
         // 上次回合遗留的挂起补充先入历史（模型提问自然收尾/中断遗留），与本次输入拼接发送
@@ -636,6 +638,24 @@ public class AgentLoop {
                     break;
                 }
 
+                // 长篇工具任务不能仅凭 finish=stop 判完成：部分 Qwen 网关会把达到服务端
+                // 输出上限的半截报告也标为 stop。要求末尾完成握手；缺失则从断点续写。
+                boolean requiresCompletionHandshake = (toolBackedContext || !reportTools.isEmpty())
+                        && content.length() >= 1000;
+                if ((toolCalls[0] == null || toolCalls[0].isEmpty())
+                        && requiresCompletionHandshake && !hasTaskCompleteMarker(content.toString())
+                        && prematureStopRecoveries < 12) {
+                    prematureStopRecoveries++;
+                    lengthContinuationHint = "[系统完成握手] 本次工具任务的回复末尾没有完成标记，"
+                            + "可能仍是阶段性内容或被服务端截断。若尚未完成，请紧接上一段从断点继续，"
+                            + "不要重复；若所有结果与交付物已经完整生成并验证，请仅补充遗漏内容，"
+                            + "并在全部正文最后单独输出 " + TASK_COMPLETE_MARKER + "。";
+                    ui.onWarning("最终交付尚未确认，正在从断点自动继续（第 "
+                            + prematureStopRecoveries + " 次）");
+                    persistSession();
+                    continue;
+                }
+
                 // 小模型偶尔会把“找到文件了/我先看看”等阶段性播报作为 stop 返回。
                 // 已经执行过工具且明显仍是进度句时自动追问，不让会话数量或一次误判终止任务。
                 if ((toolCalls[0] == null || toolCalls[0].isEmpty())
@@ -831,6 +851,18 @@ public class AgentLoop {
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (!Character.isWhitespace(c) && c != '\u200B' && c != '\uFEFF') return true;
+        }
+        return false;
+    }
+
+    static boolean hasTaskCompleteMarker(String text) {
+        return text != null && text.trim().endsWith(TASK_COMPLETE_MARKER);
+    }
+
+    private static boolean hasToolContext(List<Message> messages) {
+        if (messages == null) return false;
+        for (int i = messages.size() - 1; i >= 0 && i >= messages.size() - 80; i--) {
+            if (messages.get(i).role == Message.Role.TOOL) return true;
         }
         return false;
     }
