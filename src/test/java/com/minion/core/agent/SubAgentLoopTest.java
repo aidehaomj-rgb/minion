@@ -86,6 +86,22 @@ public class SubAgentLoopTest {
                 .content.contains("系统续接"));
     }
 
+    @Test
+    public void subAgent_thinkingOnlyStop_autoContinues() throws Exception {
+        Config config = Config.load(tmp.getRoot().toPath());
+        FakeLlmClient llm = new FakeLlmClient();
+        llm.addTurnWithTools(null, null, "只有思考");
+        llm.addTurn("实际结果");
+        RecordingUi ui = new RecordingUi();
+        SubAgentLoop sub = new SubAgentLoop("系统", "长任务", tmp.getRoot().getPath(), llm,
+                new ToolRegistry(), new ConfirmGate(config,
+                new FakeConfirmUi(ConfirmUi.Decision.APPROVE)), ui);
+        assertEquals("实际结果", sub.run());
+        assertEquals(2, llm.requests.size());
+        assertTrue(llm.requests.get(1).messages.get(llm.requests.get(1).messages.size() - 1)
+                .content.contains("只有思考"));
+    }
+
     /** I4-① 构造 AgentLoop 后 task 工具自动注册 */
     @Test
     public void agentLoop_autoRegistersTaskTool() throws Exception {

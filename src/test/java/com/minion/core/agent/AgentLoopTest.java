@@ -1647,4 +1647,20 @@ public class AgentLoopTest {
         assertFalse(AgentLoop.looksLikeInterimAnswer("分析已完成，结果文件已生成并核验。"));
         assertFalse(AgentLoop.looksLikeInterimAnswer("共有两个文件，分别为 A 和 B；详细结论如下。"));
     }
+
+    @Test
+    public void finishStop_withThinkingOnly_autoContinues() {
+        llm.addTurnWithTools(null, null, "已经分析完工具结果，准备下一步");
+        llm.addTurn("已完成并给出实际结果");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("继续复杂任务");
+
+        assertEquals(2, llm.requests.size());
+        Message hint = llm.requests.get(1).messages.get(llm.requests.get(1).messages.size() - 1);
+        assertEquals(Message.Role.USER, hint.role);
+        assertTrue(hint.content.contains("只生成了思考过程"));
+        assertEquals("纯思考不能作为 assistant 存入历史", 2, loop.messages().size());
+        assertEquals("已完成并给出实际结果", loop.messages().get(1).content);
+        assertTrue(ui.warnings.toString().contains("未产生可执行动作"));
+    }
 }

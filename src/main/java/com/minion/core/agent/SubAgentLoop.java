@@ -194,6 +194,22 @@ public class SubAgentLoop {
                             + lengthContinuationAttempts + " 次）");
                     continue;
                 }
+                if ("stop".equalsIgnoreCase(finish[0])
+                        && (toolCalls[0] == null || toolCalls[0].isEmpty()) && content.length() == 0) {
+                    if (lengthContinuationAttempts >= 4) {
+                        ui.onError("子 agent 连续 4 次只生成思考或空响应，已停止自动恢复");
+                        String result = completedContent.toString();
+                        ui.onSubAgentDone(result);
+                        return result;
+                    }
+                    lengthContinuationAttempts++;
+                    lengthContinuationHint = thinking.length() > 0
+                            ? "[系统完成性检查] 你刚才只有思考，没有正文或工具调用。请立即生成下一步完整工具调用，或给出包含实际结果的最终答复。"
+                            : "[系统完成性检查] 上一次响应为空。请继续执行并输出完整动作或实际结果。";
+                    ui.onWarning("子 agent 未产生可执行动作，正在自动继续（第 "
+                            + lengthContinuationAttempts + " 次）");
+                    continue;
+                }
                 if (toolCalls[0] == null || toolCalls[0].isEmpty()
                         || !"tool_calls".equals(finish[0])) {
                     completedContent.append(content);

@@ -608,6 +608,20 @@ public class AgentLoop {
                     continue;
                 }
 
+                // 部分 Qwen 兼容服务会在长思考后返回 finish=stop，但既无正文也无工具调用。
+                // 这不是任务完成；reasoning_content 又不能单独写回历史（下轮 API 会 400），
+                // 因此用一次性内部指令要求它把思考落实为完整动作。
+                if ((toolCalls[0] == null || toolCalls[0].isEmpty())
+                        && content.length() == 0 && prematureStopRecoveries < 4) {
+                    prematureStopRecoveries++;
+                    lengthContinuationHint = thinking.length() > 0
+                            ? "[系统完成性检查] 你刚才只生成了思考过程，没有给出正文或工具调用，原始任务尚未完成。请立即把思考落实为下一步完整工具调用，或在任务确已完成时给出包含实际结果的最终答复；不要再次只输出思考。"
+                            : "[系统完成性检查] 上一次模型响应为空，原始任务尚未完成。请继续执行并给出完整工具调用或实际最终结果。";
+                    ui.onWarning("模型未产生可执行动作，正在自动继续任务（第 "
+                            + prematureStopRecoveries + " 次）");
+                    continue;
+                }
+
                 // 小模型偶尔会把“找到文件了/我先看看”等阶段性播报作为 stop 返回。
                 // 已经执行过工具且明显仍是进度句时自动追问，不让会话数量或一次误判终止任务。
                 if ((toolCalls[0] == null || toolCalls[0].isEmpty())
