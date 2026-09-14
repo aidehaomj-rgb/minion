@@ -42,6 +42,7 @@ public class DeepSeekClient implements LlmClient {
     private final boolean thinking;
     private final String reasoningEffort;
     private final String provider;
+    private final int maxOutputTokens;
     private final OkHttpClient http;
     /** 看门狗调度池（实例级，随 close 释放）：单线程 daemon，取消即出队、空闲可回收 */
     private final ScheduledExecutorService watchdogScheduler = newWatchdogScheduler();
@@ -61,12 +62,19 @@ public class DeepSeekClient implements LlmClient {
 
     public DeepSeekClient(String url, String apiKey, String model,
                           boolean thinking, String reasoningEffort, String provider) {
+        this(url, apiKey, model, thinking, reasoningEffort, provider, 8192);
+    }
+
+    public DeepSeekClient(String url, String apiKey, String model,
+                          boolean thinking, String reasoningEffort, String provider,
+                          int maxOutputTokens) {
         this.url = url;
         this.apiKey = apiKey;
         this.model = model;
         this.thinking = thinking;
         this.reasoningEffort = reasoningEffort;
         this.provider = provider;
+        this.maxOutputTokens = Math.max(256, Math.min(maxOutputTokens <= 0 ? 8192 : maxOutputTokens, 65536));
         this.http = new OkHttpClient.Builder()
                 .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
                 .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
@@ -77,6 +85,7 @@ public class DeepSeekClient implements LlmClient {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("stream", true);
+        body.addProperty("max_tokens", maxOutputTokens);
         // 按供应商生成思考参数（deepseek: thinking/reasoning_effort；qwen: enable_thinking）
         JsonObject tp = thinkingParams(provider, thinking, reasoningEffort);
         if (tp != null) {

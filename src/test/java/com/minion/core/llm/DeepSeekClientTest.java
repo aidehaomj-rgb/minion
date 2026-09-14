@@ -82,9 +82,24 @@ public class DeepSeekClientTest {
         JsonObject json = JsonParser.parseString(body).getAsJsonObject();
         assertEquals("deepseek-v4-flash", json.get("model").getAsString());
         assertTrue(json.get("stream").getAsBoolean());
+        assertEquals(8192, json.get("max_tokens").getAsInt());
         assertEquals("max", json.get("reasoning_effort").getAsString());
         assertEquals("enabled", json.getAsJsonObject("thinking").get("type").getAsString());
         assertFalse(json.has("stream_options")); // deepseek 零回归：不发送 stream_options
+    }
+
+    @Test
+    public void request_usesConfiguredMaxOutputTokens() throws Exception {
+        server.enqueue(new MockResponse().setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"));
+        DeepSeekClient client = new DeepSeekClient(server.url("/").toString(),
+                "sk-test", "qwen", true, "xhigh", "qwen", 16384);
+        client.streamChat(Collections.singletonList(Message.user("hi")), null, new StreamHandler() {
+            @Override public void onFinish(String finishReason, Usage usage, List<ToolCall> toolCalls) { }
+        });
+        JsonObject body = JsonParser.parseString(server.takeRequest().getBody().readUtf8()).getAsJsonObject();
+        assertEquals(16384, body.get("max_tokens").getAsInt());
+        client.close();
     }
 
     @Test

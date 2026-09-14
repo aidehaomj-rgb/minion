@@ -44,6 +44,9 @@ public class SubAgentLoop {
     public String run() {
         ui.onSubAgentStart(messages.get(1).content);
         int retries = 0;
+        int lengthContinuationAttempts = 0;
+        String lengthContinuationHint = null;
+        StringBuilder completedContent = new StringBuilder();
         final boolean[] inRetry = new boolean[1]; // 瞬时错误重试循环进行中（首个流式增量到达即复位指示器）；方法级：外层 InterruptedException 需访问
         try {
             while (true) {
@@ -87,8 +90,14 @@ public class SubAgentLoop {
                     @Override
                     public void onError(LlmException e) { finish[0] = "error"; ui.onError(e.getMessage()); }
                 };
+                List<Message> requestMessages = messages;
+                if (lengthContinuationHint != null) {
+                    requestMessages = new ArrayList<Message>(messages);
+                    requestMessages.add(Message.user(lengthContinuationHint));
+                    lengthContinuationHint = null;
+                }
                 try {
-                    llm.streamChat(messages, subAgentTools(), handler);
+                    llm.streamChat(requestMessages, subAgentTools(), handler);
                 } catch (LlmException e) {
                     if (Thread.currentThread().isInterrupted()) {
                         // 已被主循环中断（cancel 引发的 Canceled 错误）：不重试
@@ -118,7 +127,7 @@ public class SubAgentLoop {
                                 break;
                             }
                             try {
-                                llm.streamChat(messages, subAgentTools(), handler);
+                                llm.streamChat(requestMessages, subAgentTools(), handler);
                                 // 成功后静默恢复（不打扰正文）：首个流式增量/onFinish 已复位指示器，
                                 // 若流中断（onError 回调已提示）则落下方正常路径处理
                                 break;
@@ -162,10 +171,35 @@ public class SubAgentLoop {
                         return "子 agent 失败: " + e.getMessage();
                     }
                 }
+                if ("length".equalsIgnoreCase(finish[0])) {
+                    boolean partialTool = toolCalls[0] != null && !toolCalls[0].isEmpty();
+                    toolCalls[0] = null;
+                    if (content.length() > 0) {
+                        Message partial = Message.assistant(content.toString());
+                        partial.reasoningContent = thinking.length() == 0 ? null : thinking.toString();
+                        messages.add(partial);
+                        completedContent.append(content);
+                    }
+                    if (lengthContinuationAttempts >= 12) {
+                        ui.onError("子 agent 连续 12 次达到单次输出上限，已停止自动续接");
+                        String result = completedContent.toString();
+                        ui.onSubAgentDone(result);
+                        return result;
+                    }
+                    lengthContinuationAttempts++;
+                    lengthContinuationHint = partialTool
+                            ? "[系统续接] 上一次输出在工具调用中被截断，工具没有执行。请从头生成完整合法的工具调用并继续任务。"
+                            : "[系统续接] 上一次输出达到长度上限。请紧接已有内容继续任务，不要重复或提前总结。";
+                    ui.onWarning("子 agent 输出达到单次上限，正在自动续接（第 "
+                            + lengthContinuationAttempts + " 次）");
+                    continue;
+                }
                 if (toolCalls[0] == null || toolCalls[0].isEmpty()
                         || !"tool_calls".equals(finish[0])) {
-                    ui.onSubAgentDone(content.toString());
-                    return content.toString();
+                    completedContent.append(content);
+                    String result = completedContent.toString();
+                    ui.onSubAgentDone(result);
+                    return result;
                 }
                 // assistant 工具调用消息先入历史——tool 消息必须紧跟含对应 tool_call_id 的
                 // assistant tool_calls 消息（DeepSeek/OpenAI 兼容 API 契约，否则 400）；

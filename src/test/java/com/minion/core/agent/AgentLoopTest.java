@@ -1583,4 +1583,68 @@ public class AgentLoopTest {
         assertTrue("回给模型的应是「不存在或已停用」提示",
                 msgs.get(2).content.contains("工具不存在或已停用: Browser"));
     }
+
+    @Test
+    public void finishLength_afterThinkingOnly_autoContinuesWithoutFakeHistory() {
+        llm.addTurnLength(null, null, "很长的思考");
+        llm.addTurn("任务最终完成");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("复杂任务");
+
+        assertEquals(2, llm.requests.size());
+        List<Message> second = llm.requests.get(1).messages;
+        assertEquals(Message.Role.USER, second.get(second.size() - 1).role);
+        assertTrue(second.get(second.size() - 1).content.contains("系统续接"));
+        assertEquals("续接指令不能污染持久会话", 2, loop.messages().size());
+        assertEquals("任务最终完成", loop.messages().get(1).content);
+        assertTrue(ui.warnings.get(0).contains("自动续接"));
+    }
+
+    @Test
+    public void finishLength_withPartialToolCall_discardsAndNeverExecutesIt() {
+        ToolCall cut = new ToolCall();
+        cut.id = "cut";
+        cut.name = "example";
+        cut.arguments = "{\"text\":"; // 明确是半截 JSON
+        llm.addTurnLength(Collections.singletonList(cut), null, "准备调用工具");
+        llm.addTurn("已安全恢复");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("复杂任务");
+
+        assertTrue("残缺工具绝不能执行", ui.toolCalls.isEmpty());
+        assertEquals(2, loop.messages().size());
+        assertEquals("已安全恢复", loop.messages().get(1).content);
+        String hint = llm.requests.get(1).messages.get(llm.requests.get(1).messages.size() - 1).content;
+        assertTrue(hint.contains("工具没有执行"));
+        assertTrue(hint.contains("从头重新生成"));
+    }
+
+    @Test
+    public void prematureProgressReply_afterTools_autoContinues() {
+        ToolCall tc = new ToolCall();
+        tc.id = "c1";
+        tc.name = "example";
+        tc.arguments = "{\"text\":\"scan\"}";
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn("找到两个文件了");
+        llm.addTurn("分析已完成，结果文件已生成并核验。");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("分析两个表格并生成结果");
+
+        assertEquals(3, llm.requests.size());
+        Message hint = llm.requests.get(2).messages.get(llm.requests.get(2).messages.size() - 1);
+        assertEquals(Message.Role.USER, hint.role);
+        assertTrue(hint.content.contains("原始任务尚未交付完成"));
+        assertTrue(ui.warnings.toString().contains("阶段性回复"));
+        assertEquals("分析已完成，结果文件已生成并核验。",
+                loop.messages().get(loop.messages().size() - 1).content);
+    }
+
+    @Test
+    public void interimAnswerDetector_isConservative() {
+        assertTrue(AgentLoop.looksLikeInterimAnswer("找到两个文件了"));
+        assertTrue(AgentLoop.looksLikeInterimAnswer("我先检查一下目录"));
+        assertFalse(AgentLoop.looksLikeInterimAnswer("分析已完成，结果文件已生成并核验。"));
+        assertFalse(AgentLoop.looksLikeInterimAnswer("共有两个文件，分别为 A 和 B；详细结论如下。"));
+    }
 }

@@ -10,6 +10,8 @@ public class ModelConfig {
     public String provider;
     public boolean thinking;
     public String reasoningEffort;
+    /** 单次回复最大 token；与上下文窗口是两个独立限制。 */
+    public int maxOutputTokens;
     public int maxContextTokens;
     public double compressThreshold;
     public int keepRecentMessages;
@@ -26,6 +28,7 @@ public class ModelConfig {
         c.provider = provider;
         c.thinking = thinking;
         c.reasoningEffort = reasoningEffort;
+        c.maxOutputTokens = maxOutputTokens;
         c.maxContextTokens = maxContextTokens;
         c.compressThreshold = compressThreshold;
         c.keepRecentMessages = keepRecentMessages;

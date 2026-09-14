@@ -244,6 +244,7 @@ public class SettingsDialog {
         effort.getItems().addAll("low", "medium", "high", "xhigh", "max");
         effort.setValue(mc == null ? "max" : mc.reasoningEffort);
         TextField maxCtx = new TextField(mc == null ? "900000" : String.valueOf(mc.maxContextTokens));
+        TextField maxOut = new TextField(mc == null ? "8192" : String.valueOf(mc.maxOutputTokens <= 0 ? 8192 : mc.maxOutputTokens));
         TextField thr = new TextField(mc == null ? "0.8" : String.valueOf(mc.compressThreshold));
         TextField keep = new TextField(mc == null ? "50" : String.valueOf(mc.keepRecentMessages));
 
@@ -254,9 +255,10 @@ public class SettingsDialog {
         grid.addRow(4, new Label("provider:"), provider);
         grid.addRow(5, new Label("思考:"), thinking);
         grid.addRow(6, new Label("effort:"), effort);
-        grid.addRow(7, new Label("maxContextTokens:"), maxCtx);
-        grid.addRow(8, new Label("compressThreshold:"), thr);
-        grid.addRow(9, new Label("keepRecentMessages:"), keep);
+        grid.addRow(7, new Label("maxOutputTokens:"), maxOut);
+        grid.addRow(8, new Label("maxContextTokens:"), maxCtx);
+        grid.addRow(9, new Label("compressThreshold:"), thr);
+        grid.addRow(10, new Label("keepRecentMessages:"), keep);
         d.getDialogPane().setContent(grid);
 
         d.setResultConverter(bt -> {
@@ -269,6 +271,7 @@ public class SettingsDialog {
             out.provider = provider.getValue() == null ? "deepseek" : provider.getValue();
             out.thinking = thinking.isSelected();
             out.reasoningEffort = effort.getValue() == null ? "max" : effort.getValue();
+            out.maxOutputTokens = Math.max(256, Math.min(parseInt(maxOut.getText(), 8192), 65536));
             out.maxContextTokens = parseInt(maxCtx.getText(), 900000);
             out.compressThreshold = parseDouble(thr.getText(), 0.8);
             out.keepRecentMessages = parseInt(keep.getText(), 50);

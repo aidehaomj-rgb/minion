@@ -400,6 +400,9 @@ public class AgentLoop {
         int rounds = 0;
         int retries = 0;
         int contextRecoveryAttempts = 0;
+        int lengthContinuationAttempts = 0;
+        int prematureStopRecoveries = 0;
+        String lengthContinuationHint = null;
         try {
             while (!interrupted) {
                 if (rounds >= roundLimit) {
@@ -439,6 +442,11 @@ public class AgentLoop {
                 List<Message> request = new ArrayList<Message>();
                 request.add(Message.system(system));
                 request.addAll(session.messages);
+                if (lengthContinuationHint != null) {
+                    // 仅加入本次 API 请求，不写入会话/界面，避免伪造一条用户消息。
+                    request.add(Message.user(lengthContinuationHint));
+                    lengthContinuationHint = null;
+                }
 
                 final List<ToolCall>[] toolCalls = new List[1];
                 final Usage[] usage = new Usage[1];
@@ -562,6 +570,15 @@ public class AgentLoop {
                     break;
                 }
 
+                boolean truncatedByLength = "length".equalsIgnoreCase(finish[0]);
+                boolean truncatedToolCall = truncatedByLength
+                        && toolCalls[0] != null && !toolCalls[0].isEmpty();
+                if (truncatedByLength) {
+                    // 参数可能只收到半截 JSON；绝不能入历史或执行，否则下一轮会 400，
+                    // 更严重时可能执行与模型原意不同的残缺命令。
+                    toolCalls[0] = null;
+                }
+
                 // assistant 回复（含思考与工具调用）入会话历史——reasoningContent 回传硬性要求；
                 // 无正文且无工具调用的空回复不入历史（仅思考消息回传会 400）
                 if (content.length() > 0
@@ -575,6 +592,34 @@ public class AgentLoop {
                 }
 
                 if (interrupted) break;
+
+                if (truncatedByLength) {
+                    if (lengthContinuationAttempts >= 12) {
+                        ui.onError("模型连续 12 次达到单次输出上限，已停止自动续接。请提高模型的 maxOutputTokens 或拆分任务。");
+                        break;
+                    }
+                    lengthContinuationAttempts++;
+                    lengthContinuationHint = truncatedToolCall
+                            ? "[系统续接] 上一次输出因长度上限在工具调用生成过程中被截断，该工具没有执行。请从头重新生成一个完整、合法的工具调用，然后继续原任务；不要重复已经完成的工作。"
+                            : "[系统续接] 上一次输出因达到单次输出长度上限而被截断。请紧接已完成的内容继续原任务，不要重复，不要提前总结；需要调用工具时请生成完整合法的工具调用。";
+                    ui.onWarning("模型输出达到单次上限，正在自动续接（第 "
+                            + lengthContinuationAttempts + " 次）");
+                    persistSession();
+                    continue;
+                }
+
+                // 小模型偶尔会把“找到文件了/我先看看”等阶段性播报作为 stop 返回。
+                // 已经执行过工具且明显仍是进度句时自动追问，不让会话数量或一次误判终止任务。
+                if ((toolCalls[0] == null || toolCalls[0].isEmpty())
+                        && !reportTools.isEmpty() && looksLikeInterimAnswer(content.toString())
+                        && prematureStopRecoveries < 4) {
+                    prematureStopRecoveries++;
+                    lengthContinuationHint = "[系统完成性检查] 你刚才的回复只是阶段性进度，原始任务尚未交付完成。请立即继续执行下一步工具操作，直到实际生成并验证用户要求的结果；不要只说明计划。";
+                    ui.onWarning("检测到阶段性回复，正在自动继续任务（第 "
+                            + prematureStopRecoveries + " 次）");
+                    persistSession();
+                    continue;
+                }
 
                 if (toolCalls[0] == null || toolCalls[0].isEmpty()
                         || !"tool_calls".equals(finish[0])) {
@@ -683,6 +728,19 @@ public class AgentLoop {
                 || e.type == LlmException.Type.TIMEOUT
                 || (e.type == LlmException.Type.NETWORK && e.retryable)
                 || e.httpCode == 500 || e.httpCode == 502;
+    }
+
+    /** 保守识别明确的阶段性播报；只在本轮已用过工具时启用，避免干扰普通问答。 */
+    static boolean looksLikeInterimAnswer(String text) {
+        if (text == null) return false;
+        String s = text.trim().replace('\r', ' ').replace('\n', ' ');
+        if (s.isEmpty() || s.length() > 240) return false;
+        String lower = s.toLowerCase(java.util.Locale.ROOT);
+        return lower.startsWith("我先") || lower.startsWith("先看")
+                || lower.startsWith("接下来") || lower.startsWith("下一步")
+                || lower.startsWith("正在") || lower.startsWith("准备")
+                || lower.matches(".*(?:找到|发现|检测到).{0,40}(?:个)?(?:文件|表格|工作簿|数据源)[了。！!]*$")
+                || lower.endsWith("继续处理") || lower.endsWith("继续分析");
     }
 
     /** OpenAI 兼容服务对上下文超限没有统一 code，只能兼容常见中英文错误正文。 */
