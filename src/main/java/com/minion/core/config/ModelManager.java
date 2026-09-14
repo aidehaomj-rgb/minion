@@ -129,6 +129,7 @@ public class ModelManager {
         old.apiKey = c.apiKey;
         old.modelName = c.modelName;
         old.provider = c.provider;
+        old.sessionId = c.sessionId;
         old.thinking = c.thinking;
         old.reasoningEffort = c.reasoningEffort;
         old.maxOutputTokens = c.maxOutputTokens <= 0 ? 8192 : c.maxOutputTokens;

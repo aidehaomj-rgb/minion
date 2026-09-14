@@ -21,7 +21,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.UUID;
 
 /** OpenAI 兼容 Chat Completions 流式客户端（SSE），内置 deepseek/qwen 思考参数适配。 */
 public class DeepSeekClient implements LlmClient {
@@ -84,8 +83,7 @@ public class DeepSeekClient implements LlmClient {
         this.reasoningEffort = reasoningEffort;
         this.provider = provider;
         this.maxOutputTokens = Math.max(256, Math.min(maxOutputTokens <= 0 ? 8192 : maxOutputTokens, 65536));
-        this.gatewaySessionId = sessionId == null || sessionId.trim().isEmpty()
-                ? UUID.randomUUID().toString() : sessionId.trim();
+        this.gatewaySessionId = sessionId == null ? "" : sessionId.trim();
         this.http = new OkHttpClient.Builder()
                 .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
                 .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
@@ -196,6 +194,10 @@ public class DeepSeekClient implements LlmClient {
      * 网关自身负责 agent/tool 执行，因此不发送 Minion 的 tools schema。
      */
     private void streamSfmAgent(List<Message> messages, StreamHandler handler) throws LlmException {
+        if (gatewaySessionId.isEmpty()) {
+            throw new LlmException(LlmException.Type.BAD_REQUEST,
+                    "SFM Agent 配置缺少 sessionId，请在 设置 → 模型 中填写服务端提供的 sessionId", false);
+        }
         String text = "";
         for (int i = messages.size() - 1; i >= 0; i--) {
             Message m = messages.get(i);
@@ -209,7 +211,13 @@ public class DeepSeekClient implements LlmClient {
         JsonObject msg = new JsonObject();
         msg.addProperty("text", text);
         msg.add("metadata", new JsonArray());
-        msg.add("attachments", new JsonArray());
+        // SFM 接口示例要求无附件时也保留一个空附件对象，不能发送空数组。
+        JsonArray attachments = new JsonArray();
+        JsonObject emptyAttachment = new JsonObject();
+        emptyAttachment.addProperty("url", "");
+        emptyAttachment.addProperty("name", "");
+        attachments.add(emptyAttachment);
+        msg.add("attachments", attachments);
         body.add("message", msg);
         Request.Builder rb = new Request.Builder().url(url)
                 .header("Authorization", "Bearer " + apiKey)

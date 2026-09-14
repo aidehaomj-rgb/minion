@@ -65,6 +65,20 @@ public class ModelManagerTest {
         assertEquals("qwen-max", m2.current().modelName);
     }
 
+    /** 修改模型时 SFM sessionId 必须复制并持久化，重新打开表单不能丢失。 */
+    @Test
+    public void update_persistsSfmSessionId() throws IOException {
+        Path dir = jarDir();
+        ModelManager m = ModelManager.load(dir);
+        ModelConfig c = m.current().copy();
+        c.provider = "sfm-agent";
+        c.modelName = "";
+        c.sessionId = "7b9a3896-c0f6-4148-b2ab-15a82e6fbb75";
+        m.update(c);
+        assertEquals(c.sessionId, m.current().sessionId);
+        assertEquals(c.sessionId, ModelManager.load(dir).current().sessionId);
+    }
+
     /** 拒绝删除最后一个模型 */
     @Test
     public void remove_lastModelRejected() throws IOException {
