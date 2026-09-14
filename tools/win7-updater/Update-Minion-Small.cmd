@@ -50,10 +50,13 @@ if /I not "%ACTUAL_PATCH%"=="%EXPECTED_PATCH%" goto :bad_hash
 
 set "EXPECTED_BASE="
 for /f "usebackq tokens=1" %%H in ("%BASE_HASH%") do if not defined EXPECTED_BASE set "EXPECTED_BASE=%%H"
+if /I "%EXPECTED_BASE%"=="ANY" goto :base_ok
 set "ACTUAL_BASE="
 for /f "skip=1 tokens=*" %%H in ('certutil -hashfile "%TARGET_DIR%\minion-0.1.0.jar" SHA256 2^>nul') do if not defined ACTUAL_BASE set "ACTUAL_BASE=%%H"
 set "ACTUAL_BASE=%ACTUAL_BASE: =%"
 if /I not "%ACTUAL_BASE%"=="%EXPECTED_BASE%" goto :wrong_version
+
+:base_ok
 
 echo Installation: %TARGET_DIR%
 echo Patch size is only changed Java classes.
