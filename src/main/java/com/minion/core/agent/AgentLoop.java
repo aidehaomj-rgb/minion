@@ -455,6 +455,7 @@ public class AgentLoop {
         int retries = 0;
         int contextRecoveryAttempts = 0;
         int lengthContinuationAttempts = 0;
+        int malformedToolRecoveries = 0;
         int prematureStopRecoveries = 0;
         boolean silentResponseCompressionAttempted = false;
         String lengthContinuationHint = null;
@@ -657,17 +658,16 @@ public class AgentLoop {
                 if (interrupted) break;
 
                 if (malformedToolCall) {
-                    if (lengthContinuationAttempts >= 12) {
-                        ui.onError("模型连续生成非法 JSON 工具参数，已停止自动恢复");
+                    if (malformedToolRecoveries >= 4) {
+                        ui.onError("模型连续 4 次生成损坏的工具参数，已停止重复请求，避免继续消耗上下文。"
+                                + "请压缩上下文后重试，或让模型将大文件分块写入。 ");
                         break;
                     }
-                    lengthContinuationAttempts++;
-                    lengthContinuationHint = "[系统工具调用修复] 上一次工具调用的 arguments 不是完整合法的 JSON，"
-                            + "该调用未保存、未执行。请重新生成完整工具调用；arguments 必须是单个合法 JSON 对象，"
-                            + "不要使用 Markdown 代码块或省略内容。";
+                    malformedToolRecoveries++;
+                    lengthContinuationHint = buildMalformedToolRecoveryHint(malformedToolRecoveries);
                     nextRequestWithoutThinking = true;
                     ui.onWarning("模型工具参数 JSON 损坏，正在要求重新生成（第 "
-                            + lengthContinuationAttempts + " 次）");
+                            + malformedToolRecoveries + " 次）");
                     persistSession();
                     continue;
                 }
@@ -759,6 +759,7 @@ public class AgentLoop {
                 // 只统计连续无动作：一旦模型成功产生工具调用，恢复计数归零。
                 prematureStopRecoveries = 0;
                 lengthContinuationAttempts = 0;
+                malformedToolRecoveries = 0;
                 rounds++;
 
                 List<ToolCall> calls = toolCalls[0];
@@ -990,6 +991,14 @@ public class AgentLoop {
                 : "上一次模型响应没有可见正文或工具调用，原始任务尚未完成。")
                 + "不要说明接下来准备做什么；立即生成下一步完整工具调用，"
                 + "或在任务确已完成时直接给出包含实际结果的最终答复。";
+    }
+
+    static String buildMalformedToolRecoveryHint(int attempt) {
+        return "/no_think\n[系统工具调用修复] 第 " + attempt
+                + " 次：上一次 arguments 因过长或截断而不是合法 JSON，该调用未保存、未执行。"
+                + "禁止原样重试超长调用。每次 arguments 总长度必须尽量小，文件 content 每块不超过1000字符；"
+                + "写大文件时先调用 Write(mode=overwrite) 写首块，再多次调用 Write(mode=append) 追加后续块。"
+                + "若只需修改局部，优先使用 Edit，不能把整份文件重新放进参数。现在只生成一个短小、完整的工具调用。";
     }
 
     /** 可中断等待：100ms 小片轮询 interrupted 标志（interrupt() 只设标志不中断线程，

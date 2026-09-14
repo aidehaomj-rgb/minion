@@ -1780,7 +1780,9 @@ public class AgentLoopTest {
         assertEquals("损坏调用不能执行", 1, ui.toolCalls.size());
         assertTrue(ui.warnings.toString().contains("JSON 损坏"));
         Message repair = llm.requests.get(1).messages.get(llm.requests.get(1).messages.size() - 1);
-        assertTrue(repair.content.contains("arguments 不是完整合法的 JSON"));
+        assertTrue(repair.content.startsWith("/no_think"));
+        assertTrue(repair.content.contains("content 每块不超过1000字符"));
+        assertTrue(repair.content.contains("mode=append"));
     }
 
     @Test

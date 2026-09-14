@@ -92,6 +92,18 @@ public class EditToolsTest {
     }
 
     @Test
+    public void write_appendMode_supportsChunkedLargeFiles() throws Exception {
+        ToolResult first = write.execute(args("{\"path\":\"chunked.md\",\"content\":\"第一块\\n\",\"mode\":\"overwrite\"}"));
+        ToolResult second = write.execute(args("{\"path\":\"chunked.md\",\"content\":\"第二块\",\"mode\":\"append\"}"));
+        assertTrue(first.output, first.ok);
+        assertTrue(second.output, second.ok);
+        assertTrue(second.output.contains("已追加"));
+        assertEquals("第一块\n第二块",
+                new String(Files.readAllBytes(p("chunked.md")), StandardCharsets.UTF_8));
+        assertTrue(write.schema().toString().contains("append"));
+    }
+
+    @Test
     public void write_overwrite_highRisk() throws Exception {
         Files.write(p("a.txt"), "old".getBytes(StandardCharsets.UTF_8));
         assertTrue(write.isHighRisk(args("{\"path\":\"a.txt\"}")));

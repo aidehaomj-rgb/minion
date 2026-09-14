@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 
 /** 写文件。覆盖已存在文件为高危操作（需确认）。 */
 public class WriteTool implements Tool {
@@ -48,12 +49,12 @@ public class WriteTool implements Tool {
     public String name() { return "Write"; }
 
     @Override
-    public String description() { return "写入文件内容（覆盖已存在文件前会请求确认）"; }
+    public String description() { return "写入文件；大内容必须分块，每块不超过1000字符：首块 mode=overwrite，后续块 mode=append"; }
 
     @Override
     public JsonObject schema() {
-        return SchemaGenerator.objectSchema("写入文件",
-                new String[]{"path", "content"}, new String[]{"path", "content"});
+        return SchemaGenerator.objectSchema("写入文件（mode支持 overwrite/append；长文件分成多个小调用）",
+                new String[]{"path", "content", "mode"}, new String[]{"path", "content"});
     }
 
     @Override
@@ -75,12 +76,19 @@ public class WriteTool implements Tool {
         }
         if (p.getParent() != null) Files.createDirectories(p.getParent());
         String content = args.get("content").getAsString();
+        boolean append = args.has("mode") && "append".equalsIgnoreCase(args.get("mode").getAsString());
         if (checkpoints != null) {
             try { checkpoints.create(p, "Write"); }
             catch (IOException e) { return ToolResult.error("创建写入前检查点失败，未修改文件: " + e.getMessage()); }
         }
-        Files.write(p, content.getBytes(StandardCharsets.UTF_8));
-        return ToolResult.success("已写入 " + p + " (" + content.length() + " 字符)");
+        if (append) {
+            Files.write(p, content.getBytes(StandardCharsets.UTF_8),
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } else {
+            Files.write(p, content.getBytes(StandardCharsets.UTF_8));
+        }
+        return ToolResult.success((append ? "已追加 " : "已写入 ") + p
+                + " (" + content.length() + " 字符)");
     }
 
     /** 越界守卫：已存在路径交给 PathsGuard（toRealPath 防符号链接）；不存在路径向上找最深已存在祖先做真实路径校验 */
