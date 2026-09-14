@@ -207,9 +207,8 @@ public class SubAgentLoop {
                         return result;
                     }
                     lengthContinuationAttempts++;
-                    lengthContinuationHint = thinking.length() > 0
-                            ? "[系统完成性检查] 你刚才只有思考，没有正文或工具调用。请立即生成下一步完整工具调用，或给出包含实际结果的最终答复。"
-                            : "[系统完成性检查] 上一次响应为空。请继续执行并输出完整动作或实际结果。";
+                    lengthContinuationHint = buildNoActionRecoveryHint(
+                            lengthContinuationAttempts, hasVisibleText(thinking));
                     nextRequestWithoutThinking = true;
                     ui.onWarning("子 agent 未产生可执行动作，正在自动继续（第 "
                             + lengthContinuationAttempts + " 次）");
@@ -277,6 +276,17 @@ public class SubAgentLoop {
             if (!Character.isWhitespace(c) && c != '\u200B' && c != '\uFEFF') return true;
         }
         return false;
+    }
+
+    private static String buildNoActionRecoveryHint(int attempt, boolean hadThinking) {
+        String prefix = "/no_think\n[系统完成性检查] ";
+        if (attempt >= 3) {
+            return prefix + "这是第 " + attempt + " 次纠偏。禁止解释计划、复述任务或只输出思考。"
+                    + "下一条响应只允许是完整工具调用，或者直接交付完整最终结果。";
+        }
+        return prefix + (hadThinking ? "你刚才只有思考，没有正文或工具调用。"
+                : "上一次响应没有可见正文或工具调用。")
+                + "请立即输出完整动作或实际最终结果，不要再次说明计划。";
     }
 
     /** 可中断等待：100ms 小片轮询中断标志（与主循环 sleepWithInterruptCheck 一致；

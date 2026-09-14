@@ -1661,6 +1661,7 @@ public class AgentLoopTest {
         assertEquals(2, llm.requests.size());
         Message hint = llm.requests.get(1).messages.get(llm.requests.get(1).messages.size() - 1);
         assertEquals(Message.Role.USER, hint.role);
+        assertTrue("Qwen 恢复提示必须带模板级关闭思考指令", hint.content.startsWith("/no_think"));
         assertTrue(hint.content.contains("只生成了思考过程"));
         assertEquals("纯思考不能作为 assistant 存入历史", 2, loop.messages().size());
         assertEquals("已完成并给出实际结果", loop.messages().get(1).content);
@@ -1679,5 +1680,14 @@ public class AgentLoopTest {
         assertTrue(ui.warnings.toString().contains("未产生可执行动作"));
         assertEquals("空白正文不能写入持久历史", 2, loop.messages().size());
         assertEquals("已继续执行并完成结果", loop.messages().get(1).content);
+    }
+
+    @Test
+    public void repeatedThinkingOnly_escalatesRecoveryInstruction() {
+        String hint = AgentLoop.buildNoActionRecoveryHint(3, true);
+        assertTrue(hint.startsWith("/no_think"));
+        assertTrue(hint.contains("第 3 次纠偏"));
+        assertTrue(hint.contains("禁止解释计划"));
+        assertTrue(hint.contains("尚未输出的位置续写正文"));
     }
 }

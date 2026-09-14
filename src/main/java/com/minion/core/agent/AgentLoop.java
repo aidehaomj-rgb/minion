@@ -620,9 +620,8 @@ public class AgentLoop {
                 if ((toolCalls[0] == null || toolCalls[0].isEmpty())
                         && !hasContent && prematureStopRecoveries < 12) {
                     prematureStopRecoveries++;
-                    lengthContinuationHint = thinking.length() > 0
-                            ? "[系统完成性检查] 你刚才只生成了思考过程，没有给出正文或工具调用，原始任务尚未完成。请立即把思考落实为下一步完整工具调用，或在任务确已完成时给出包含实际结果的最终答复；不要再次只输出思考。"
-                            : "[系统完成性检查] 上一次模型响应为空，原始任务尚未完成。请继续执行并给出完整工具调用或实际最终结果。";
+                    lengthContinuationHint = buildNoActionRecoveryHint(
+                            prematureStopRecoveries, hasVisibleText(thinking));
                     nextRequestWithoutThinking = true;
                     ui.onWarning("模型未产生可执行动作，正在自动继续任务（第 "
                             + prematureStopRecoveries + " 次）");
@@ -826,6 +825,22 @@ public class AgentLoop {
             if (!Character.isWhitespace(c) && c != '\u200B' && c != '\uFEFF') return true;
         }
         return false;
+    }
+
+    /** Qwen 部署有时忽略 enable_thinking=false；/no_think 同时作用于聊天模板。
+     *  连续失败后升级措辞，防止模型反复复述“我要继续/我要输出报告”。 */
+    static String buildNoActionRecoveryHint(int attempt, boolean hadThinking) {
+        String prefix = "/no_think\n[系统完成性检查] ";
+        if (attempt >= 3) {
+            return prefix + "这是第 " + attempt + " 次纠偏。禁止解释计划、禁止复述任务、禁止输出思考过程。"
+                    + "你的下一条响应只允许是一个可执行的完整工具调用，或者直接交付完整最终结果；"
+                    + "若已有分析结果，立即从尚未输出的位置续写正文。";
+        }
+        return prefix + (hadThinking
+                ? "你刚才只生成了思考过程，没有给出正文或工具调用，原始任务尚未完成。"
+                : "上一次模型响应没有可见正文或工具调用，原始任务尚未完成。")
+                + "不要说明接下来准备做什么；立即生成下一步完整工具调用，"
+                + "或在任务确已完成时直接给出包含实际结果的最终答复。";
     }
 
     /** 可中断等待：100ms 小片轮询 interrupted 标志（interrupt() 只设标志不中断线程，
