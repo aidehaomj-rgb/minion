@@ -768,6 +768,9 @@ public class AgentLoop {
         return lower.startsWith("我先") || lower.startsWith("先看")
                 || lower.startsWith("接下来") || lower.startsWith("下一步")
                 || lower.startsWith("正在") || lower.startsWith("准备")
+                || lower.startsWith("好的，继续") || lower.startsWith("好，继续")
+                || lower.matches("^(?:好的?，?继续[。！!，, ]*)?(?:现在|接下来|下一步)(?:要|将|先|开始|继续|立即)?(?:补齐|检查|核对|验证|分析|处理|执行|生成|读取|查看).*")
+                || lower.matches("^(?:let me|i will|i'll|next,? i).*(?:check|verify|analy[sz]e|continue|run|read|inspect).*")
                 || lower.matches(".*(?:找到|发现|检测到).{0,40}(?:个)?(?:文件|表格|工作簿|数据源)[了。！!]*$")
                 || lower.endsWith("继续处理") || lower.endsWith("继续分析");
     }
