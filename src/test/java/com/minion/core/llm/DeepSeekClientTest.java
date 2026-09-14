@@ -148,6 +148,23 @@ public class DeepSeekClientTest {
     }
 
     @Test
+    public void recoveryRequest_detectsQwenFromModelNameWhenProviderIsLegacyDeepseek() throws Exception {
+        server.enqueue(new MockResponse().setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"));
+        DeepSeekClient client = new DeepSeekClient(server.url("/").toString(),
+                "sk-test", "Qwen3.8-27B", true, "medium", "deepseek", 2048);
+        client.streamChatWithoutThinking(Collections.singletonList(Message.user("立即执行")),
+                null, new StreamHandler() {
+                    @Override public void onFinish(String reason, Usage usage, List<ToolCall> calls) { }
+                });
+        JsonObject body = JsonParser.parseString(server.takeRequest().getBody().readUtf8()).getAsJsonObject();
+        assertFalse(body.get("enable_thinking").getAsBoolean());
+        assertFalse(body.has("thinking"));
+        assertTrue(body.getAsJsonObject("stream_options").get("include_usage").getAsBoolean());
+        client.close();
+    }
+
+    @Test
     public void streamChat_parsesToolCallDeltas() throws Exception {
         String sse = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"Read\",\"arguments\":\"\"}}]}}]}\n\n"
                 + "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"path\\\":\\\"a\"}}]}}]}\n\n"

@@ -200,8 +200,8 @@ public class SubAgentLoop {
                 }
                 if ("stop".equalsIgnoreCase(finish[0])
                         && (toolCalls[0] == null || toolCalls[0].isEmpty()) && content.length() == 0) {
-                    if (lengthContinuationAttempts >= 4) {
-                        ui.onError("子 agent 连续 4 次只生成思考或空响应，已停止自动恢复");
+                    if (lengthContinuationAttempts >= 12) {
+                        ui.onError("子 agent 连续 12 次只生成思考或空响应，已停止自动恢复");
                         String result = completedContent.toString();
                         ui.onSubAgentDone(result);
                         return result;
@@ -222,6 +222,8 @@ public class SubAgentLoop {
                     ui.onSubAgentDone(result);
                     return result;
                 }
+                // 成功产生工具动作后重新计算连续恢复次数，长任务不会累计到旧上限。
+                lengthContinuationAttempts = 0;
                 // assistant 工具调用消息先入历史——tool 消息必须紧跟含对应 tool_call_id 的
                 // assistant tool_calls 消息（DeepSeek/OpenAI 兼容 API 契约，否则 400）；
                 // reasoningContent 原样回传同样是硬性要求（思考模式 + 工具调用，缺失下轮 400）

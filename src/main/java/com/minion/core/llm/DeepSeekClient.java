@@ -97,12 +97,13 @@ public class DeepSeekClient implements LlmClient {
         body.addProperty("stream", true);
         body.addProperty("max_tokens", maxOutputTokens);
         // 按供应商生成思考参数（deepseek: thinking/reasoning_effort；qwen: enable_thinking）
-        JsonObject tp = thinkingParams(provider, thinking && !disableThinking, reasoningEffort);
+        String effectiveProvider = effectiveProvider();
+        JsonObject tp = thinkingParams(effectiveProvider, thinking && !disableThinking, reasoningEffort);
         if (tp != null) {
             for (Map.Entry<String, JsonElement> e : tp.entrySet()) body.add(e.getKey(), e.getValue());
         }
         // qwen 流式默认不返回 usage，需显式 include_usage；deepseek 不发送（零回归）
-        if ("qwen".equalsIgnoreCase(provider)) {
+        if ("qwen".equalsIgnoreCase(effectiveProvider)) {
             JsonObject so = new JsonObject();
             so.addProperty("include_usage", true);
             body.add("stream_options", so);
@@ -120,6 +121,13 @@ public class DeepSeekClient implements LlmClient {
                 .header("Authorization", "Bearer " + apiKey)
                 .post(RequestBody.create(JSON, body.toString()));
         return rb.build();
+    }
+
+    /** 兼容旧配置：模型名明确为 Qwen 时，即使 provider 误选 deepseek 也按 Qwen 协议发送。 */
+    private String effectiveProvider() {
+        if ("qwen".equalsIgnoreCase(provider)) return "qwen";
+        return model != null && model.toLowerCase(java.util.Locale.ROOT).contains("qwen")
+                ? "qwen" : provider;
     }
 
     /** 按供应商生成思考参数；deepseek/未知关闭思考时返回 null（不发参数）。
