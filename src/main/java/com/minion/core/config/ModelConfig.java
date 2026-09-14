@@ -8,6 +8,8 @@ public class ModelConfig {
     public String apiKey;
     public String modelName;
     public String provider;
+    /** SFM Agent Gateway 会话 ID；为空时由客户端自动生成 UUID。 */
+    public String sessionId;
     /** 协议类型：qwen/deepseek 使用 OpenAI Chat Completions；sfm-agent 使用 SFM Agent Gateway。 */
     public boolean thinking;
     public String reasoningEffort;
@@ -27,6 +29,7 @@ public class ModelConfig {
         c.apiKey = apiKey;
         c.modelName = modelName;
         c.provider = provider;
+        c.sessionId = sessionId;
         c.thinking = thinking;
         c.reasoningEffort = reasoningEffort;
         c.maxOutputTokens = maxOutputTokens;

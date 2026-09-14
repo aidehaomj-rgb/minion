@@ -551,7 +551,7 @@ public class SessionManager {
     /** 新建 LlmClient（模型配置工厂；GUI 弹窗切模型也用它） */
     public LlmClient newLlm(ModelConfig mc) {
         return new DeepSeekClient(mc.url, mc.apiKey, mc.modelName,
-                mc.thinking, mc.reasoningEffort, mc.provider, mc.maxOutputTokens);
+                mc.thinking, mc.reasoningEffort, mc.provider, mc.maxOutputTokens, mc.sessionId);
     }
 
     /**

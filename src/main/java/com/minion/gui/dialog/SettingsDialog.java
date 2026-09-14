@@ -225,6 +225,8 @@ public class SettingsDialog {
         TextField apiKey = new TextField(mc == null ? "" : mc.apiKey);
         apiKey.setPromptText("sk-...");
         TextField modelName = new TextField(mc == null ? "" : mc.modelName);
+        TextField sessionId = new TextField(mc == null ? "" : mc.sessionId);
+        sessionId.setPromptText("SFM Agent 必填；其他模型留空");
         ComboBox<String> provider = new ComboBox<String>();
         provider.getItems().addAll("qwen", "deepseek", "sfm-agent");
         if (mc == null) {
@@ -253,12 +255,22 @@ public class SettingsDialog {
         grid.addRow(2, new Label("API Key:"), apiKey);
         grid.addRow(3, new Label("模型名:"), modelName);
         grid.addRow(4, new Label("provider:"), provider);
-        grid.addRow(5, new Label("思考:"), thinking);
-        grid.addRow(6, new Label("effort:"), effort);
-        grid.addRow(7, new Label("maxOutputTokens:"), maxOut);
-        grid.addRow(8, new Label("maxContextTokens:"), maxCtx);
-        grid.addRow(9, new Label("compressThreshold:"), thr);
-        grid.addRow(10, new Label("keepRecentMessages:"), keep);
+        grid.addRow(5, new Label("sessionId:"), sessionId);
+        grid.addRow(6, new Label("思考:"), thinking);
+        grid.addRow(7, new Label("effort:"), effort);
+        grid.addRow(8, new Label("maxOutputTokens:"), maxOut);
+        grid.addRow(9, new Label("maxContextTokens:"), maxCtx);
+        grid.addRow(10, new Label("compressThreshold:"), thr);
+        grid.addRow(11, new Label("keepRecentMessages:"), keep);
+        provider.valueProperty().addListener((obs, old, value) -> {
+            boolean sfm = "sfm-agent".equalsIgnoreCase(value);
+            modelName.setDisable(sfm);
+            thinking.setDisable(sfm);
+            if (sfm) thinking.setSelected(false);
+        });
+        boolean sfm = mc != null && "sfm-agent".equalsIgnoreCase(mc.provider);
+        modelName.setDisable(sfm);
+        thinking.setDisable(sfm);
         d.getDialogPane().setContent(grid);
 
         d.setResultConverter(bt -> {
@@ -269,6 +281,7 @@ public class SettingsDialog {
             out.apiKey = apiKey.getText().trim();
             out.modelName = modelName.getText().trim();
             out.provider = provider.getValue() == null ? "deepseek" : provider.getValue();
+            out.sessionId = sessionId.getText().trim();
             out.thinking = thinking.isSelected();
             out.reasoningEffort = effort.getValue() == null ? "max" : effort.getValue();
             out.maxOutputTokens = Math.max(256, Math.min(parseInt(maxOut.getText(), 8192), 65536));
