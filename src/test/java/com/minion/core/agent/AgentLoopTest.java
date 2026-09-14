@@ -1690,4 +1690,22 @@ public class AgentLoopTest {
         assertTrue(hint.contains("禁止解释计划"));
         assertTrue(hint.contains("尚未输出的位置续写正文"));
     }
+
+    @Test
+    public void noThinkEmptyResponse_reEnablesThinkingInsteadOfRepeatingEmptyRequests() {
+        llm.addTurnWithTools(null, null, "只输出思考");
+        llm.addTurnWithTools(null, null, null);
+        llm.addTurn("最终产生有效结果");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("执行复杂任务");
+
+        assertEquals(3, llm.requests.size());
+        assertEquals("只有思考后的恢复轮应关闭思考，空响应后必须重新开启", 1,
+                llm.withoutThinkingCalls);
+        Message thirdHint = llm.requests.get(2).messages.get(
+                llm.requests.get(2).messages.size() - 1);
+        assertFalse(thirdHint.content.startsWith("/no_think"));
+        assertTrue(thirdHint.content.contains("返回了空响应"));
+        assertEquals("最终产生有效结果", loop.messages().get(loop.messages().size() - 1).content);
+    }
 }

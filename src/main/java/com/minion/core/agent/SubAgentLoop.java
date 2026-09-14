@@ -207,9 +207,10 @@ public class SubAgentLoop {
                         return result;
                     }
                     lengthContinuationAttempts++;
+                    boolean hadThinking = hasVisibleText(thinking);
                     lengthContinuationHint = buildNoActionRecoveryHint(
-                            lengthContinuationAttempts, hasVisibleText(thinking));
-                    nextRequestWithoutThinking = true;
+                            lengthContinuationAttempts, hadThinking);
+                    nextRequestWithoutThinking = hadThinking;
                     ui.onWarning("子 agent 未产生可执行动作，正在自动继续（第 "
                             + lengthContinuationAttempts + " 次）");
                     continue;
@@ -279,7 +280,8 @@ public class SubAgentLoop {
     }
 
     private static String buildNoActionRecoveryHint(int attempt, boolean hadThinking) {
-        String prefix = "/no_think\n[系统完成性检查] ";
+        String prefix = hadThinking ? "/no_think\n[系统完成性检查] "
+                : "[系统完成性检查] 上一轮关闭思考后返回了空响应，本轮允许必要的简短思考，但必须产生正文或工具调用。";
         if (attempt >= 3) {
             return prefix + "这是第 " + attempt + " 次纠偏。禁止解释计划、复述任务或只输出思考。"
                     + "下一条响应只允许是完整工具调用，或者直接交付完整最终结果。";

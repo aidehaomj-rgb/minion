@@ -620,12 +620,20 @@ public class AgentLoop {
                 if ((toolCalls[0] == null || toolCalls[0].isEmpty())
                         && !hasContent && prematureStopRecoveries < 12) {
                     prematureStopRecoveries++;
+                    boolean hadThinking = hasVisibleText(thinking);
                     lengthContinuationHint = buildNoActionRecoveryHint(
-                            prematureStopRecoveries, hasVisibleText(thinking));
-                    nextRequestWithoutThinking = true;
+                            prematureStopRecoveries, hadThinking);
+                    // 只有思考 -> 下一轮关思考；关思考后返回空包 -> 恢复思考。
+                    // 某些 Qwen 网关在 enable_thinking=false 时无法生成任何 token，不能持续强关。
+                    nextRequestWithoutThinking = hadThinking;
                     ui.onWarning("模型未产生可执行动作，正在自动继续任务（第 "
                             + prematureStopRecoveries + " 次）");
                     continue;
+                }
+                if ((toolCalls[0] == null || toolCalls[0].isEmpty()) && !hasContent) {
+                    ui.onError("模型连续 12 次只返回思考或空响应，已停止自动恢复。"
+                            + "这通常表示模型服务未按要求生成正文或工具调用，请稍后重试或切换模型。 ");
+                    break;
                 }
 
                 // 小模型偶尔会把“找到文件了/我先看看”等阶段性播报作为 stop 返回。
@@ -830,7 +838,8 @@ public class AgentLoop {
     /** Qwen 部署有时忽略 enable_thinking=false；/no_think 同时作用于聊天模板。
      *  连续失败后升级措辞，防止模型反复复述“我要继续/我要输出报告”。 */
     static String buildNoActionRecoveryHint(int attempt, boolean hadThinking) {
-        String prefix = "/no_think\n[系统完成性检查] ";
+        String prefix = hadThinking ? "/no_think\n[系统完成性检查] "
+                : "[系统完成性检查] 上一轮关闭思考后模型返回了空响应，本轮允许必要的简短思考，但必须产生正文或工具调用。";
         if (attempt >= 3) {
             return prefix + "这是第 " + attempt + " 次纠偏。禁止解释计划、禁止复述任务、禁止输出思考过程。"
                     + "你的下一条响应只允许是一个可执行的完整工具调用，或者直接交付完整最终结果；"
