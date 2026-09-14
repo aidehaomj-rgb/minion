@@ -226,7 +226,7 @@ public class SettingsDialog {
         apiKey.setPromptText("sk-...");
         TextField modelName = new TextField(mc == null ? "" : mc.modelName);
         ComboBox<String> provider = new ComboBox<String>();
-        provider.getItems().addAll("qwen", "deepseek");
+        provider.getItems().addAll("qwen", "deepseek", "sfm-agent");
         if (mc == null) {
             provider.setValue("deepseek");
         } else {

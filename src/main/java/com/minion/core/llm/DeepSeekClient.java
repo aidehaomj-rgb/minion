@@ -21,6 +21,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
 
 /** OpenAI 兼容 Chat Completions 流式客户端（SSE），内置 deepseek/qwen 思考参数适配。 */
 public class DeepSeekClient implements LlmClient {
@@ -43,6 +44,8 @@ public class DeepSeekClient implements LlmClient {
     private final String reasoningEffort;
     private final String provider;
     private final int maxOutputTokens;
+    /** SFM Agent Gateway 会话标识；同一个 Minion 会话内保持不变。 */
+    private final String gatewaySessionId = UUID.randomUUID().toString();
     private final OkHttpClient http;
     /** 看门狗调度池（实例级，随 close 释放）：单线程 daemon，取消即出队、空闲可回收 */
     private final ScheduledExecutorService watchdogScheduler = newWatchdogScheduler();
@@ -161,13 +164,98 @@ public class DeepSeekClient implements LlmClient {
     @Override
     public void streamChat(List<Message> messages, List<JsonObject> tools, StreamHandler handler)
             throws LlmException {
+        if ("sfm-agent".equalsIgnoreCase(provider)) {
+            streamSfmAgent(messages, handler);
+            return;
+        }
         streamChatInternal(messages, tools, handler, false);
     }
 
     @Override
     public void streamChatWithoutThinking(List<Message> messages, List<JsonObject> tools,
                                           StreamHandler handler) throws LlmException {
+        if ("sfm-agent".equalsIgnoreCase(provider)) {
+            streamSfmAgent(messages, handler);
+            return;
+        }
         streamChatInternal(messages, tools, handler, true);
+    }
+
+    /**
+     * SFM Agent Studio Gateway 协议：
+     * POST {stream:true, delta:true, sessionId, message:{text,metadata,attachments}}
+     * SSE data 中正文位于 content[].text.value，和 OpenAI choices.delta 不同。
+     * 网关自身负责 agent/tool 执行，因此不发送 Minion 的 tools schema。
+     */
+    private void streamSfmAgent(List<Message> messages, StreamHandler handler) throws LlmException {
+        String text = "";
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Message m = messages.get(i);
+            if (m != null && m.role == Message.Role.USER && m.content != null
+                    && !m.content.trim().isEmpty()) { text = m.content; break; }
+        }
+        JsonObject body = new JsonObject();
+        body.addProperty("stream", true);
+        body.addProperty("delta", true);
+        body.addProperty("sessionId", gatewaySessionId);
+        JsonObject msg = new JsonObject();
+        msg.addProperty("text", text);
+        msg.add("metadata", new JsonArray());
+        msg.add("attachments", new JsonArray());
+        body.add("message", msg);
+        Request.Builder rb = new Request.Builder().url(url)
+                .header("Authorization", "Bearer " + apiKey)
+                .header("Content-Type", "application/json")
+                .post(RequestBody.create(JSON, body.toString()));
+        okhttp3.Call call = http.newCall(rb.build());
+        inFlightCalls.add(call);
+        final boolean[] watchdogFired = new boolean[1];
+        final ScheduledFuture<?> watchdog = watchdogScheduler.schedule(() -> {
+            watchdogFired[0] = true; call.cancel();
+        }, firstTokenTimeoutMs, TimeUnit.MILLISECONDS);
+        Usage usage = null;
+        StringBuilder out = new StringBuilder();
+        try (Response response = call.execute()) {
+            if (!response.isSuccessful()) throw LlmException.of(response.code(), responseBody(response));
+            if (response.body() == null) throw new LlmException(LlmException.Type.OTHER, "空响应", false);
+            BufferedSource source = response.body().source();
+            String line;
+            while ((line = source.readUtf8Line()) != null) {
+                if (!line.startsWith("data:")) continue;
+                String data = line.substring(5).trim();
+                if (data.isEmpty() || "[DONE]".equals(data)) continue;
+                JsonObject chunk;
+                try { chunk = JsonParser.parseString(data).getAsJsonObject(); }
+                catch (RuntimeException ignored) { continue; }
+                if (chunk.has("usage") && chunk.get("usage").isJsonObject())
+                    usage = Usage.fromJson(chunk.getAsJsonObject("usage"));
+                JsonArray content = chunk.has("content") && chunk.get("content").isJsonArray()
+                        ? chunk.getAsJsonArray("content") : null;
+                if (content == null) continue;
+                for (JsonElement e : content) {
+                    if (!e.isJsonObject()) continue;
+                    JsonObject item = e.getAsJsonObject();
+                    JsonObject t = item.has("text") && item.get("text").isJsonObject()
+                            ? item.getAsJsonObject("text") : null;
+                    if (t != null && t.has("value") && !t.get("value").isJsonNull()) {
+                        String d = t.get("value").getAsString();
+                        if (!d.isEmpty()) { watchdog.cancel(false); out.append(d); handler.onContent(d); }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            if (watchdogFired[0]) throw new LlmException(LlmException.Type.TIMEOUT,
+                    "请求超时：" + thresholdText() + "内未收到模型输出", true);
+            if (isTimeout(e)) throw new LlmException(LlmException.Type.TIMEOUT, "请求超时: " + e.getMessage(), true);
+            if (isDnsFailure(e)) throw new LlmException(LlmException.Type.NETWORK,
+                    "网络错误: " + e.getMessage() + "（域名无法解析，请检查设置中的 API 地址）", false);
+            throw new LlmException(LlmException.Type.NETWORK, "网络错误: " + e.getMessage(), true);
+        } finally {
+            watchdog.cancel(false); inFlightCalls.remove(call);
+        }
+        if (usage == null) usage = Usage.estimate(messages, out.toString());
+        handler.onUsage(usage);
+        handler.onFinish("stop", usage, new ArrayList<ToolCall>());
     }
 
     private void streamChatInternal(List<Message> messages, List<JsonObject> tools,
