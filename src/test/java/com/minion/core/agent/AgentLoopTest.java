@@ -1666,4 +1666,17 @@ public class AgentLoopTest {
         assertTrue(ui.warnings.toString().contains("未产生可执行动作"));
         assertEquals("恢复轮必须临时关闭思考", 1, llm.withoutThinkingCalls);
     }
+
+    @Test
+    public void finishStop_withInvisibleContentAndThinking_autoContinues() {
+        llm.addTurnWithTools(null, " \r\n\t\u200B\uFEFF", "只制定了下一步计划");
+        llm.addTurn("已继续执行并完成结果");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("继续复杂任务");
+
+        assertEquals("空白正文不能让循环误判任务完成", 2, llm.requests.size());
+        assertTrue(ui.warnings.toString().contains("未产生可执行动作"));
+        assertEquals("空白正文不能写入持久历史", 2, loop.messages().size());
+        assertEquals("已继续执行并完成结果", loop.messages().get(1).content);
+    }
 }

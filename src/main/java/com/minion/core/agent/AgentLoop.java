@@ -584,10 +584,11 @@ public class AgentLoop {
 
                 // assistant 回复（含思考与工具调用）入会话历史——reasoningContent 回传硬性要求；
                 // 无正文且无工具调用的空回复不入历史（仅思考消息回传会 400）
-                if (content.length() > 0
+                boolean hasContent = hasVisibleText(content);
+                if (hasContent
                         || (toolCalls[0] != null && !toolCalls[0].isEmpty())) {
                     Message assistantMsg = Message.assistant(
-                            content.length() == 0 ? null : content.toString());
+                            hasContent ? content.toString() : null);
                     assistantMsg.reasoningContent = thinking.length() == 0 ? null : thinking.toString();
                     assistantMsg.toolCalls = toolCalls[0];
                     session.messages.add(assistantMsg);
@@ -617,7 +618,7 @@ public class AgentLoop {
                 // 这不是任务完成；reasoning_content 又不能单独写回历史（下轮 API 会 400），
                 // 因此用一次性内部指令要求它把思考落实为完整动作。
                 if ((toolCalls[0] == null || toolCalls[0].isEmpty())
-                        && content.length() == 0 && prematureStopRecoveries < 12) {
+                        && !hasContent && prematureStopRecoveries < 12) {
                     prematureStopRecoveries++;
                     lengthContinuationHint = thinking.length() > 0
                             ? "[系统完成性检查] 你刚才只生成了思考过程，没有给出正文或工具调用，原始任务尚未完成。请立即把思考落实为下一步完整工具调用，或在任务确已完成时给出包含实际结果的最终答复；不要再次只输出思考。"
@@ -643,7 +644,7 @@ public class AgentLoop {
 
                 if (toolCalls[0] == null || toolCalls[0].isEmpty()
                         || !"tool_calls".equals(finish[0])) {
-                    taskCompleted = content.length() > 0;
+                    taskCompleted = hasContent;
                     break;
                 }
                 // 只统计连续无动作：一旦模型成功产生工具调用，恢复计数归零。
@@ -813,7 +814,17 @@ public class AgentLoop {
     /** 零增量闸门：本次请求是否还没吐出任何可见内容。tool_calls 不参与判定——
      *  它累积在 DeepSeekClient 方法内的局部变量里，onFinish 前既不对外暴露也不渲染，重来无重复显示风险 */
     private boolean noOutputYet(StringBuilder content, StringBuilder thinking) {
-        return content.length() == 0 && thinking.length() == 0;
+        return !hasVisibleText(content) && !hasVisibleText(thinking);
+    }
+
+    /** 部分兼容服务会在正文通道只返回空格、换行、BOM 或零宽空格。 */
+    static boolean hasVisibleText(CharSequence text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!Character.isWhitespace(c) && c != '\u200B' && c != '\uFEFF') return true;
+        }
+        return false;
     }
 
     /** 可中断等待：100ms 小片轮询 interrupted 标志（interrupt() 只设标志不中断线程，
@@ -857,7 +868,7 @@ public class AgentLoop {
      *  正文未到达时（仅思考）不入历史：仅 reasoning_content 无 content/tool_calls 的
      *  assistant 消息回传会 400（DeepSeek 思考模式硬性要求）。 */
     private void appendPartialAssistant(StringBuilder content, StringBuilder thinking) {
-        if (content.length() == 0) return;
+        if (!hasVisibleText(content)) return;
         Message assistantMsg = Message.assistant(content.toString());
         assistantMsg.reasoningContent = thinking.length() == 0 ? null : thinking.toString();
         session.messages.add(assistantMsg);

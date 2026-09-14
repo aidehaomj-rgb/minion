@@ -177,7 +177,7 @@ public class SubAgentLoop {
                 if ("length".equalsIgnoreCase(finish[0])) {
                     boolean partialTool = toolCalls[0] != null && !toolCalls[0].isEmpty();
                     toolCalls[0] = null;
-                    if (content.length() > 0) {
+                    if (hasVisibleText(content)) {
                         Message partial = Message.assistant(content.toString());
                         partial.reasoningContent = thinking.length() == 0 ? null : thinking.toString();
                         messages.add(partial);
@@ -199,7 +199,7 @@ public class SubAgentLoop {
                     continue;
                 }
                 if ("stop".equalsIgnoreCase(finish[0])
-                        && (toolCalls[0] == null || toolCalls[0].isEmpty()) && content.length() == 0) {
+                        && (toolCalls[0] == null || toolCalls[0].isEmpty()) && !hasVisibleText(content)) {
                     if (lengthContinuationAttempts >= 12) {
                         ui.onError("子 agent 连续 12 次只生成思考或空响应，已停止自动恢复");
                         String result = completedContent.toString();
@@ -228,7 +228,7 @@ public class SubAgentLoop {
                 // assistant tool_calls 消息（DeepSeek/OpenAI 兼容 API 契约，否则 400）；
                 // reasoningContent 原样回传同样是硬性要求（思考模式 + 工具调用，缺失下轮 400）
                 Message assistantMsg = Message.assistant(
-                        content.length() == 0 ? null : content.toString());
+                        hasVisibleText(content) ? content.toString() : null);
                 assistantMsg.reasoningContent = thinking.length() == 0 ? null : thinking.toString();
                 assistantMsg.toolCalls = toolCalls[0];
                 messages.add(assistantMsg);
@@ -267,7 +267,16 @@ public class SubAgentLoop {
 
     /** 零增量闸门：已吐过正文/思考即不可长重试（与主循环一致，防重复输出） */
     private boolean noOutputYet(StringBuilder content, StringBuilder thinking) {
-        return content.length() == 0 && thinking.length() == 0;
+        return !hasVisibleText(content) && !hasVisibleText(thinking);
+    }
+
+    private static boolean hasVisibleText(CharSequence text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!Character.isWhitespace(c) && c != '\u200B' && c != '\uFEFF') return true;
+        }
+        return false;
     }
 
     /** 可中断等待：100ms 小片轮询中断标志（与主循环 sleepWithInterruptCheck 一致；
