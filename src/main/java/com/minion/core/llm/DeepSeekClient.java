@@ -210,7 +210,8 @@ public class DeepSeekClient implements LlmClient {
         body.addProperty("sessionId", gatewaySessionId);
         JsonObject msg = new JsonObject();
         msg.addProperty("text", text);
-        msg.add("metadata", new JsonArray());
+        // SFM 接口的 message.metadata 类型是对象（{}），数组（[]）会被 Spring 参数校验拒绝为 400。
+        msg.add("metadata", new JsonObject());
         // SFM 接口示例要求无附件时也保留一个空附件对象，不能发送空数组。
         JsonArray attachments = new JsonArray();
         JsonObject emptyAttachment = new JsonObject();
@@ -251,11 +252,15 @@ public class DeepSeekClient implements LlmClient {
                 for (JsonElement e : content) {
                     if (!e.isJsonObject()) continue;
                     JsonObject item = e.getAsJsonObject();
-                    JsonObject t = item.has("text") && item.get("text").isJsonObject()
-                            ? item.getAsJsonObject("text") : null;
-                    if (t != null && t.has("value") && !t.get("value").isJsonNull()) {
-                        String d = t.get("value").getAsString();
-                        if (!d.isEmpty()) { watchdog.cancel(false); out.append(d); handler.onContent(d); }
+                    if (!item.has("text") || item.get("text").isJsonNull()) continue;
+                    JsonElement textElement = item.get("text");
+                    if (textElement.isJsonArray()) {
+                        for (JsonElement part : textElement.getAsJsonArray()) {
+                            if (part.isJsonObject()) appendSfmText(part.getAsJsonObject(), out, handler, watchdog);
+                        }
+                    } else if (textElement.isJsonObject()) {
+                        // 兼容部分网关版本返回 text:{value:...} 的旧格式。
+                        appendSfmText(textElement.getAsJsonObject(), out, handler, watchdog);
                     }
                 }
             }
@@ -272,6 +277,16 @@ public class DeepSeekClient implements LlmClient {
         if (usage == null) usage = Usage.estimate(messages, out.toString());
         handler.onUsage(usage);
         handler.onFinish("stop", usage, new ArrayList<ToolCall>());
+    }
+
+    private void appendSfmText(JsonObject text, StringBuilder out, StreamHandler handler,
+                               ScheduledFuture<?> watchdog) {
+        if (!text.has("value") || text.get("value").isJsonNull()) return;
+        String delta = text.get("value").getAsString();
+        if (delta.isEmpty()) return;
+        watchdog.cancel(false);
+        out.append(delta);
+        handler.onContent(delta);
     }
 
     private void streamChatInternal(List<Message> messages, List<JsonObject> tools,

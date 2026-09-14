@@ -103,6 +103,36 @@ public class DeepSeekClientTest {
     }
 
     @Test
+    public void sfmAgent_usesDocumentedPayloadAndParsesTextArray() throws Exception {
+        String sse = "data: {\"content\":[{\"text\":[{\"value\":\"你是\",\"type\":\"text\"}]}],\"end\":false}\n\n"
+                + "data: {\"content\":[{\"text\":[{\"value\":\"Qwen\",\"type\":\"text\"}]}],\"end\":true}\n\n";
+        server.enqueue(new MockResponse().setHeader("Content-Type", "text/event-stream")
+                .setBody(sse));
+        DeepSeekClient client = new DeepSeekClient(server.url("/agent/api/run").toString(),
+                "app-key", "", false, "medium", "sfm-agent", 8192,
+                "7b9a3896-c0f6-4148-b2ab-15a82e6fbb75");
+        final StringBuilder content = new StringBuilder();
+        client.streamChat(Collections.singletonList(Message.user("你是什么模型")), null,
+                new StreamHandler() {
+                    @Override public void onContent(String delta) { content.append(delta); }
+                    @Override public void onFinish(String reason, Usage usage, List<ToolCall> calls) { }
+                });
+        assertEquals("你是Qwen", content.toString());
+        RecordedRequest request = server.takeRequest();
+        assertEquals("Bearer app-key", request.getHeader("Authorization"));
+        JsonObject body = JsonParser.parseString(request.getBody().readUtf8()).getAsJsonObject();
+        assertTrue(body.get("stream").getAsBoolean());
+        assertTrue(body.get("delta").getAsBoolean());
+        assertEquals("7b9a3896-c0f6-4148-b2ab-15a82e6fbb75", body.get("sessionId").getAsString());
+        JsonObject message = body.getAsJsonObject("message");
+        assertEquals("你是什么模型", message.get("text").getAsString());
+        assertTrue(message.get("metadata").isJsonObject());
+        assertEquals("", message.getAsJsonArray("attachments").get(0).getAsJsonObject()
+                .get("url").getAsString());
+        client.close();
+    }
+
+    @Test
     public void recoveryRequest_temporarilyDisablesQwenThinking() throws Exception {
         server.enqueue(new MockResponse().setHeader("Content-Type", "text/event-stream")
                 .setBody("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"));
