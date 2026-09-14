@@ -1645,6 +1645,7 @@ public class AgentLoopTest {
         assertTrue(AgentLoop.looksLikeInterimAnswer("找到两个文件了"));
         assertTrue(AgentLoop.looksLikeInterimAnswer("我先检查一下目录"));
         assertTrue(AgentLoop.looksLikeInterimAnswer("好的，继续。现在补齐关键交叉验证（稽查后石墨除气件出口明细、6903税号整改前后对比）："));
+        assertTrue(AgentLoop.looksLikeInterimAnswer("我发现孤数据中同一单号+项号出现多行，且部分单号进出口日期为空，这可能影响金额统计，我需要先确认重复行的区别和空日期单的性质。"));
         assertTrue(AgentLoop.looksLikeInterimAnswer("Next, I will verify the generated workbook."));
         assertFalse(AgentLoop.looksLikeInterimAnswer("分析已完成，结果文件已生成并核验。"));
         assertFalse(AgentLoop.looksLikeInterimAnswer("共有两个文件，分别为 A 和 B；详细结论如下。"));
