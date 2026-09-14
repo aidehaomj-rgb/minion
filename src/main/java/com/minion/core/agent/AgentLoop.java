@@ -740,7 +740,8 @@ public class AgentLoop {
                 // 小模型偶尔会把“找到文件了/我先看看”等阶段性播报作为 stop 返回。
                 // 已经执行过工具且明显仍是进度句时自动追问，不让会话数量或一次误判终止任务。
                 if ((toolCalls[0] == null || toolCalls[0].isEmpty())
-                        && !reportTools.isEmpty() && looksLikeInterimAnswer(content.toString())
+                        && (toolBackedContext || !reportTools.isEmpty())
+                        && looksLikeInterimAnswer(content.toString())
                         && prematureStopRecoveries < 12) {
                     prematureStopRecoveries++;
                     lengthContinuationHint = "[系统完成性检查] 你刚才的回复只是阶段性进度，原始任务尚未交付完成。请立即继续执行下一步工具操作，直到实际生成并验证用户要求的结果；不要只说明计划。";
@@ -878,6 +879,7 @@ public class AgentLoop {
                 || lower.startsWith("接下来") || lower.startsWith("下一步")
                 || lower.startsWith("正在") || lower.startsWith("准备")
                 || lower.startsWith("好的，继续") || lower.startsWith("好，继续")
+                || lower.matches("^继续[。！!，, ]*.*(?:现在|接下来|下一步)(?:要|将|先|开始|继续|立即)?(?:补齐|检查|核对|验证|分析|处理|执行|生成|读取|查看).*")
                 || lower.matches("^(?:好的?，?继续[。！!，, ]*)?(?:现在|接下来|下一步)(?:要|将|先|开始|继续|立即)?(?:补齐|检查|核对|验证|分析|处理|执行|生成|读取|查看).*")
                 || lower.matches(".*(?:我(?:还)?需要先|我接下来(?:会|将)|随后我会|然后我会)(?:确认|检查|核对|验证|分析|处理|执行|生成|读取|查看|补充|继续).*")
                 || lower.matches("^(?:let me|i will|i'll|next,? i).*(?:check|verify|analy[sz]e|continue|run|read|inspect).*")

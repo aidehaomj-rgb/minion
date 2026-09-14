@@ -1657,6 +1657,7 @@ public class AgentLoopTest {
         assertTrue(AgentLoop.looksLikeInterimAnswer("找到两个文件了"));
         assertTrue(AgentLoop.looksLikeInterimAnswer("我先检查一下目录"));
         assertTrue(AgentLoop.looksLikeInterimAnswer("好的，继续。现在补齐关键交叉验证（稽查后石墨除气件出口明细、6903税号整改前后对比）："));
+        assertTrue(AgentLoop.looksLikeInterimAnswer("继续。扫描和复核已完成，现在生成最终筛查结果 Excel。"));
         assertTrue(AgentLoop.looksLikeInterimAnswer("我发现孤数据中同一单号+项号出现多行，且部分单号进出口日期为空，这可能影响金额统计，我需要先确认重复行的区别和空日期单的性质。"));
         assertTrue(AgentLoop.looksLikeInterimAnswer("Next, I will verify the generated workbook."));
         assertFalse(AgentLoop.looksLikeInterimAnswer("分析已完成，结果文件已生成并核验。"));
@@ -1803,6 +1804,26 @@ public class AgentLoopTest {
             }
             assertNotEquals("old-broken", m.toolCallId);
         }
+    }
+
+    @Test
+    public void continuationTurn_usesPreviousToolContextForProgressDetection() {
+        AgentLoop loop = newLoop();
+        ToolCall prior = new ToolCall();
+        prior.id = "prior-tool";
+        prior.name = "example";
+        prior.arguments = "{\"text\":\"scan\"}";
+        Message priorAssistant = Message.assistant(null);
+        priorAssistant.toolCalls = Collections.singletonList(prior);
+        loop.messages().add(priorAssistant);
+        loop.messages().add(Message.toolResult("prior-tool", "example", "扫描完成"));
+        llm.addTurn("继续。扫描和复核已完成，现在生成最终筛查结果 Excel。");
+        llm.addTurn("Excel 已生成并验证。");
+        loop.runUserTurn("继续完成之前的任务");
+
+        assertEquals("跨回合阶段性回复必须继续", 2, llm.requests.size());
+        assertTrue(ui.warnings.toString().contains("阶段性回复"));
+        assertEquals("Excel 已生成并验证。", loop.messages().get(loop.messages().size() - 1).content);
     }
 
     private static String repeat(String value, int count) {
