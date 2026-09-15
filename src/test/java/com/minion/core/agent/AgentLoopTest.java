@@ -1786,6 +1786,26 @@ public class AgentLoopTest {
     }
 
     @Test
+    public void mixedToolBatch_executesValidCallAndDropsOnlyMalformedCall() {
+        ToolCall valid = new ToolCall();
+        valid.id = "mixed-valid";
+        valid.name = "example";
+        valid.arguments = "{\"text\":\"safe\"}";
+        ToolCall broken = new ToolCall();
+        broken.id = "mixed-broken";
+        broken.name = "example";
+        broken.arguments = "{\"text\":";
+        llm.addTurnWithTools(Arrays.asList(valid, broken), null);
+        llm.addTurn("合法调用已完成");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("执行混合调用");
+
+        assertEquals(1, ui.toolCalls.size());
+        assertEquals("example", ui.toolCalls.get(0));
+        assertTrue(ui.warnings.toString().contains("其余合法调用将继续执行"));
+    }
+
+    @Test
     public void persistedMalformedToolArguments_areHealedBeforeNextRequest() {
         AgentLoop loop = newLoop();
         ToolCall broken = new ToolCall();

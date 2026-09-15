@@ -104,6 +104,13 @@ public class DeepSeekClient implements LlmClient {
         }
         // qwen 流式默认不返回 usage，需显式 include_usage；deepseek 不发送（零回归）
         if ("qwen".equalsIgnoreCase(effectiveProvider)) {
+            // Qwen 部署差异：DashScope/部分网关读取顶层 enable_thinking，
+            // vLLM/OpenAI server 读取 chat_template_kwargs。两处同时发送以确保恢复轮真能关思考。
+            JsonObject templateArgs = new JsonObject();
+            templateArgs.addProperty("enable_thinking", thinking && !disableThinking);
+            body.add("chat_template_kwargs", templateArgs);
+            // 工具参数输出额度有限时，并行调用会把多个 JSON 一起截断；每轮只允许一个。
+            body.addProperty("parallel_tool_calls", false);
             JsonObject so = new JsonObject();
             so.addProperty("include_usage", true);
             body.add("stream_options", so);

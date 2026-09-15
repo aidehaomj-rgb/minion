@@ -144,6 +144,8 @@ public class DeepSeekClientTest {
                 });
         JsonObject body = JsonParser.parseString(server.takeRequest().getBody().readUtf8()).getAsJsonObject();
         assertFalse(body.get("enable_thinking").getAsBoolean());
+        assertFalse(body.getAsJsonObject("chat_template_kwargs").get("enable_thinking").getAsBoolean());
+        assertFalse(body.get("parallel_tool_calls").getAsBoolean());
         client.close();
     }
 
@@ -159,6 +161,8 @@ public class DeepSeekClientTest {
                 });
         JsonObject body = JsonParser.parseString(server.takeRequest().getBody().readUtf8()).getAsJsonObject();
         assertFalse(body.get("enable_thinking").getAsBoolean());
+        assertFalse(body.getAsJsonObject("chat_template_kwargs").get("enable_thinking").getAsBoolean());
+        assertFalse(body.get("parallel_tool_calls").getAsBoolean());
         assertFalse(body.has("thinking"));
         assertTrue(body.getAsJsonObject("stream_options").get("include_usage").getAsBoolean());
         client.close();
@@ -455,6 +459,8 @@ public class DeepSeekClientTest {
         RecordedRequest req = server.takeRequest();
         JsonObject json = JsonParser.parseString(req.getBody().readUtf8()).getAsJsonObject();
         assertTrue(json.get("enable_thinking").getAsBoolean());
+        assertTrue(json.getAsJsonObject("chat_template_kwargs").get("enable_thinking").getAsBoolean());
+        assertFalse(json.get("parallel_tool_calls").getAsBoolean());
         assertFalse(json.has("thinking"));
         assertEquals("max", json.get("reasoning_effort").getAsString());
         assertTrue(json.getAsJsonObject("stream_options").get("include_usage").getAsBoolean());
@@ -474,6 +480,8 @@ public class DeepSeekClientTest {
         RecordedRequest req = server.takeRequest();
         JsonObject json = JsonParser.parseString(req.getBody().readUtf8()).getAsJsonObject();
         assertFalse(json.get("enable_thinking").getAsBoolean());
+        assertFalse(json.getAsJsonObject("chat_template_kwargs").get("enable_thinking").getAsBoolean());
+        assertFalse(json.get("parallel_tool_calls").getAsBoolean());
         assertTrue(json.getAsJsonObject("stream_options").get("include_usage").getAsBoolean());
     }
 

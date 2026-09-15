@@ -423,10 +423,17 @@ public class AgentLoop {
         }
     }
 
-    private static boolean validToolCalls(List<ToolCall> calls) {
-        if (calls == null) return true;
-        for (ToolCall tc : calls) if (!normalizeAndValidateToolArguments(tc)) return false;
-        return true;
+    /** 原地保留合法调用，返回被丢弃的损坏调用数；一个坏调用不再连带丢弃同批合法调用。 */
+    private static int removeInvalidToolCalls(List<ToolCall> calls) {
+        if (calls == null) return 0;
+        int removed = 0;
+        for (int i = calls.size() - 1; i >= 0; i--) {
+            if (!normalizeAndValidateToolArguments(calls.get(i))) {
+                calls.remove(i);
+                removed++;
+            }
+        }
+        return removed;
     }
 
     public void runUserTurn(String input) { runUserTurn(input, null); }
@@ -632,15 +639,21 @@ public class AgentLoop {
                 boolean truncatedByLength = "length".equalsIgnoreCase(finish[0]);
                 boolean truncatedToolCall = truncatedByLength
                         && toolCalls[0] != null && !toolCalls[0].isEmpty();
-                boolean malformedToolCall = !truncatedByLength
-                        && toolCalls[0] != null && !toolCalls[0].isEmpty()
-                        && !validToolCalls(toolCalls[0]);
+                if (toolCalls[0] != null) toolCalls[0] = new ArrayList<ToolCall>(toolCalls[0]);
+                int malformedToolCallCount = !truncatedByLength
+                        ? removeInvalidToolCalls(toolCalls[0]) : 0;
+                boolean malformedToolCall = malformedToolCallCount > 0
+                        && (toolCalls[0] == null || toolCalls[0].isEmpty());
                 if (truncatedByLength) {
                     // 参数可能只收到半截 JSON；绝不能入历史或执行，否则下一轮会 400，
                     // 更严重时可能执行与模型原意不同的残缺命令。
                     toolCalls[0] = null;
                 }
                 if (malformedToolCall) toolCalls[0] = null;
+                else if (malformedToolCallCount > 0) {
+                    ui.onWarning("已丢弃 " + malformedToolCallCount
+                            + " 个损坏的工具调用，其余合法调用将继续执行");
+                }
 
                 // assistant 回复（含思考与工具调用）入会话历史——reasoningContent 回传硬性要求；
                 // 无正文且无工具调用的空回复不入历史（仅思考消息回传会 400）
@@ -998,7 +1011,9 @@ public class AgentLoop {
                 + " 次：上一次 arguments 因过长或截断而不是合法 JSON，该调用未保存、未执行。"
                 + "禁止原样重试超长调用。每次 arguments 总长度必须尽量小，文件 content 每块不超过1000字符；"
                 + "写大文件时先调用 Write(mode=overwrite) 写首块，再多次调用 Write(mode=append) 追加后续块。"
-                + "若只需修改局部，优先使用 Edit，不能把整份文件重新放进参数。现在只生成一个短小、完整的工具调用。";
+                + "若只需修改局部，优先使用 Edit，不能把整份文件重新放进参数。"
+                + "每轮严格只生成一个工具调用；Edit 每次只能修改一处，成功后下一轮再修改下一处。"
+                + "现在只生成第一个短小、完整的工具调用。";
     }
 
     /** 可中断等待：100ms 小片轮询 interrupted 标志（interrupt() 只设标志不中断线程，
