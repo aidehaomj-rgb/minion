@@ -1689,6 +1689,33 @@ public class AgentLoopTest {
     }
 
     @Test
+    public void interruptedReplyDetector_isConservative() {
+        assertTrue(AgentLoop.looksLikeInterruptedReply("两个文件都乱了（根目录版128行是新内容但"));
+        assertTrue(AgentLoop.looksLikeInterruptedReply("The root causes are:"));
+        assertTrue(AgentLoop.looksLikeInterruptedReply("结果如下：\n```json\n{\"a\":1}"));
+        assertFalse(AgentLoop.looksLikeInterruptedReply("两个文件已修复并验证。"));
+        assertFalse(AgentLoop.looksLikeInterruptedReply("分析已完成。" + AgentLoop.TASK_COMPLETE_MARKER));
+    }
+
+    @Test
+    public void truncatedSentenceAfterTools_autoContinuesWithoutManualCompact() {
+        ToolCall tc = new ToolCall();
+        tc.id = "c1";
+        tc.name = "example";
+        tc.arguments = "{\"text\":\"scan\"}";
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn("两个文件都乱了（根目录版128行是新内容但");
+        llm.addTurn("已经核对并修复两个文件。" + AgentLoop.TASK_COMPLETE_MARKER);
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("修复文件并验证");
+
+        assertEquals(3, llm.requests.size());
+        assertTrue(ui.warnings.toString().contains("阶段性回复"));
+        assertTrue(loop.messages().get(loop.messages().size() - 1).content
+                .endsWith(AgentLoop.TASK_COMPLETE_MARKER));
+    }
+
+    @Test
     public void finishStop_withThinkingOnly_autoContinues() {
         llm.addTurnWithTools(null, null, "已经分析完工具结果，准备下一步");
         llm.addTurn("已完成并给出实际结果");
