@@ -1662,6 +1662,30 @@ public class AgentLoopTest {
         assertTrue(AgentLoop.looksLikeInterimAnswer("Next, I will verify the generated workbook."));
         assertFalse(AgentLoop.looksLikeInterimAnswer("分析已完成，结果文件已生成并核验。"));
         assertFalse(AgentLoop.looksLikeInterimAnswer("共有两个文件，分别为 A 和 B；详细结论如下。"));
+        String longAnalysis = repeat("已完成一轮分类复核，结果仍需交叉验证。", 18);
+        assertTrue(AgentLoop.looksLikeInterimAnswer(longAnalysis + "让我再查验当前 strong 来源："));
+        assertFalse(AgentLoop.looksLikeInterimAnswer(longAnalysis + "分析已完成，结果文件已生成并核验。"));
+        assertFalse(AgentLoop.looksLikeInterimAnswer(longAnalysis + "让我再查验当前 strong 来源：\n"
+                + AgentLoop.TASK_COMPLETE_MARKER));
+    }
+
+    @Test
+    public void longProgressReply_afterTools_autoContinues() {
+        ToolCall tc = new ToolCall();
+        tc.id = "c1";
+        tc.name = "example";
+        tc.arguments = "{\"text\":\"scan\"}";
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn(repeat("已完成一轮分类复核，结果仍需交叉验证。", 18)
+                + "让我再查验当前 strong 来源：");
+        llm.addTurn("已完成复核并生成结果。" + AgentLoop.TASK_COMPLETE_MARKER);
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("复核分类并完成结果");
+
+        assertEquals(3, llm.requests.size());
+        assertTrue(ui.warnings.toString().contains("阶段性回复"));
+        assertTrue(loop.messages().get(loop.messages().size() - 1).content
+                .endsWith(AgentLoop.TASK_COMPLETE_MARKER));
     }
 
     @Test

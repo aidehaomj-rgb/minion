@@ -887,7 +887,14 @@ public class AgentLoop {
     static boolean looksLikeInterimAnswer(String text) {
         if (text == null) return false;
         String s = text.trim().replace('\r', ' ').replace('\n', ' ');
-        if (s.isEmpty() || s.length() > 240) return false;
+        if (s.isEmpty() || hasTaskCompleteMarker(s)) return false;
+        // 长篇分析后以“让我再查验…”结尾仍是进度回复。只检查末尾，避免把正文中
+        // 提到的计划误当成未完成；原有短回复规则继续保持保守。
+        if (s.length() > 240) {
+            String tail = s.substring(Math.max(0, s.length() - 200));
+            return tail.matches(".*(?:让我再|我再|接下来(?:我)?(?:会|要|将)?|下一步(?:我)?(?:会|要|将)?|现在(?:我)?(?:会|要|将)?|还需(?:要)?|需要继续)"
+                    + "(?:查验|检查|核对|验证|分析|处理|执行|生成|读取|查看|补充|复核|确认|排查|扫描)[^。！？!?]*[：:，,。]*$");
+        }
         String lower = s.toLowerCase(java.util.Locale.ROOT);
         return lower.startsWith("我先") || lower.startsWith("先看")
                 || lower.startsWith("接下来") || lower.startsWith("下一步")
