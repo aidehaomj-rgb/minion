@@ -1,0 +1,49 @@
+Minion 0.1.0 - Windows 7 x64 离线试用包
+================================================
+
+一、使用条件
+
+1. Windows 7 64 位。
+2. 内网电脑能够访问 OpenAI 兼容的模型接口。
+3. 本包已携带 Zulu OpenJDK 8u222 x64 和 JavaFX，无需安装 Java，
+   不会修改系统 JAVA_HOME 或 PATH。
+
+二、安装和启动
+
+1. 把整个 minion-win7-offline-0.1.0 文件夹复制到内网电脑。
+2. 建议放到普通用户可写目录，例如：D:\tools\minion-win7-offline-0.1.0
+3. 不要只复制 JAR；jdk8 文件夹和启动脚本必须一起保留。
+4. 双击“启动Minion.cmd”。
+5. 如果窗口没有出现，双击“排障启动-显示控制台.cmd”查看错误。
+
+三、首次配置
+
+1. 首次运行会在本目录生成 config.properties、workspace.json、model.json。
+2. 打开右上角“设置”，在“模型”页配置：
+   - 内网 OpenAI 兼容接口地址
+   - 模型名称
+   - API Key（如果接口需要）
+   - provider（按实际接口选择 deepseek 或 qwen）
+3. 创建工作空间时，选择允许 Minion 读写的项目目录。
+
+四、安全提醒
+
+1. 不要把真实 API Key、Cookie、会话文件发回外网。
+2. session 文件夹可能保存对话和文档内容。
+3. 首次试用建议使用测试目录，不要直接选择重要业务资料目录。
+4. 高风险命令出现确认提示时，不清楚用途不要同意。
+5. 公司有软件准入要求时，应先交 IT/安全部门审查。
+
+五、浏览器和 MCP（可选）
+
+1. 内置浏览器工具需要本机 Chrome，并在设置中填写 Chrome 路径。
+2. MCP stdio 工具可能还需要 Node.js 或对应服务端程序；本包未携带 Node.js。
+3. 不配置浏览器或 MCP 不影响基本聊天和文件工具。
+
+六、版本信息
+
+源码：https://github.com/aacw1/minion
+源码提交：ce92ec3943d63dab7e845f714544ce24501d5144
+构建 JDK：Zulu OpenJDK 8u222 x64 with JavaFX
+构建工具：Apache Maven 3.9.9
+构建日期：2026-08-26

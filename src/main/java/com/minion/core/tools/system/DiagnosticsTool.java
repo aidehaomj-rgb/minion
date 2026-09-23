@@ -9,6 +9,7 @@ import com.minion.core.tools.Tool;
 import com.minion.core.tools.ToolResult;
 import com.minion.core.tools.Workspace;
 import com.minion.core.tools.python.PythonRuntime;
+import com.minion.core.tools.plugin.BrowserConfig;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -26,12 +27,19 @@ public final class DiagnosticsTool implements Tool {
     private final Workspace workspace;
     private final PythonRuntime python;
     private final Path jarDir;
+    private final BrowserConfig browser;
 
     public DiagnosticsTool(Config config, Workspace workspace, PythonRuntime python, Path jarDir) {
+        this(config, workspace, python, jarDir, null);
+    }
+
+    public DiagnosticsTool(Config config, Workspace workspace, PythonRuntime python, Path jarDir,
+                           BrowserConfig browser) {
         this.config = config;
         this.workspace = workspace;
         this.python = python;
         this.jarDir = jarDir;
+        this.browser = browser;
     }
 
     @Override public String name() { return "Diagnostics"; }
@@ -84,8 +92,8 @@ public final class DiagnosticsTool implements Tool {
         } catch (Exception e) {
             sb.append("Python: missing/error | ").append(e.getMessage()).append('\n');
         }
-        sb.append("浏览器配置: port=").append(config.browserPort())
-                .append(" headless=").append(config.browserHeadless()).append('\n');
+        sb.append("浏览器配置: port=").append(browser == null ? 9222 : browser.port)
+                .append(" headless=").append(browser != null && browser.headless).append('\n');
         sb.append("读越界: ").append(config.readAllowOutside()).append(" | 跳过高危确认: ")
                 .append(config.confirmSkip()).append('\n');
         sb.append("日志: ").append(DiagnosticLog.file() == null ? "未初始化" : DiagnosticLog.file()).append('\n');
@@ -94,7 +102,7 @@ public final class DiagnosticsTool implements Tool {
     }
 
     private String resolvedBrowser() {
-        String p = config.browserPath();
+        String p = browser == null ? "" : browser.path;
         return p == null || p.trim().isEmpty() ? "chrome" : p;
     }
 

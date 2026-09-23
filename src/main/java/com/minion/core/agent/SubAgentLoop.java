@@ -44,6 +44,10 @@ public class SubAgentLoop {
     public String run() {
         ui.onSubAgentStart(messages.get(1).content);
         int retries = 0;
+        int lengthContinuationAttempts = 0;
+        String lengthContinuationHint = null;
+        boolean nextRequestWithoutThinking = false;
+        StringBuilder completedContent = new StringBuilder();
         final boolean[] inRetry = new boolean[1]; // 瞬时错误重试循环进行中（首个流式增量到达即复位指示器）；方法级：外层 InterruptedException 需访问
         try {
             while (true) {
@@ -87,8 +91,16 @@ public class SubAgentLoop {
                     @Override
                     public void onError(LlmException e) { finish[0] = "error"; ui.onError(e.getMessage()); }
                 };
+                List<Message> requestMessages = messages;
+                if (lengthContinuationHint != null) {
+                    requestMessages = new ArrayList<Message>(messages);
+                    requestMessages.add(Message.user(lengthContinuationHint));
+                    lengthContinuationHint = null;
+                }
+                final boolean requestWithoutThinking = nextRequestWithoutThinking;
+                nextRequestWithoutThinking = false;
                 try {
-                    llm.streamChat(messages, subAgentTools(), handler);
+                    streamChat(requestMessages, handler, requestWithoutThinking);
                 } catch (LlmException e) {
                     if (Thread.currentThread().isInterrupted()) {
                         // 已被主循环中断（cancel 引发的 Canceled 错误）：不重试
@@ -118,7 +130,7 @@ public class SubAgentLoop {
                                 break;
                             }
                             try {
-                                llm.streamChat(messages, subAgentTools(), handler);
+                                streamChat(requestMessages, handler, requestWithoutThinking);
                                 // 成功后静默恢复（不打扰正文）：首个流式增量/onFinish 已复位指示器，
                                 // 若流中断（onError 回调已提示）则落下方正常路径处理
                                 break;
@@ -162,16 +174,61 @@ public class SubAgentLoop {
                         return "子 agent 失败: " + e.getMessage();
                     }
                 }
+                if ("length".equalsIgnoreCase(finish[0])) {
+                    boolean partialTool = toolCalls[0] != null && !toolCalls[0].isEmpty();
+                    toolCalls[0] = null;
+                    if (hasVisibleText(content)) {
+                        Message partial = Message.assistant(content.toString());
+                        partial.reasoningContent = thinking.length() == 0 ? null : thinking.toString();
+                        messages.add(partial);
+                        completedContent.append(content);
+                    }
+                    if (lengthContinuationAttempts >= 12) {
+                        ui.onError("子 agent 连续 12 次达到单次输出上限，已停止自动续接");
+                        String result = completedContent.toString();
+                        ui.onSubAgentDone(result);
+                        return result;
+                    }
+                    lengthContinuationAttempts++;
+                    lengthContinuationHint = partialTool
+                            ? "[系统续接] 上一次输出在工具调用中被截断，工具没有执行。请从头生成完整合法的工具调用并继续任务。"
+                            : "[系统续接] 上一次输出达到长度上限。请紧接已有内容继续任务，不要重复或提前总结。";
+                    nextRequestWithoutThinking = true;
+                    ui.onWarning("子 agent 输出达到单次上限，正在自动续接（第 "
+                            + lengthContinuationAttempts + " 次）");
+                    continue;
+                }
+                if ("stop".equalsIgnoreCase(finish[0])
+                        && (toolCalls[0] == null || toolCalls[0].isEmpty()) && !hasVisibleText(content)) {
+                    if (lengthContinuationAttempts >= 12) {
+                        ui.onError("子 agent 连续 12 次只生成思考或空响应，已停止自动恢复");
+                        String result = completedContent.toString();
+                        ui.onSubAgentDone(result);
+                        return result;
+                    }
+                    lengthContinuationAttempts++;
+                    boolean hadThinking = hasVisibleText(thinking);
+                    lengthContinuationHint = buildNoActionRecoveryHint(
+                            lengthContinuationAttempts, hadThinking);
+                    nextRequestWithoutThinking = hadThinking;
+                    ui.onWarning("子 agent 未产生可执行动作，正在自动继续（第 "
+                            + lengthContinuationAttempts + " 次）");
+                    continue;
+                }
                 if (toolCalls[0] == null || toolCalls[0].isEmpty()
                         || !"tool_calls".equals(finish[0])) {
-                    ui.onSubAgentDone(content.toString());
-                    return content.toString();
+                    completedContent.append(content);
+                    String result = completedContent.toString();
+                    ui.onSubAgentDone(result);
+                    return result;
                 }
+                // 成功产生工具动作后重新计算连续恢复次数，长任务不会累计到旧上限。
+                lengthContinuationAttempts = 0;
                 // assistant 工具调用消息先入历史——tool 消息必须紧跟含对应 tool_call_id 的
                 // assistant tool_calls 消息（DeepSeek/OpenAI 兼容 API 契约，否则 400）；
                 // reasoningContent 原样回传同样是硬性要求（思考模式 + 工具调用，缺失下轮 400）
                 Message assistantMsg = Message.assistant(
-                        content.length() == 0 ? null : content.toString());
+                        hasVisibleText(content) ? content.toString() : null);
                 assistantMsg.reasoningContent = thinking.length() == 0 ? null : thinking.toString();
                 assistantMsg.toolCalls = toolCalls[0];
                 messages.add(assistantMsg);
@@ -202,9 +259,36 @@ public class SubAgentLoop {
                 || e.httpCode == 500 || e.httpCode == 502;
     }
 
+    private void streamChat(List<Message> request, com.minion.core.llm.StreamHandler handler,
+                            boolean withoutThinking) throws LlmException {
+        if (withoutThinking) llm.streamChatWithoutThinking(request, subAgentTools(), handler);
+        else llm.streamChat(request, subAgentTools(), handler);
+    }
+
     /** 零增量闸门：已吐过正文/思考即不可长重试（与主循环一致，防重复输出） */
     private boolean noOutputYet(StringBuilder content, StringBuilder thinking) {
-        return content.length() == 0 && thinking.length() == 0;
+        return !hasVisibleText(content) && !hasVisibleText(thinking);
+    }
+
+    private static boolean hasVisibleText(CharSequence text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!Character.isWhitespace(c) && c != '\u200B' && c != '\uFEFF') return true;
+        }
+        return false;
+    }
+
+    private static String buildNoActionRecoveryHint(int attempt, boolean hadThinking) {
+        String prefix = hadThinking ? "/no_think\n[系统完成性检查] "
+                : "[系统完成性检查] 上一轮关闭思考后返回了空响应，本轮允许必要的简短思考，但必须产生正文或工具调用。";
+        if (attempt >= 3) {
+            return prefix + "这是第 " + attempt + " 次纠偏。禁止解释计划、复述任务或只输出思考。"
+                    + "下一条响应只允许是完整工具调用，或者直接交付完整最终结果。";
+        }
+        return prefix + (hadThinking ? "你刚才只有思考，没有正文或工具调用。"
+                : "上一次响应没有可见正文或工具调用。")
+                + "请立即输出完整动作或实际最终结果，不要再次说明计划。";
     }
 
     /** 可中断等待：100ms 小片轮询中断标志（与主循环 sleepWithInterruptCheck 一致；
@@ -246,7 +330,7 @@ public class SubAgentLoop {
                 return ToolResult.error("子 agent 不可加载技能（Skill 工具已禁用）");
             }
             Tool tool = registry.get(call.name);
-            if (tool == null) return ToolResult.error("未知工具: " + call.name);
+            if (tool == null) return ToolResult.error("工具不存在或已停用: " + call.name);
             JsonObject args;
             try {
                 args = JsonParser.parseString(call.arguments == null ? "{}" : call.arguments).getAsJsonObject();

@@ -20,6 +20,40 @@ import static org.junit.Assert.*;
 
 public class DeepSeekClientTest {
 
+    @Test
+    public void eofWithoutTermination_isIncomplete() throws Exception {
+        server.enqueue(new MockResponse().setBody("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"));
+        final String[] reason = new String[1];
+        newClient().streamChat(Collections.singletonList(Message.user("hi")), null, new StreamHandler() {
+            @Override public void onFinish(String r, Usage usage, List<ToolCall> calls) {
+                reason[0] = r;
+                assertTrue(usage.estimated);
+            }
+        });
+        assertEquals("incomplete", reason[0]);
+    }
+
+    @Test
+    public void doneWithoutFinishReason_isAccepted() throws Exception {
+        server.enqueue(new MockResponse().setBody("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"));
+        final String[] reason = new String[1];
+        newClient().streamChat(Collections.singletonList(Message.user("hi")), null, new StreamHandler() {
+            @Override public void onFinish(String r, Usage usage, List<ToolCall> calls) { reason[0] = r; }
+        });
+        assertEquals("stop", reason[0]);
+    }
+
+    @Test
+    public void incompleteSummary_isRejected() throws Exception {
+        server.enqueue(new MockResponse().setBody("data: {\"choices\":[{\"delta\":{\"content\":\"partial summary\"}}]}\n\n"));
+        try {
+            newClient().completeChat(Collections.singletonList(Message.user("hi")), "summarize");
+            fail("Partial summary must not replace history");
+        } catch (LlmException expected) {
+            assertTrue(expected.getMessage().contains("保留原始上下文"));
+        }
+    }
+
     private MockWebServer server;
 
     @Before
@@ -82,9 +116,90 @@ public class DeepSeekClientTest {
         JsonObject json = JsonParser.parseString(body).getAsJsonObject();
         assertEquals("deepseek-v4-flash", json.get("model").getAsString());
         assertTrue(json.get("stream").getAsBoolean());
+        assertEquals(8192, json.get("max_tokens").getAsInt());
         assertEquals("max", json.get("reasoning_effort").getAsString());
         assertEquals("enabled", json.getAsJsonObject("thinking").get("type").getAsString());
         assertFalse(json.has("stream_options")); // deepseek 零回归：不发送 stream_options
+    }
+
+    @Test
+    public void request_usesConfiguredMaxOutputTokens() throws Exception {
+        server.enqueue(new MockResponse().setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"));
+        DeepSeekClient client = new DeepSeekClient(server.url("/").toString(),
+                "sk-test", "qwen", true, "xhigh", "qwen", 16384);
+        client.streamChat(Collections.singletonList(Message.user("hi")), null, new StreamHandler() {
+            @Override public void onFinish(String finishReason, Usage usage, List<ToolCall> toolCalls) { }
+        });
+        JsonObject body = JsonParser.parseString(server.takeRequest().getBody().readUtf8()).getAsJsonObject();
+        assertEquals(16384, body.get("max_tokens").getAsInt());
+        client.close();
+    }
+
+    @Test
+    public void sfmAgent_usesDocumentedPayloadAndParsesTextArray() throws Exception {
+        String sse = "data: {\"content\":[{\"text\":[{\"value\":\"你是\",\"type\":\"text\"}]}],\"end\":false}\n\n"
+                + "data: {\"content\":[{\"text\":[{\"value\":\"Qwen\",\"type\":\"text\"}]}],\"end\":true}\n\n";
+        server.enqueue(new MockResponse().setHeader("Content-Type", "text/event-stream")
+                .setBody(sse));
+        DeepSeekClient client = new DeepSeekClient(server.url("/agent/api/run").toString(),
+                "app-key", "", false, "medium", "sfm-agent", 8192,
+                "7b9a3896-c0f6-4148-b2ab-15a82e6fbb75");
+        final StringBuilder content = new StringBuilder();
+        client.streamChat(Collections.singletonList(Message.user("你是什么模型")), null,
+                new StreamHandler() {
+                    @Override public void onContent(String delta) { content.append(delta); }
+                    @Override public void onFinish(String reason, Usage usage, List<ToolCall> calls) { }
+                });
+        assertEquals("你是Qwen", content.toString());
+        RecordedRequest request = server.takeRequest();
+        assertEquals("Bearer app-key", request.getHeader("Authorization"));
+        JsonObject body = JsonParser.parseString(request.getBody().readUtf8()).getAsJsonObject();
+        assertTrue(body.get("stream").getAsBoolean());
+        assertTrue(body.get("delta").getAsBoolean());
+        assertEquals("7b9a3896-c0f6-4148-b2ab-15a82e6fbb75", body.get("sessionId").getAsString());
+        JsonObject message = body.getAsJsonObject("message");
+        assertEquals("你是什么模型", message.get("text").getAsString());
+        assertTrue(message.get("metadata").isJsonObject());
+        assertEquals("", message.getAsJsonArray("attachments").get(0).getAsJsonObject()
+                .get("url").getAsString());
+        client.close();
+    }
+
+    @Test
+    public void recoveryRequest_temporarilyDisablesQwenThinking() throws Exception {
+        server.enqueue(new MockResponse().setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"));
+        DeepSeekClient client = new DeepSeekClient(server.url("/").toString(),
+                "sk-test", "qwen", true, "xhigh", "qwen", 8192);
+        client.streamChatWithoutThinking(Collections.singletonList(Message.user("继续并执行")),
+                null, new StreamHandler() {
+                    @Override public void onFinish(String reason, Usage usage, List<ToolCall> calls) { }
+                });
+        JsonObject body = JsonParser.parseString(server.takeRequest().getBody().readUtf8()).getAsJsonObject();
+        assertFalse(body.get("enable_thinking").getAsBoolean());
+        assertFalse(body.getAsJsonObject("chat_template_kwargs").get("enable_thinking").getAsBoolean());
+        assertFalse(body.get("parallel_tool_calls").getAsBoolean());
+        client.close();
+    }
+
+    @Test
+    public void recoveryRequest_detectsQwenFromModelNameWhenProviderIsLegacyDeepseek() throws Exception {
+        server.enqueue(new MockResponse().setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"));
+        DeepSeekClient client = new DeepSeekClient(server.url("/").toString(),
+                "sk-test", "Qwen3.8-27B", true, "medium", "deepseek", 2048);
+        client.streamChatWithoutThinking(Collections.singletonList(Message.user("立即执行")),
+                null, new StreamHandler() {
+                    @Override public void onFinish(String reason, Usage usage, List<ToolCall> calls) { }
+                });
+        JsonObject body = JsonParser.parseString(server.takeRequest().getBody().readUtf8()).getAsJsonObject();
+        assertFalse(body.get("enable_thinking").getAsBoolean());
+        assertFalse(body.getAsJsonObject("chat_template_kwargs").get("enable_thinking").getAsBoolean());
+        assertFalse(body.get("parallel_tool_calls").getAsBoolean());
+        assertFalse(body.has("thinking"));
+        assertTrue(body.getAsJsonObject("stream_options").get("include_usage").getAsBoolean());
+        client.close();
     }
 
     @Test
@@ -378,6 +493,8 @@ public class DeepSeekClientTest {
         RecordedRequest req = server.takeRequest();
         JsonObject json = JsonParser.parseString(req.getBody().readUtf8()).getAsJsonObject();
         assertTrue(json.get("enable_thinking").getAsBoolean());
+        assertTrue(json.getAsJsonObject("chat_template_kwargs").get("enable_thinking").getAsBoolean());
+        assertFalse(json.get("parallel_tool_calls").getAsBoolean());
         assertFalse(json.has("thinking"));
         assertEquals("max", json.get("reasoning_effort").getAsString());
         assertTrue(json.getAsJsonObject("stream_options").get("include_usage").getAsBoolean());
@@ -397,6 +514,8 @@ public class DeepSeekClientTest {
         RecordedRequest req = server.takeRequest();
         JsonObject json = JsonParser.parseString(req.getBody().readUtf8()).getAsJsonObject();
         assertFalse(json.get("enable_thinking").getAsBoolean());
+        assertFalse(json.getAsJsonObject("chat_template_kwargs").get("enable_thinking").getAsBoolean());
+        assertFalse(json.get("parallel_tool_calls").getAsBoolean());
         assertTrue(json.getAsJsonObject("stream_options").get("include_usage").getAsBoolean());
     }
 

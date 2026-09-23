@@ -36,6 +36,9 @@ public class ModelManager {
                             if (c.reasoningEffort == null || c.reasoningEffort.trim().isEmpty()) {
                                 c.reasoningEffort = "qwen".equalsIgnoreCase(c.provider) ? "xhigh" : "max";
                             }
+                            // 旧 model.json 没有该字段时 Gson 读为 0；迁移到安全默认值，
+                            // 避免服务端采用常见的 2048 默认上限截断思考/工具调用。
+                            if (c.maxOutputTokens <= 0) c.maxOutputTokens = 8192;
                             m.models.add(c);
                         }
                     }
@@ -68,6 +71,7 @@ public class ModelManager {
         c.provider = "deepseek";
         c.thinking = true;
         c.reasoningEffort = "max";
+        c.maxOutputTokens = 8192;
         c.maxContextTokens = 900000;
         c.compressThreshold = 0.8;
         c.keepRecentMessages = 50;
@@ -84,6 +88,7 @@ public class ModelManager {
         c.provider = "qwen";
         c.thinking = true;
         c.reasoningEffort = "xhigh";
+        c.maxOutputTokens = 8192;
         c.maxContextTokens = 131072;
         c.compressThreshold = 0.8;
         c.keepRecentMessages = 50;
@@ -124,8 +129,10 @@ public class ModelManager {
         old.apiKey = c.apiKey;
         old.modelName = c.modelName;
         old.provider = c.provider;
+        old.sessionId = c.sessionId;
         old.thinking = c.thinking;
         old.reasoningEffort = c.reasoningEffort;
+        old.maxOutputTokens = c.maxOutputTokens <= 0 ? 8192 : c.maxOutputTokens;
         old.maxContextTokens = c.maxContextTokens;
         old.compressThreshold = c.compressThreshold;
         old.keepRecentMessages = c.keepRecentMessages;

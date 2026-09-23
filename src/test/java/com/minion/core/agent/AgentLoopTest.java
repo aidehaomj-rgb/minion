@@ -69,6 +69,18 @@ public class AgentLoopTest {
         return loop;
     }
 
+    private AgentLoop newLoopWithContext(int maxTokens, double threshold, int keepRecent) {
+        com.minion.core.context.ContextManager cm = new com.minion.core.context.ContextManager(
+                maxTokens, threshold, keepRecent, llm, 0);
+        AgentLoop loop = new AgentLoop(llm, registry,
+                new SystemPromptBuilder(tmp.getRoot().getPath() + "/project.md"),
+                confirm, ui, cm,
+                new Workspace(tmp.getRoot().getPath()),
+                Session.create(tmp.getRoot().getPath(), "test-model"));
+        loop.roundLimit = 20;
+        return loop;
+    }
+
     @Test
     public void singleTurn_noTools() {
         llm.addTurn("好的");
@@ -1544,5 +1556,383 @@ public class AgentLoopTest {
         assertEquals(1, ui.errors.size());
         assertTrue(ui.errors.get(0).startsWith("网络超时 重试了"));
         assertTrue(ui.errors.get(0).contains("仍失败"));
+    }
+
+    /** 插件停用后模型仍拿旧工具名来调：得到「不存在或已停用」的失败结果，而不是执行 */
+    @Test
+    public void disabledPluginToolCallReturnsDisabledHint() {
+        registry.setGate(new ToolRegistry.PluginGate() {
+            @Override public boolean enabled(String pluginId) { return false; }   // 全部插件停用
+        });
+        registry.register("browser", new Tool() {
+            @Override public String name() { return "Browser"; }
+            @Override public String description() { return "浏览器导航"; }
+            @Override public com.google.gson.JsonObject schema() {
+                return com.minion.core.tools.SchemaGenerator.objectSchema("浏览器导航",
+                        new String[]{"action"}, new String[]{"action"});
+            }
+            @Override public ToolResult execute(com.google.gson.JsonObject args) {
+                throw new IllegalStateException("停用的工具不应被执行");
+            }
+        });
+        assertNull("gate 停用后 registry 不应交出该工具", registry.get("Browser"));
+        assertEquals("内置工具（pluginId=null）恒放行，只剩插件工具被挡下",
+                2, registry.schemas().size());
+
+        // 假模型仍拿旧名字请求调用（运行中会话下轮请求的典型场景）
+        ToolCall tc = new ToolCall();
+        tc.id = "c1";
+        tc.name = "Browser";
+        tc.arguments = "{\"action\":\"open\"}";
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn("明白");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("打开页面");
+        // 0:user 1:assistant(tool_calls) 2:tool(失败结果) 3:assistant(final)
+        List<Message> msgs = loop.messages();
+        assertEquals(4, msgs.size());
+        assertEquals(Message.Role.TOOL, msgs.get(2).role);
+        assertTrue("回给模型的应是「不存在或已停用」提示",
+                msgs.get(2).content.contains("工具不存在或已停用: Browser"));
+    }
+
+    @Test
+    public void stopWithTools_stillExecutesCompleteCall() {
+        ToolCall tc = new ToolCall();
+        tc.id = "compat"; tc.name = "example"; tc.arguments = "{\"text\":\"hi\"}";
+        llm.addTurnWithFinish(Collections.singletonList(tc), null, "stop");
+        llm.addTurn("处理完成");
+        newLoop().runUserTurn("执行工具");
+        assertEquals(1, ui.toolCalls.size());
+        assertEquals(2, llm.requests.size());
+    }
+
+    @Test
+    public void incompleteStream_neverExecutesUnterminatedToolCall() {
+        ToolCall tc = new ToolCall();
+        tc.id = "partial"; tc.name = "example"; tc.arguments = "{\"text\":\"hi\"}";
+        llm.addTurnWithFinish(Collections.singletonList(tc), "部分正文", "incomplete");
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn("处理完成");
+        newLoop().runUserTurn("执行工具");
+        assertEquals(1, ui.toolCalls.size());
+        assertEquals(3, llm.requests.size());
+    }
+
+    @Test
+    public void incompleteStream_recoveryIsBounded() {
+        llm.addTurnWithFinish(null, "部分正文", "incomplete");
+        newLoop().runUserTurn("执行任务");
+        assertEquals(4, llm.requests.size());
+        assertTrue(ui.toolCalls.isEmpty());
+    }
+
+    @Test
+    public void finishLength_afterThinkingOnly_autoContinuesWithoutFakeHistory() {
+        llm.addTurnLength(null, null, "很长的思考");
+        llm.addTurn("任务最终完成");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("复杂任务");
+
+        assertEquals(2, llm.requests.size());
+        List<Message> second = llm.requests.get(1).messages;
+        assertEquals(Message.Role.USER, second.get(second.size() - 1).role);
+        assertTrue(second.get(second.size() - 1).content.contains("系统续接"));
+        assertEquals("续接指令不能污染持久会话", 2, loop.messages().size());
+        assertEquals("任务最终完成", loop.messages().get(1).content);
+        assertTrue(ui.warnings.get(0).contains("自动续接"));
+    }
+
+    @Test
+    public void finishLength_withPartialToolCall_discardsAndNeverExecutesIt() {
+        ToolCall cut = new ToolCall();
+        cut.id = "cut";
+        cut.name = "example";
+        cut.arguments = "{\"text\":"; // 明确是半截 JSON
+        llm.addTurnLength(Collections.singletonList(cut), null, "准备调用工具");
+        llm.addTurn("已安全恢复");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("复杂任务");
+
+        assertTrue("残缺工具绝不能执行", ui.toolCalls.isEmpty());
+        assertEquals(2, loop.messages().size());
+        assertEquals("已安全恢复", loop.messages().get(1).content);
+        String hint = llm.requests.get(1).messages.get(llm.requests.get(1).messages.size() - 1).content;
+        assertTrue(hint.contains("工具没有执行"));
+        assertTrue(hint.contains("从头重新生成"));
+    }
+
+    @Test
+    public void prematureProgressReply_afterTools_autoContinues() {
+        ToolCall tc = new ToolCall();
+        tc.id = "c1";
+        tc.name = "example";
+        tc.arguments = "{\"text\":\"scan\"}";
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn("找到两个文件了");
+        llm.addTurn("分析已完成，结果文件已生成并核验。");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("分析两个表格并生成结果");
+
+        assertEquals(3, llm.requests.size());
+        Message hint = llm.requests.get(2).messages.get(llm.requests.get(2).messages.size() - 1);
+        assertEquals(Message.Role.USER, hint.role);
+        assertTrue(hint.content.contains("原始任务尚未交付完成"));
+        assertTrue(ui.warnings.toString().contains("阶段性回复"));
+        assertEquals("分析已完成，结果文件已生成并核验。",
+                loop.messages().get(loop.messages().size() - 1).content);
+    }
+
+    @Test
+    public void interimAnswerDetector_isConservative() {
+        assertTrue(AgentLoop.looksLikeInterimAnswer("找到两个文件了"));
+        assertTrue(AgentLoop.looksLikeInterimAnswer("我先检查一下目录"));
+        assertTrue(AgentLoop.looksLikeInterimAnswer("好的，继续。现在补齐关键交叉验证（稽查后石墨除气件出口明细、6903税号整改前后对比）："));
+        assertTrue(AgentLoop.looksLikeInterimAnswer("继续。扫描和复核已完成，现在生成最终筛查结果 Excel。"));
+        assertTrue(AgentLoop.looksLikeInterimAnswer("我发现孤数据中同一单号+项号出现多行，且部分单号进出口日期为空，这可能影响金额统计，我需要先确认重复行的区别和空日期单的性质。"));
+        assertTrue(AgentLoop.looksLikeInterimAnswer("Next, I will verify the generated workbook."));
+        assertFalse(AgentLoop.looksLikeInterimAnswer("分析已完成，结果文件已生成并核验。"));
+        assertFalse(AgentLoop.looksLikeInterimAnswer("共有两个文件，分别为 A 和 B；详细结论如下。"));
+        String longAnalysis = repeat("已完成一轮分类复核，结果仍需交叉验证。", 18);
+        assertTrue(AgentLoop.looksLikeInterimAnswer(longAnalysis + "让我再查验当前 strong 来源："));
+        assertFalse(AgentLoop.looksLikeInterimAnswer(longAnalysis + "分析已完成，结果文件已生成并核验。"));
+        assertFalse(AgentLoop.looksLikeInterimAnswer(longAnalysis + "让我再查验当前 strong 来源：\n"
+                + AgentLoop.TASK_COMPLETE_MARKER));
+    }
+
+    @Test
+    public void longProgressReply_afterTools_autoContinues() {
+        ToolCall tc = new ToolCall();
+        tc.id = "c1";
+        tc.name = "example";
+        tc.arguments = "{\"text\":\"scan\"}";
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn(repeat("已完成一轮分类复核，结果仍需交叉验证。", 18)
+                + "让我再查验当前 strong 来源：");
+        llm.addTurn("已完成复核并生成结果。" + AgentLoop.TASK_COMPLETE_MARKER);
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("复核分类并完成结果");
+
+        assertEquals(3, llm.requests.size());
+        assertTrue(ui.warnings.toString().contains("阶段性回复"));
+        assertTrue(loop.messages().get(loop.messages().size() - 1).content
+                .endsWith(AgentLoop.TASK_COMPLETE_MARKER));
+    }
+
+    @Test
+    public void interruptedReplyDetector_isConservative() {
+        assertTrue(AgentLoop.looksLikeInterruptedReply("两个文件都乱了（根目录版128行是新内容但"));
+        assertTrue(AgentLoop.looksLikeInterruptedReply("The root causes are:"));
+        assertTrue(AgentLoop.looksLikeInterruptedReply("结果如下：\n```json\n{\"a\":1}"));
+        assertFalse(AgentLoop.looksLikeInterruptedReply("两个文件已修复并验证。"));
+        assertFalse(AgentLoop.looksLikeInterruptedReply("分析已完成。" + AgentLoop.TASK_COMPLETE_MARKER));
+    }
+
+    @Test
+    public void truncatedSentenceAfterTools_autoContinuesWithoutManualCompact() {
+        ToolCall tc = new ToolCall();
+        tc.id = "c1";
+        tc.name = "example";
+        tc.arguments = "{\"text\":\"scan\"}";
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn("两个文件都乱了（根目录版128行是新内容但");
+        llm.addTurn("已经核对并修复两个文件。" + AgentLoop.TASK_COMPLETE_MARKER);
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("修复文件并验证");
+
+        assertEquals(3, llm.requests.size());
+        assertTrue(ui.warnings.toString().contains("阶段性回复"));
+        assertTrue(loop.messages().get(loop.messages().size() - 1).content
+                .endsWith(AgentLoop.TASK_COMPLETE_MARKER));
+    }
+
+    @Test
+    public void finishStop_withThinkingOnly_autoContinues() {
+        llm.addTurnWithTools(null, null, "已经分析完工具结果，准备下一步");
+        llm.addTurn("已完成并给出实际结果");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("继续复杂任务");
+
+        assertEquals(2, llm.requests.size());
+        Message hint = llm.requests.get(1).messages.get(llm.requests.get(1).messages.size() - 1);
+        assertEquals(Message.Role.USER, hint.role);
+        assertTrue("Qwen 恢复提示必须带模板级关闭思考指令", hint.content.startsWith("/no_think"));
+        assertTrue(hint.content.contains("只生成了思考过程"));
+        assertEquals("纯思考不能作为 assistant 存入历史", 2, loop.messages().size());
+        assertEquals("已完成并给出实际结果", loop.messages().get(1).content);
+        assertTrue(ui.warnings.toString().contains("未产生可执行动作"));
+        assertEquals("恢复轮必须临时关闭思考", 1, llm.withoutThinkingCalls);
+    }
+
+    @Test
+    public void finishStop_withInvisibleContentAndThinking_autoContinues() {
+        llm.addTurnWithTools(null, " \r\n\t\u200B\uFEFF", "只制定了下一步计划");
+        llm.addTurn("已继续执行并完成结果");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("继续复杂任务");
+
+        assertEquals("空白正文不能让循环误判任务完成", 2, llm.requests.size());
+        assertTrue(ui.warnings.toString().contains("未产生可执行动作"));
+        assertEquals("空白正文不能写入持久历史", 2, loop.messages().size());
+        assertEquals("已继续执行并完成结果", loop.messages().get(1).content);
+    }
+
+    @Test
+    public void repeatedThinkingOnly_escalatesRecoveryInstruction() {
+        String hint = AgentLoop.buildNoActionRecoveryHint(3, true);
+        assertTrue(hint.startsWith("/no_think"));
+        assertTrue(hint.contains("第 3 次纠偏"));
+        assertTrue(hint.contains("禁止解释计划"));
+        assertTrue(hint.contains("尚未输出的位置续写正文"));
+    }
+
+    @Test
+    public void noThinkEmptyResponse_reEnablesThinkingInsteadOfRepeatingEmptyRequests() {
+        llm.addTurnWithTools(null, null, "只输出思考");
+        llm.addTurnWithTools(null, null, null);
+        llm.addTurn("最终产生有效结果");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("执行复杂任务");
+
+        assertEquals(3, llm.requests.size());
+        assertEquals("只有思考后的恢复轮应关闭思考，空响应后必须重新开启", 1,
+                llm.withoutThinkingCalls);
+        Message thirdHint = llm.requests.get(2).messages.get(
+                llm.requests.get(2).messages.size() - 1);
+        assertFalse(thirdHint.content.startsWith("/no_think"));
+        assertTrue(thirdHint.content.contains("返回了空响应"));
+        assertEquals("最终产生有效结果", loop.messages().get(loop.messages().size() - 1).content);
+    }
+
+    @Test
+    public void repeatedEmptyResponses_triggerForcedContextRecovery() {
+        llm.addTurnWithTools(null, null, null);
+        llm.addTurnWithTools(null, null, null);
+        llm.compressResult = "保留任务目标与已完成步骤的压缩摘要";
+        llm.addTurn("压缩后恢复输出");
+        AgentLoop loop = newLoopWithContext(100000, 0.8, 50);
+        for (int i = 0; i < 20; i++) {
+            loop.messages().add(Message.user("历史数据" + i));
+            loop.messages().add(Message.assistant("历史结果" + i));
+        }
+        loop.runUserTurn("继续执行");
+
+        assertNotNull("连续空响应必须调用压缩模型", llm.lastRequestMessages);
+        assertTrue(ui.warnings.toString().contains("强制压缩上下文"));
+        assertTrue(ui.warnings.toString().contains("空响应恢复压缩完成"));
+        assertEquals("压缩后恢复输出", loop.messages().get(loop.messages().size() - 1).content);
+    }
+
+    @Test
+    public void longToolBackedReply_withoutCompletionMarker_continuesFromCheckpoint() {
+        ToolCall tc = new ToolCall();
+        tc.id = "long-1";
+        tc.name = "example";
+        tc.arguments = "{\"text\":\"analyse\"}";
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn(repeat("半截报告内容", 180));
+        llm.addTurn("剩余结论已补齐\n" + AgentLoop.TASK_COMPLETE_MARKER);
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("完成复杂分析报告");
+
+        assertEquals(3, llm.requests.size());
+        Message hint = llm.requests.get(2).messages.get(llm.requests.get(2).messages.size() - 1);
+        assertTrue(hint.content.contains("完成握手"));
+        assertTrue(hint.content.contains("从断点继续"));
+        assertTrue(ui.warnings.toString().contains("最终交付尚未确认"));
+    }
+
+    @Test
+    public void malformedToolArguments_areDiscardedAndRegenerated() {
+        ToolCall broken = new ToolCall();
+        broken.id = "broken-json";
+        broken.name = "example";
+        broken.arguments = "{\"text\":";
+        ToolCall valid = new ToolCall();
+        valid.id = "valid-json";
+        valid.name = "example";
+        valid.arguments = "{\"text\":\"ok\"}";
+        llm.addTurnWithTools(Collections.singletonList(broken), null);
+        llm.addTurnWithTools(Collections.singletonList(valid), null);
+        llm.addTurn("任务完成");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("执行任务");
+
+        assertEquals(3, llm.requests.size());
+        assertEquals("损坏调用不能执行", 1, ui.toolCalls.size());
+        assertTrue(ui.warnings.toString().contains("JSON 损坏"));
+        Message repair = llm.requests.get(1).messages.get(llm.requests.get(1).messages.size() - 1);
+        assertTrue(repair.content.startsWith("/no_think"));
+        assertTrue(repair.content.contains("content 每块不超过1000字符"));
+        assertTrue(repair.content.contains("mode=append"));
+    }
+
+    @Test
+    public void mixedToolBatch_executesValidCallAndDropsOnlyMalformedCall() {
+        ToolCall valid = new ToolCall();
+        valid.id = "mixed-valid";
+        valid.name = "example";
+        valid.arguments = "{\"text\":\"safe\"}";
+        ToolCall broken = new ToolCall();
+        broken.id = "mixed-broken";
+        broken.name = "example";
+        broken.arguments = "{\"text\":";
+        llm.addTurnWithTools(Arrays.asList(valid, broken), null);
+        llm.addTurn("合法调用已完成");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("执行混合调用");
+
+        assertEquals(1, ui.toolCalls.size());
+        assertEquals("example", ui.toolCalls.get(0));
+        assertTrue(ui.warnings.toString().contains("其余合法调用将继续执行"));
+    }
+
+    @Test
+    public void persistedMalformedToolArguments_areHealedBeforeNextRequest() {
+        AgentLoop loop = newLoop();
+        ToolCall broken = new ToolCall();
+        broken.id = "old-broken";
+        broken.name = "example";
+        broken.arguments = "***";
+        Message assistant = Message.assistant("旧的阶段性内容");
+        assistant.toolCalls = Collections.singletonList(broken);
+        loop.messages().add(assistant);
+        loop.messages().add(Message.toolResult("old-broken", "example", "旧结果"));
+        llm.addTurn("会话已恢复");
+        loop.runUserTurn("继续");
+
+        assertTrue(ui.warnings.toString().contains("自动清理会话历史"));
+        for (Message m : llm.requests.get(0).messages) {
+            if (m.toolCalls != null) {
+                for (ToolCall tc : m.toolCalls) assertNotEquals("old-broken", tc.id);
+            }
+            assertNotEquals("old-broken", m.toolCallId);
+        }
+    }
+
+    @Test
+    public void continuationTurn_usesPreviousToolContextForProgressDetection() {
+        AgentLoop loop = newLoop();
+        ToolCall prior = new ToolCall();
+        prior.id = "prior-tool";
+        prior.name = "example";
+        prior.arguments = "{\"text\":\"scan\"}";
+        Message priorAssistant = Message.assistant(null);
+        priorAssistant.toolCalls = Collections.singletonList(prior);
+        loop.messages().add(priorAssistant);
+        loop.messages().add(Message.toolResult("prior-tool", "example", "扫描完成"));
+        llm.addTurn("继续。扫描和复核已完成，现在生成最终筛查结果 Excel。");
+        llm.addTurn("Excel 已生成并验证。");
+        loop.runUserTurn("继续完成之前的任务");
+
+        assertEquals("跨回合阶段性回复必须继续", 2, llm.requests.size());
+        assertTrue(ui.warnings.toString().contains("阶段性回复"));
+        assertEquals("Excel 已生成并验证。", loop.messages().get(loop.messages().size() - 1).content);
+    }
+
+    private static String repeat(String value, int count) {
+        StringBuilder out = new StringBuilder(value.length() * count);
+        for (int i = 0; i < count; i++) out.append(value);
+        return out.toString();
     }
 }

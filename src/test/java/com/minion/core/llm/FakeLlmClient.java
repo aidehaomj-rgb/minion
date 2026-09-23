@@ -23,6 +23,7 @@ public class FakeLlmClient implements LlmClient {
     public List<JsonObject> lastRequestTools = new ArrayList<JsonObject>();
     /** 每次 streamChat 请求的完整记录（消息 + 工具 schema），供测试断言请求序列 */
     public final List<RequestRecord> requests = new ArrayList<RequestRecord>();
+    public int withoutThinkingCalls = 0;
 
     public static class ScriptedTurn {
         public final List<ToolCall> toolCalls;
@@ -30,6 +31,7 @@ public class FakeLlmClient implements LlmClient {
         public final String thinking;
         public final LlmException error;
         public final boolean throwOnCall; // true = streamChat 直接抛 error（响应码异常路径）
+        public final String finishReason;
         /** 非 null：抛错/回调前先吐这段增量（模拟流式中途断流） */
         public final String partialContent;
 
@@ -48,12 +50,18 @@ public class FakeLlmClient implements LlmClient {
         }
         public ScriptedTurn(List<ToolCall> toolCalls, String content, String thinking,
                             LlmException error, boolean throwOnCall, String partialContent) {
+            this(toolCalls, content, thinking, error, throwOnCall, partialContent, null);
+        }
+        public ScriptedTurn(List<ToolCall> toolCalls, String content, String thinking,
+                            LlmException error, boolean throwOnCall, String partialContent,
+                            String finishReason) {
             this.toolCalls = toolCalls;
             this.content = content;
             this.thinking = thinking;
             this.error = error;
             this.throwOnCall = throwOnCall;
             this.partialContent = partialContent;
+            this.finishReason = finishReason;
         }
     }
 
@@ -68,12 +76,21 @@ public class FakeLlmClient implements LlmClient {
 
     public void addTurn(String content) { turns.add(new ScriptedTurn(null, content)); }
 
+    public void addTurnWithFinish(List<ToolCall> calls, String content, String reason) {
+        turns.add(new ScriptedTurn(calls, content, null, null, false, null, reason));
+    }
+
     public void addTurnWithTools(List<ToolCall> toolCalls, String content) {
         turns.add(new ScriptedTurn(toolCalls, content));
     }
 
     public void addTurnWithTools(List<ToolCall> toolCalls, String content, String thinking) {
         turns.add(new ScriptedTurn(toolCalls, content, thinking));
+    }
+
+    /** 模拟服务端达到单次输出上限；toolCalls 可传半截参数，调用方不得执行。 */
+    public void addTurnLength(List<ToolCall> toolCalls, String content, String thinking) {
+        turns.add(new ScriptedTurn(toolCalls, content, thinking, null, false, null, "length"));
     }
 
     /** 脚本化失败：streamChat 时以 onError 回调报错（模拟 API 400/500 等） */
@@ -112,12 +129,18 @@ public class FakeLlmClient implements LlmClient {
         u.outputTokens = 5;
         // thinking 先于 content/tool_calls 回调（与 DeepSeek SSE 顺序一致）
         if (turn.thinking != null) handler.onThinking(turn.thinking);
-        if (turn.toolCalls != null && !turn.toolCalls.isEmpty()) {
-            handler.onFinish("tool_calls", u, turn.toolCalls);
-        } else {
-            handler.onContent(turn.content);
-            handler.onFinish("stop", u, new ArrayList<ToolCall>());
-        }
+        if (turn.content != null) handler.onContent(turn.content);
+        String reason = turn.finishReason != null ? turn.finishReason
+                : (turn.toolCalls != null && !turn.toolCalls.isEmpty() ? "tool_calls" : "stop");
+        handler.onFinish(reason, u, turn.toolCalls == null
+                ? new ArrayList<ToolCall>() : turn.toolCalls);
+    }
+
+    @Override
+    public void streamChatWithoutThinking(List<Message> messages, List<JsonObject> tools,
+                                          StreamHandler handler) throws LlmException {
+        withoutThinkingCalls++;
+        streamChat(messages, tools, handler);
     }
 
     @Override

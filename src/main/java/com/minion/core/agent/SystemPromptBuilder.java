@@ -23,7 +23,12 @@ public class SystemPromptBuilder {
           + "5.修改文件前先 Read 确认当前内容；Edit 必须精确匹配原文。\n"
           + "6.复杂任务可用 task 工具派发子 agent 并行处理，子 agent 会返回结果摘要。\n"
           + "7.涉及删除/覆盖等破坏性操作时，等待用户确认（系统会拦截）。\n"
-          + "8.任何代码修改都需要检查，编译测试通过后才算完成。";
+          + "8.任何代码修改都需要检查，编译测试通过后才算完成。\n"
+          + "9.复杂任务中，定位文件、列出数据、说明‘我先看看/下一步处理’都只是中间进度，不是任务完成；必须继续调用工具，直到用户要求的数据分析、文件、代码或其他交付物已经实际产出并验证，才能给最终答复。\n"
+          + "10.使用过工具的复杂任务，最终答复必须完整，并在全部正文的最后单独追加 [[MINION_TASK_COMPLETE]]；"
+          + "计划、进度、半截报告或尚待验证时严禁输出此标记。若输出受限，应从断点续写，只有全部交付完成后才能追加标记。\n"
+          + "11.为避免工具JSON被输出上限截断，每轮最多生成一个工具调用；Edit每次只修改一处；"
+          + "大文件使用Write分块，首块mode=overwrite，后续块mode=append，每块content不超过1000字符。";
 
     private final String projectMdPath;
     /** 工作目录（可空=不注入；模型必须知道当前目录，否则会猜测/编造路径，曾实测编造出旧项目目录） */
@@ -60,7 +65,7 @@ public class SystemPromptBuilder {
     public String build(List<Skill> allSkills) {
         StringBuilder sb = new StringBuilder(BUILTIN);
         if (emptyOutputPlaceholder) {
-            sb.append("\n9.工具执行成功但无输出时，返回结果将为「输出内容为空」（如 mvn -q 输出重定向、读取空文件）：")
+            sb.append("\n12.工具执行成功但无输出时，返回结果将为「输出内容为空」（如 mvn -q 输出重定向、读取空文件）：")
               .append("表示命令成功、无输出内容，请按成功结果处理，不要视为失败或重复调用同一工具。\n");
         }
         if (workDir != null && !workDir.trim().isEmpty()) {

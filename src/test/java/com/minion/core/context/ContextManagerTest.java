@@ -14,6 +14,18 @@ import static org.junit.Assert.*;
 
 public class ContextManagerTest {
 
+    @Test
+    public void serverUsage_calibratesEstimateAndResetsOnModelChange() {
+        ContextManager cm = new ContextManager(131072, 0.8, 10, new FakeLlmClient(), 10);
+        List<Message> messages = Collections.singletonList(Message.user("测试内容"));
+        int original = cm.estimate(messages);
+        cm.observeInputTokens(messages, 110000);
+        assertEquals(110000, cm.estimate(messages));
+        assertTrue(cm.shouldCompress(messages));
+        cm.setLlm(new FakeLlmClient());
+        assertEquals(original, cm.estimate(messages));
+    }
+
     private static Message assistantWithTools(String... names) {
         Message m = Message.assistant(null);
         List<ToolCall> tcs = new ArrayList<ToolCall>();

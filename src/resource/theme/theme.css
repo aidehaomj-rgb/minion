@@ -464,6 +464,13 @@
     -fx-border-color: transparent transparent #232733 transparent;
     -fx-border-width: 0 0 1 0;
 }
+.model-picker { -fx-font-size: 13px; -fx-padding: 4 7; }
+.model-picker .arrow-button { -fx-background-color: transparent; }
+.model-picker .arrow { -fx-background-color: #a8b0bb; }
+.context-menu { -fx-background-color: #20242d; -fx-border-color: #3a4252; }
+.context-menu .menu-item:focused { -fx-background-color: #35415b; }
+.context-menu .menu-item .label { -fx-text-fill: #e8ebf0; }
+.list-cell.session-drop-target { -fx-border-color: #4f8cff; -fx-border-width: 2 0 0 0; }
 
 /* ===== 聊天正文显式 LCD：ScrollPane 裁剪下 JavaFX 8 默认回退灰阶 AA（正文发虚根因），显式指定优先 ===== */
 .chat-content { -fx-font-smoothing-type: lcd; }

@@ -18,6 +18,10 @@ public class SystemPromptBuilderTest {
         assertTrue(p.contains("不要在工作空间创建临时文件"));
         assertTrue(p.contains("/dev/null"));
         assertTrue(p.contains("nul"));
+        assertTrue(p.contains("[[MINION_TASK_COMPLETE]]"));
+        assertTrue(p.contains("全部正文的最后"));
+        assertTrue(p.contains("每轮最多生成一个工具调用"));
+        assertTrue(p.contains("mode=append"));
     }
 
     @Test

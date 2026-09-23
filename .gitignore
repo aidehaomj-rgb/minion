@@ -13,3 +13,6 @@ src/resource/config.properties
 /offline-deps-win7/
 /offline-deps-win7-32bit/
 /tools/win7-updater/*.sha256
+
+# 编辑工具产生的备份文件
+*.md.bak

@@ -7,9 +7,8 @@ import com.minion.core.mcp.McpManager;
 import com.minion.core.mcp.McpStore;
 import com.minion.core.skills.Skill;
 import com.minion.core.skills.SkillManager;
-import com.minion.core.tools.browser.BrowserSession;
-import com.minion.core.tools.browser.CdpClient;
-import com.minion.core.tools.browser.ChromeLauncher;
+import com.minion.core.tools.plugin.ToolPluginManager;
+import com.minion.core.tools.plugin.ToolStore;
 import com.minion.core.tools.confirm.ConfirmUi;
 import com.minion.core.tools.OutputDump;
 import com.minion.gui.MinionApp;
@@ -39,29 +38,20 @@ public class Main {
         // MCP 服务器管理（mcp.json；惰性连接，退出钩子关停子进程）
         McpManager mcpManager = new McpManager(McpStore.load(jarDir));
 
-        // 浏览器工具（懒启动 Chrome；未配置 browser.path 则不加载 CDP 工具）
-        BrowserSession browserSession = null;
-        ChromeLauncher chrome = null;
-        String browserPath = config.browserPath();
-        if (browserPath != null && !browserPath.trim().isEmpty()) {
-            chrome = new ChromeLauncher(browserPath, config.browserPort(),
-                    Paths.get(config.browserUserDataDir()), config.browserHeadless(),
-                    config.browserTimeoutMs());
-            browserSession = new BrowserSession(chrome, new CdpClient(10000,
-                    config.browserTimeoutMs()));
-        }
-        final ChromeLauncher chromeToStop = chrome;
+        // 可插拔工具（tools.json）：浏览器懒启动 Chrome、数据库每次调用新建连接；
+        // 四项默认不启用，启用状态由设置页「工具」页实时改，全局会话下一轮请求生效
+        final ToolPluginManager plugins = new ToolPluginManager(ToolStore.load(jarDir));
 
         ConfirmUi confirmUi = new GuiConfirmUi();
         SessionManager manager = new SessionManager(confirmUi, config, jarDir,
-                workspaces, models, skills, browserSession, mcpManager);
+                workspaces, models, skills, plugins, mcpManager);
 
         // 退出钩子统一收口：先关会话（AgentLoop + LLM okhttp 资源 + 线程池 + MCP 子进程），再停自启 Chrome
         // （manager.shutdown 幂等——关窗已 shutdown 时此处空转）
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             manager.shutdown();
             mcpManager.shutdown();
-            if (chromeToStop != null) chromeToStop.stop();
+            plugins.shutdown();
         }));
 
         MinionApp.start(config, workspaces, models, manager);

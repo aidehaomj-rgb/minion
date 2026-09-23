@@ -1,6 +1,7 @@
 package com.minion.core.agent;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.minion.core.diagnostics.DiagnosticLog;
 import com.minion.core.context.ContextManager;
 import com.minion.core.context.TokenCounter;
@@ -31,6 +32,7 @@ import java.util.concurrent.TimeUnit;
 
 /** 主 agent 循环：请求 → 工具执行 → 回传，直到模型不再调用工具。 */
 public class AgentLoop {
+    static final String TASK_COMPLETE_MARKER = "[[MINION_TASK_COMPLETE]]";
 
     public static final int DEFAULT_ROUND_LIMIT = 1000;
 
@@ -288,7 +290,9 @@ public class AgentLoop {
         try {
             int beforeTokens = contextManager.estimate(session.messages);
             List<Message> beforeMessages = session.messages;
-            session.messages = contextManager.compress(session.messages);
+            // 用户主动 /compact 不受自动阈值限制；配置窗口可能大于服务端真实窗口，
+            // 即使界面仅显示 39%，也必须能强制缩减当前活跃工具链。
+            session.messages = contextManager.compressForRecovery(session.messages);
             int afterTokens = contextManager.estimate(session.messages);
             if (session.messages != beforeMessages) {
                 ui.onWarning("已压缩上下文（" + beforeTokens + " → " + afterTokens + " token，历史摘要已置前）");
@@ -325,8 +329,10 @@ public class AgentLoop {
         session.createdAt = s.createdAt;
         session.workDir = s.workDir;
         session.modelName = s.modelName;
+        session.modelDisplayName = s.modelDisplayName;
         session.title = s.title;
         scrubHalfTurn(); // 恢复历史同样清洗半轮残留（外部/旧格式文件可能含残缺 toolCalls）
+        scrubInvalidToolArguments();
         if (s.todos != null) session.todos.replace(s.todos.items); // 原地装载（replace 内部 clear+addAll）
         if (s.usage != null) session.usage.restore(s.usage);
         workspace.restore(s.cwd);
@@ -382,13 +388,69 @@ public class AgentLoop {
         }
     }
 
+    /** 清洗旧版本落盘的非法 tool arguments；否则服务端校验历史时会让会话永久 400。 */
+    private int scrubInvalidToolArguments() {
+        List<String> invalidIds = new ArrayList<String>();
+        for (int i = session.messages.size() - 1; i >= 0; i--) {
+            Message m = session.messages.get(i);
+            if (m.role != Message.Role.ASSISTANT || m.toolCalls == null) continue;
+            List<ToolCall> valid = new ArrayList<ToolCall>();
+            for (ToolCall tc : m.toolCalls) {
+                if (normalizeAndValidateToolArguments(tc)) valid.add(tc);
+                else if (tc != null && tc.id != null) invalidIds.add(tc.id);
+            }
+            m.toolCalls = valid.isEmpty() ? null : valid;
+            if (!hasVisibleText(m.content) && (m.toolCalls == null || m.toolCalls.isEmpty())) {
+                session.messages.remove(i);
+            }
+        }
+        for (int i = session.messages.size() - 1; i >= 0; i--) {
+            Message m = session.messages.get(i);
+            if (m.role == Message.Role.TOOL && invalidIds.contains(m.toolCallId)) session.messages.remove(i);
+        }
+        return invalidIds.size();
+    }
+
+    private static boolean normalizeAndValidateToolArguments(ToolCall tc) {
+        if (tc == null) return false;
+        if (tc.arguments == null || tc.arguments.trim().isEmpty()) {
+            tc.arguments = "{}";
+            return true;
+        }
+        try {
+            return new JsonParser().parse(tc.arguments).isJsonObject();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** 原地保留合法调用，返回被丢弃的损坏调用数；一个坏调用不再连带丢弃同批合法调用。 */
+    private static int removeInvalidToolCalls(List<ToolCall> calls) {
+        if (calls == null) return 0;
+        int removed = 0;
+        for (int i = calls.size() - 1; i >= 0; i--) {
+            if (!normalizeAndValidateToolArguments(calls.get(i))) {
+                calls.remove(i);
+                removed++;
+            }
+        }
+        return removed;
+    }
+
     public void runUserTurn(String input) { runUserTurn(input, null); }
 
     public void runUserTurn(String input, List<ImagePart> images) {
         interrupted = false;
         lastIneffectiveAutoCompressTokens = -1;
+        int repairedToolCalls = scrubInvalidToolArguments();
+        if (repairedToolCalls > 0) {
+            ui.onWarning("已自动清理会话历史中 " + repairedToolCalls
+                    + " 个损坏的工具调用参数，正在重新发送请求");
+            persistSession();
+        }
         long start = System.currentTimeMillis(); // 统计行：轮次耗时
         int reportFromIndex = session.messages.size();
+        boolean toolBackedContext = hasToolContext(session.messages);
         List<String> reportTools = new ArrayList<String>();
         boolean taskCompleted = false;
         // 上次回合遗留的挂起补充先入历史（模型提问自然收尾/中断遗留），与本次输入拼接发送
@@ -400,6 +462,13 @@ public class AgentLoop {
         int rounds = 0;
         int retries = 0;
         int contextRecoveryAttempts = 0;
+        int lengthContinuationAttempts = 0;
+        int interruptedStreamAttempts = 0;
+        int malformedToolRecoveries = 0;
+        int prematureStopRecoveries = 0;
+        boolean silentResponseCompressionAttempted = false;
+        String lengthContinuationHint = null;
+        boolean nextRequestWithoutThinking = false;
         try {
             while (!interrupted) {
                 if (rounds >= roundLimit) {
@@ -439,6 +508,13 @@ public class AgentLoop {
                 List<Message> request = new ArrayList<Message>();
                 request.add(Message.system(system));
                 request.addAll(session.messages);
+                if (lengthContinuationHint != null) {
+                    // 仅加入本次 API 请求，不写入会话/界面，避免伪造一条用户消息。
+                    request.add(Message.user(lengthContinuationHint));
+                    lengthContinuationHint = null;
+                }
+                final boolean requestWithoutThinking = nextRequestWithoutThinking;
+                nextRequestWithoutThinking = false;
 
                 final List<ToolCall>[] toolCalls = new List[1];
                 final Usage[] usage = new Usage[1];
@@ -481,7 +557,7 @@ public class AgentLoop {
                     }
                 };
                 try {
-                    llm.streamChat(request, registry.schemas(), handler);
+                    streamChat(request, handler, requestWithoutThinking);
                 } catch (LlmException e) {
                     if (interrupted) {
                         // 用户主动中断（如 DeepSeekClient.cancel → Canceled）：不重试不打警告，
@@ -514,7 +590,7 @@ public class AgentLoop {
                                 break;
                             }
                             try {
-                                llm.streamChat(request, registry.schemas(), handler);
+                                streamChat(request, handler, requestWithoutThinking);
                                 // 成功后静默恢复（不打扰正文）：首个流式增量/onFinish 已复位指示器，
                                 // 若流中断（onError 回调）则落下方 finish=="error" 检查点统一处理
                                 break;
@@ -551,6 +627,14 @@ public class AgentLoop {
                 }
 
                 if (usage[0] != null) session.usage.record(usage[0]);
+                if (contextManager != null && usage[0] != null && !usage[0].estimated) {
+                    contextManager.observeInputTokens(session.messages, usage[0].inputTokens);
+                    pushContextStats();
+                }
+                DiagnosticLog.info("agent-response", "finish=" + finish[0]
+                        + " localMessages=" + session.messages.size()
+                        + " contentChars=" + content.length()
+                        + " toolCalls=" + (toolCalls[0] == null ? 0 : toolCalls[0].size()));
                 if ("error".equals(finish[0])) {
                     if (err[0] != null && isContextOverflow(err[0])
                             && noOutputYet(content, thinking)
@@ -562,12 +646,49 @@ public class AgentLoop {
                     break;
                 }
 
+                if ("incomplete".equals(finish[0])) {
+                    // 未收到终止信号的工具参数绝不执行，即便它碰巧是合法 JSON。
+                    appendPartialAssistant(content, thinking);
+                    if (interrupted) break;
+                    if (++interruptedStreamAttempts > 3) {
+                        ui.onError("模型响应连续 4 次缺少结束信号，本轮未完成；请查看 .minion/logs/minion.log。");
+                        break;
+                    }
+                    lengthContinuationHint = "[传输恢复] 上次响应流在收到完成信号前断开。已显示的正文仅为部分内容，"
+                            + "该次工具调用没有执行。请从断点继续，若需工具请重新生成完整调用，不要重复之前已经执行成功的操作。";
+                    ui.onWarning("模型响应流提前结束，正在恢复任务（第 " + interruptedStreamAttempts + " 次）");
+                    continue;
+                }
+                if ("stop".equals(finish[0]) && toolCalls[0] != null && !toolCalls[0].isEmpty()) {
+                    // 部分兼容网关把工具回合标为 stop；完整参数仍走正常校验和执行。
+                    finish[0] = "tool_calls";
+                }
+                boolean truncatedByLength = "length".equalsIgnoreCase(finish[0]);
+                boolean truncatedToolCall = truncatedByLength
+                        && toolCalls[0] != null && !toolCalls[0].isEmpty();
+                if (toolCalls[0] != null) toolCalls[0] = new ArrayList<ToolCall>(toolCalls[0]);
+                int malformedToolCallCount = !truncatedByLength
+                        ? removeInvalidToolCalls(toolCalls[0]) : 0;
+                boolean malformedToolCall = malformedToolCallCount > 0
+                        && (toolCalls[0] == null || toolCalls[0].isEmpty());
+                if (truncatedByLength) {
+                    // 参数可能只收到半截 JSON；绝不能入历史或执行，否则下一轮会 400，
+                    // 更严重时可能执行与模型原意不同的残缺命令。
+                    toolCalls[0] = null;
+                }
+                if (malformedToolCall) toolCalls[0] = null;
+                else if (malformedToolCallCount > 0) {
+                    ui.onWarning("已丢弃 " + malformedToolCallCount
+                            + " 个损坏的工具调用，其余合法调用将继续执行");
+                }
+
                 // assistant 回复（含思考与工具调用）入会话历史——reasoningContent 回传硬性要求；
                 // 无正文且无工具调用的空回复不入历史（仅思考消息回传会 400）
-                if (content.length() > 0
+                boolean hasContent = hasVisibleText(content);
+                if (hasContent
                         || (toolCalls[0] != null && !toolCalls[0].isEmpty())) {
                     Message assistantMsg = Message.assistant(
-                            content.length() == 0 ? null : content.toString());
+                            hasContent ? content.toString() : null);
                     assistantMsg.reasoningContent = thinking.length() == 0 ? null : thinking.toString();
                     assistantMsg.toolCalls = toolCalls[0];
                     session.messages.add(assistantMsg);
@@ -576,11 +697,119 @@ public class AgentLoop {
 
                 if (interrupted) break;
 
-                if (toolCalls[0] == null || toolCalls[0].isEmpty()
-                        || !"tool_calls".equals(finish[0])) {
-                    taskCompleted = content.length() > 0;
+                if (malformedToolCall) {
+                    if (malformedToolRecoveries >= 4) {
+                        ui.onError("模型连续 4 次生成损坏的工具参数，已停止重复请求，避免继续消耗上下文。"
+                                + "请压缩上下文后重试，或让模型将大文件分块写入。 ");
+                        break;
+                    }
+                    malformedToolRecoveries++;
+                    lengthContinuationHint = buildMalformedToolRecoveryHint(malformedToolRecoveries);
+                    nextRequestWithoutThinking = true;
+                    ui.onWarning("模型工具参数 JSON 损坏，正在要求重新生成（第 "
+                            + malformedToolRecoveries + " 次）");
+                    persistSession();
+                    continue;
+                }
+
+                if (truncatedByLength) {
+                    if (lengthContinuationAttempts >= 12) {
+                        ui.onError("模型连续 12 次达到单次输出上限，已停止自动续接。请提高模型的 maxOutputTokens 或拆分任务。");
+                        break;
+                    }
+                    lengthContinuationAttempts++;
+                    lengthContinuationHint = truncatedToolCall
+                            ? "[系统续接] 上一次输出因长度上限在工具调用生成过程中被截断，该工具没有执行。请从头重新生成一个完整、合法的工具调用，然后继续原任务；不要重复已经完成的工作。"
+                            : "[系统续接] 上一次输出因达到单次输出长度上限而被截断。请紧接已完成的内容继续原任务，不要重复，不要提前总结；需要调用工具时请生成完整合法的工具调用。";
+                    // 长度用尽常由思考耗光输出预算引起；恢复轮直接要求动作。
+                    nextRequestWithoutThinking = true;
+                    ui.onWarning("模型输出达到单次上限，正在自动续接（第 "
+                            + lengthContinuationAttempts + " 次）");
+                    persistSession();
+                    continue;
+                }
+
+                // 部分 Qwen 兼容服务会在长思考后返回 finish=stop，但既无正文也无工具调用。
+                // 这不是任务完成；reasoning_content 又不能单独写回历史（下轮 API 会 400），
+                // 因此用一次性内部指令要求它把思考落实为完整动作。
+                if ((toolCalls[0] == null || toolCalls[0].isEmpty())
+                        && !hasContent && prematureStopRecoveries < 12) {
+                    prematureStopRecoveries++;
+                    boolean hadThinking = hasVisibleText(thinking);
+                    lengthContinuationHint = buildNoActionRecoveryHint(
+                            prematureStopRecoveries, hadThinking);
+                    // 只有思考 -> 下一轮关思考；关思考后返回空包 -> 恢复思考。
+                    // 某些 Qwen 网关在 enable_thinking=false 时无法生成任何 token，不能持续强关。
+                    nextRequestWithoutThinking = hadThinking;
+                    if (!hadThinking && prematureStopRecoveries >= 2
+                            && !silentResponseCompressionAttempted && contextManager != null) {
+                        silentResponseCompressionAttempted = true;
+                        if (recoverFromSilentResponses()) {
+                            prematureStopRecoveries = 0;
+                            nextRequestWithoutThinking = false;
+                        }
+                    }
+                    ui.onWarning("模型未产生可执行动作，正在自动继续任务（第 "
+                            + prematureStopRecoveries + " 次）");
+                    continue;
+                }
+                if ((toolCalls[0] == null || toolCalls[0].isEmpty()) && !hasContent) {
+                    ui.onError("模型连续 12 次只返回思考或空响应，已停止自动恢复。"
+                            + "这通常表示模型服务未按要求生成正文或工具调用，请稍后重试或切换模型。 ");
                     break;
                 }
+
+                // 长篇工具任务不能仅凭 finish=stop 判完成：部分 Qwen 网关会把达到服务端
+                // 输出上限的半截报告也标为 stop。要求末尾完成握手；缺失则从断点续写。
+                boolean requiresCompletionHandshake = (toolBackedContext || !reportTools.isEmpty())
+                        && content.length() >= 1000;
+                if ((toolCalls[0] == null || toolCalls[0].isEmpty())
+                        && requiresCompletionHandshake && !hasTaskCompleteMarker(content.toString())
+                        && prematureStopRecoveries < 12) {
+                    prematureStopRecoveries++;
+                    lengthContinuationHint = "[系统完成握手] 本次工具任务的回复末尾没有完成标记，"
+                            + "可能仍是阶段性内容或被服务端截断。若尚未完成，请紧接上一段从断点继续，"
+                            + "不要重复；若所有结果与交付物已经完整生成并验证，请仅补充遗漏内容，"
+                            + "并在全部正文最后单独输出 " + TASK_COMPLETE_MARKER + "。";
+                    ui.onWarning("最终交付尚未确认，正在从断点自动继续（第 "
+                            + prematureStopRecoveries + " 次）");
+                    persistSession();
+                    continue;
+                }
+
+                // 小模型偶尔会把“找到文件了/我先看看”等阶段性播报作为 stop 返回。
+                // 已经执行过工具且明显仍是进度句时自动追问，不让会话数量或一次误判终止任务。
+                boolean unfinishedReply = (toolCalls[0] == null || toolCalls[0].isEmpty())
+                        && (toolBackedContext || !reportTools.isEmpty())
+                        && (looksLikeInterimAnswer(content.toString())
+                        || looksLikeInterruptedReply(content.toString()));
+                if (unfinishedReply && prematureStopRecoveries < 12) {
+                    prematureStopRecoveries++;
+                    lengthContinuationHint = "[系统完成性检查] 你刚才的回复只是阶段性进度或在句子中途结束，原始任务尚未交付完成。"
+                            + "请从刚才的断点继续；若需要工具则立即调用，直到实际生成并验证用户要求的结果。不要重复已完成的工作。";
+                    ui.onWarning("检测到阶段性回复，正在自动继续任务（第 "
+                            + prematureStopRecoveries + " 次）");
+                    persistSession();
+                    continue;
+                }
+                if (unfinishedReply) {
+                    ui.onError("模型连续 12 次返回未完成的阶段性回复，已停止自动续接；本轮未标记为完成。"
+                            + "请检查模型服务的 finish_reason 与输出限制后重试。 ");
+                    break;
+                }
+
+                if (toolCalls[0] == null || toolCalls[0].isEmpty()
+                        || !"tool_calls".equals(finish[0])) {
+                    taskCompleted = hasContent && hasTaskCompleteMarker(content.toString());
+                    DiagnosticLog.info("agent-exit", "reason=model_response_end finish=" + finish[0]
+                            + " modelReportedComplete=" + taskCompleted + " toolRounds=" + rounds);
+                    break;
+                }
+                // 只统计连续无动作：一旦模型成功产生工具调用，恢复计数归零。
+                prematureStopRecoveries = 0;
+                lengthContinuationAttempts = 0;
+                interruptedStreamAttempts = 0;
+                malformedToolRecoveries = 0;
                 rounds++;
 
                 List<ToolCall> calls = toolCalls[0];
@@ -685,6 +914,55 @@ public class AgentLoop {
                 || e.httpCode == 500 || e.httpCode == 502;
     }
 
+    private void streamChat(List<Message> request, com.minion.core.llm.StreamHandler handler,
+                            boolean withoutThinking) throws LlmException {
+        if (withoutThinking) llm.streamChatWithoutThinking(request, registry.schemas(), handler);
+        else llm.streamChat(request, registry.schemas(), handler);
+    }
+
+    /** 保守识别明确的阶段性播报；只在本轮已用过工具时启用，避免干扰普通问答。 */
+    static boolean looksLikeInterimAnswer(String text) {
+        if (text == null) return false;
+        String s = text.trim().replace('\r', ' ').replace('\n', ' ');
+        if (s.isEmpty() || hasTaskCompleteMarker(s)) return false;
+        // 长篇分析后以“让我再查验…”结尾仍是进度回复。只检查末尾，避免把正文中
+        // 提到的计划误当成未完成；原有短回复规则继续保持保守。
+        if (s.length() > 240) {
+            String tail = s.substring(Math.max(0, s.length() - 200));
+            return tail.matches(".*(?:让我再|我再|接下来(?:我)?(?:会|要|将)?|下一步(?:我)?(?:会|要|将)?|现在(?:我)?(?:会|要|将)?|还需(?:要)?|需要继续)"
+                    + "(?:查验|检查|核对|验证|分析|处理|执行|生成|读取|查看|补充|复核|确认|排查|扫描)[^。！？!?]*[：:，,。]*$");
+        }
+        String lower = s.toLowerCase(java.util.Locale.ROOT);
+        return lower.startsWith("我先") || lower.startsWith("先看")
+                || lower.startsWith("接下来") || lower.startsWith("下一步")
+                || lower.startsWith("正在") || lower.startsWith("准备")
+                || lower.startsWith("好的，继续") || lower.startsWith("好，继续")
+                || lower.matches("^继续[。！!，, ]*.*(?:现在|接下来|下一步)(?:要|将|先|开始|继续|立即)?(?:补齐|检查|核对|验证|分析|处理|执行|生成|读取|查看).*")
+                || lower.matches("^(?:好的?，?继续[。！!，, ]*)?(?:现在|接下来|下一步)(?:要|将|先|开始|继续|立即)?(?:补齐|检查|核对|验证|分析|处理|执行|生成|读取|查看).*")
+                || lower.matches(".*(?:我(?:还)?需要先|我接下来(?:会|将)|随后我会|然后我会)(?:确认|检查|核对|验证|分析|处理|执行|生成|读取|查看|补充|继续).*")
+                || lower.matches("^(?:let me|i will|i'll|next,? i).*(?:check|verify|analy[sz]e|continue|run|read|inspect).*")
+                || lower.matches(".*(?:找到|发现|检测到).{0,40}(?:个)?(?:文件|表格|工作簿|数据源)[了。！!]*$")
+                || lower.endsWith("继续处理") || lower.endsWith("继续分析");
+    }
+
+    /** 工具任务的正文若停在连接词或未闭合的引述/括号/代码块，不能因 finish=stop 标为完成。 */
+    static boolean looksLikeInterruptedReply(String text) {
+        if (text == null) return false;
+        String s = text.trim();
+        if (s.isEmpty() || hasTaskCompleteMarker(s)) return false;
+        if (s.matches("(?s).*(?:但|但是|因为|由于|并且|以及|不过|然而|而|所以|因此|:|：|,|，|;|；)$")
+                || s.matches("(?is).*\\b(?:then|but|because|and|however)$")) return true;
+        if (countChar(s, '（') > countChar(s, '）')
+                || countChar(s, '(') > countChar(s, ')')) return true;
+        return s.split("```", -1).length % 2 == 0;
+    }
+
+    private static int countChar(String s, char target) {
+        int count = 0;
+        for (int i = 0; i < s.length(); i++) if (s.charAt(i) == target) count++;
+        return count;
+    }
+
     /** OpenAI 兼容服务对上下文超限没有统一 code，只能兼容常见中英文错误正文。 */
     private boolean isContextOverflow(LlmException e) {
         if (e == null || (e.httpCode != 400 && e.httpCode != 413)) return false;
@@ -723,7 +1001,81 @@ public class AgentLoop {
     /** 零增量闸门：本次请求是否还没吐出任何可见内容。tool_calls 不参与判定——
      *  它累积在 DeepSeekClient 方法内的局部变量里，onFinish 前既不对外暴露也不渲染，重来无重复显示风险 */
     private boolean noOutputYet(StringBuilder content, StringBuilder thinking) {
-        return content.length() == 0 && thinking.length() == 0;
+        return !hasVisibleText(content) && !hasVisibleText(thinking);
+    }
+
+    /** 服务端不报上下文超限、只静默返回空包时的恢复路径。配置的 maxContextTokens
+     *  可能高于真实模型窗口，不能再依赖百分比阈值。 */
+    private boolean recoverFromSilentResponses() {
+        int before = contextManager.estimate(session.messages);
+        ui.onCompressingChanged(true);
+        try {
+            ui.onWarning("模型连续返回空响应，正在强制压缩上下文并重建请求（当前 "
+                    + before + " token）");
+            List<Message> old = session.messages;
+            session.messages = contextManager.compressForRecovery(session.messages);
+            int after = contextManager.estimate(session.messages);
+            if (session.messages == old || after >= before) {
+                ui.onWarning("空响应恢复压缩未成功，将切换思考策略继续尝试");
+                return false;
+            }
+            ui.onWarning("空响应恢复压缩完成（" + before + " → " + after
+                    + " token），正在继续原任务");
+            pushContextStats();
+            persistSession();
+            return true;
+        } finally {
+            ui.onCompressingChanged(false);
+        }
+    }
+
+    /** 部分兼容服务会在正文通道只返回空格、换行、BOM 或零宽空格。 */
+    static boolean hasVisibleText(CharSequence text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (!Character.isWhitespace(c) && c != '\u200B' && c != '\uFEFF') return true;
+        }
+        return false;
+    }
+
+    static boolean hasTaskCompleteMarker(String text) {
+        return text != null && text.trim().endsWith(TASK_COMPLETE_MARKER);
+    }
+
+    private static boolean hasToolContext(List<Message> messages) {
+        if (messages == null) return false;
+        for (int i = messages.size() - 1; i >= 0 && i >= messages.size() - 80; i--) {
+            if (messages.get(i).role == Message.Role.TOOL) return true;
+        }
+        return false;
+    }
+
+    /** Qwen 部署有时忽略 enable_thinking=false；/no_think 同时作用于聊天模板。
+     *  连续失败后升级措辞，防止模型反复复述“我要继续/我要输出报告”。 */
+    static String buildNoActionRecoveryHint(int attempt, boolean hadThinking) {
+        String prefix = hadThinking ? "/no_think\n[系统完成性检查] "
+                : "[系统完成性检查] 上一轮关闭思考后模型返回了空响应，本轮允许必要的简短思考，但必须产生正文或工具调用。";
+        if (attempt >= 3) {
+            return prefix + "这是第 " + attempt + " 次纠偏。禁止解释计划、禁止复述任务、禁止输出思考过程。"
+                    + "你的下一条响应只允许是一个可执行的完整工具调用，或者直接交付完整最终结果；"
+                    + "若已有分析结果，立即从尚未输出的位置续写正文。";
+        }
+        return prefix + (hadThinking
+                ? "你刚才只生成了思考过程，没有给出正文或工具调用，原始任务尚未完成。"
+                : "上一次模型响应没有可见正文或工具调用，原始任务尚未完成。")
+                + "不要说明接下来准备做什么；立即生成下一步完整工具调用，"
+                + "或在任务确已完成时直接给出包含实际结果的最终答复。";
+    }
+
+    static String buildMalformedToolRecoveryHint(int attempt) {
+        return "/no_think\n[系统工具调用修复] 第 " + attempt
+                + " 次：上一次 arguments 因过长或截断而不是合法 JSON，该调用未保存、未执行。"
+                + "禁止原样重试超长调用。每次 arguments 总长度必须尽量小，文件 content 每块不超过1000字符；"
+                + "写大文件时先调用 Write(mode=overwrite) 写首块，再多次调用 Write(mode=append) 追加后续块。"
+                + "若只需修改局部，优先使用 Edit，不能把整份文件重新放进参数。"
+                + "每轮严格只生成一个工具调用；Edit 每次只能修改一处，成功后下一轮再修改下一处。"
+                + "现在只生成第一个短小、完整的工具调用。";
     }
 
     /** 可中断等待：100ms 小片轮询 interrupted 标志（interrupt() 只设标志不中断线程，
@@ -767,7 +1119,7 @@ public class AgentLoop {
      *  正文未到达时（仅思考）不入历史：仅 reasoning_content 无 content/tool_calls 的
      *  assistant 消息回传会 400（DeepSeek 思考模式硬性要求）。 */
     private void appendPartialAssistant(StringBuilder content, StringBuilder thinking) {
-        if (content.length() == 0) return;
+        if (!hasVisibleText(content)) return;
         Message assistantMsg = Message.assistant(content.toString());
         assistantMsg.reasoningContent = thinking.length() == 0 ? null : thinking.toString();
         session.messages.add(assistantMsg);
@@ -778,7 +1130,7 @@ public class AgentLoop {
         try {
             Tool tool = registry.get(call.name);
             if (tool == null) {
-                ToolResult result = ToolResult.error("未知工具: " + call.name);
+                ToolResult result = ToolResult.error("工具不存在或已停用: " + call.name);
                 DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
                 return result;
             }

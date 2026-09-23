@@ -29,7 +29,7 @@ final class TaskReportWriter {
         StringBuilder md=new StringBuilder();
         md.append("# 任务执行记录\n\n")
           .append("- 时间：").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date())).append('\n')
-          .append("- 状态：").append(completed?"已完成":"未完整完成，请查看遗留事项").append('\n')
+          .append("- 状态：").append(completed?"模型报告完成（请核对交付物）":"本轮已结束，任务完成情况未确认").append('\n')
           .append("- 耗时：").append(String.format(java.util.Locale.ROOT,"%.1f 秒",elapsedMs/1000.0)).append('\n')
           .append("- 会话：").append(session.id==null?"":session.id).append("\n\n## 原始目标\n\n")
           .append(clean(request)).append("\n\n## 执行步骤\n\n");

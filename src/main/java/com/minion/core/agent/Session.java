@@ -19,6 +19,8 @@ public class Session {
     public String title;
     public String workDir;
     public String modelName;
+    /** 本会话选择的模型配置标识；旧会话缺失时使用当前默认模型。 */
+    public String modelDisplayName;
     /** 会话管理元数据：置顶优先展示；归档后从默认侧栏隐藏但仍保留落盘。 */
     public boolean pinned;
     public boolean archived;

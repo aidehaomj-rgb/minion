@@ -15,6 +15,9 @@ import javafx.scene.control.OverrunStyle;
 import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.Tooltip;
 import javafx.scene.Node;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.Dragboard;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -80,6 +83,10 @@ public class SessionListView extends ListView<SessionHandle> {
             if (empty || h == null) {
                 setGraphic(null);
                 setText(null);
+                setOnDragDetected(null);
+                setOnDragOver(null);
+                setOnDragDropped(null);
+                getStyleClass().remove("session-drop-target");
                 return;
             }
             String label = (h.session.pinned ? "★ " : "") + (h.title == null ? "(新会话)" : h.title);
@@ -148,6 +155,39 @@ public class SessionListView extends ListView<SessionHandle> {
                 cellBox.getChildren().add(sum);
             }
             setGraphic(cellBox);
+            setOnDragDetected(e -> {
+                if (isEmpty() || isHoverButton(e.getTarget())) return;
+                Dragboard board = startDragAndDrop(TransferMode.MOVE);
+                ClipboardContent payload = new ClipboardContent();
+                payload.putString(h.id);
+                board.setContent(payload);
+                e.consume();
+            });
+            setOnDragOver(e -> {
+                Dragboard board = e.getDragboard();
+                if (!isEmpty() && e.getGestureSource() instanceof SessionCell
+                        && board.hasString() && !h.id.equals(board.getString())
+                        && manager.findSession(board.getString()) != null) {
+                    e.acceptTransferModes(TransferMode.MOVE);
+                }
+                e.consume();
+            });
+            setOnDragEntered(e -> {
+                if (e.getGestureSource() instanceof SessionCell && e.getDragboard().hasString()
+                        && !h.id.equals(e.getDragboard().getString())
+                        && !getStyleClass().contains("session-drop-target")) {
+                    getStyleClass().add("session-drop-target");
+                }
+            });
+            setOnDragExited(e -> getStyleClass().remove("session-drop-target"));
+            setOnDragDropped(e -> {
+                SessionHandle source = manager.findSession(e.getDragboard().getString());
+                boolean moved = manager.reorderSession(source, h, e.getY() < getHeight() / 2);
+                e.setDropCompleted(moved);
+                if (moved) refresh();
+                getStyleClass().remove("session-drop-target");
+                e.consume();
+            });
         }
     }
 

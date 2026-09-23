@@ -21,6 +21,21 @@ public class SessionStore {
 
     public SessionStore(Path dir) { this.dir = dir; }
 
+    /** 项目内会话的手动顺序，单独保存，避免改动会话内容或时间戳。 */
+    public List<String> loadOrder() throws IOException {
+        Path file = dir.resolve("session-order.txt");
+        if (!Files.exists(file)) return new ArrayList<String>();
+        return Files.readAllLines(file, StandardCharsets.UTF_8);
+    }
+
+    public void saveOrder(List<String> ids) throws IOException {
+        Files.createDirectories(dir);
+        Path temp = dir.resolve("session-order.txt.tmp");
+        Path file = dir.resolve("session-order.txt");
+        Files.write(temp, ids, StandardCharsets.UTF_8);
+        Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
+    }
+
     public Path save(Session session) throws IOException {
         Files.createDirectories(dir);
         String json = gson.toJson(session);

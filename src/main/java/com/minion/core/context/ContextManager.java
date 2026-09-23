@@ -32,6 +32,7 @@ public class ContextManager {
     /** 最近一次 compress 是否真正尝试过压缩（take>0）：false = 真无可压缩（条数/token 未达），
      *  true = 已尝试但 LLM 调用失败原样返回。供 AgentLoop 区分"暂无可压缩"与"压缩失败"提示 */
     private volatile boolean lastCompressAttempted;
+    private volatile double inputTokenScale = 1.0;
 
     public ContextManager(int maxContextTokens, double threshold, int keepRecent,
                           LlmClient llm, int systemTokens) {
@@ -50,7 +51,7 @@ public class ContextManager {
     }
 
     /** 换 LLM 客户端（模型切换后调用；压缩请求走新客户端） */
-    public void setLlm(LlmClient llm) { this.llm = llm; }
+    public void setLlm(LlmClient llm) { this.llm = llm; inputTokenScale = 1.0; }
 
     /** 上下文窗口上限（AgentLoop 压缩百分比计算用） */
     public int maxTokens() { return maxContextTokens; }
@@ -62,7 +63,14 @@ public class ContextManager {
     public double threshold() { return threshold; }
 
     public int estimate(List<Message> messages) {
-        return systemTokens + TokenCounter.estimateMessages(messages);
+        return (int) Math.min(Integer.MAX_VALUE,
+                Math.ceil((systemTokens + (double) TokenCounter.estimateMessages(messages)) * inputTokenScale));
+    }
+
+    /** API 的 prompt_tokens 包含工具定义等开销；用当前请求对应的本地统计校准后续预估。 */
+    public void observeInputTokens(List<Message> messages, int actualTokens) {
+        int local = systemTokens + TokenCounter.estimateMessages(messages);
+        if (local > 0 && actualTokens > 0) inputTokenScale = Math.max(1.0, (double) actualTokens / local);
     }
 
     public boolean shouldCompress(List<Message> messages) {

@@ -39,12 +39,9 @@ import com.minion.core.tools.ToolRegistry;
 import com.minion.core.tools.WebFetchTool;
 import com.minion.core.tools.Workspace;
 import com.minion.core.tools.WriteTool;
-import com.minion.core.tools.browser.BrowserDebugTool;
-import com.minion.core.tools.browser.BrowserActionTool;
-import com.minion.core.tools.browser.BrowserEvalTool;
-import com.minion.core.tools.browser.BrowserScreenshotTool;
-import com.minion.core.tools.browser.BrowserSession;
-import com.minion.core.tools.browser.BrowserTool;
+import com.minion.core.tools.plugin.ToolContext;
+import com.minion.core.tools.plugin.ToolPlugin;
+import com.minion.core.tools.plugin.ToolPluginManager;
 import com.minion.core.tools.confirm.ConfirmGate;
 import com.minion.core.tools.confirm.ConfirmUi;
 import com.minion.core.tools.checkpoint.CheckpointTool;
@@ -121,7 +118,7 @@ public class SessionManager {
     private final WorkspaceManager workspaces;
     private final ModelManager models;
     private final SkillSet skillSet; // 内置列表 + 项目实扫合并；建会话时取一次不可变快照
-    private final BrowserSession browserSession; // 可为 null（测试/未配置浏览器路径）
+    private final ToolPluginManager plugins; // 可为 null（测试）；可插拔工具的启用判定与配置来源
     private final McpManager mcp; // 可为 null（测试）；MCP 服务器管理：惰性连接 + 工具补注册
     private final CommandDispatcher dispatcher; // 斜杠命令本地分发（GUI 输入路径）
     private final SecretStore secretStore;
@@ -144,6 +141,7 @@ public class SessionManager {
         final ConfirmGate confirmGate;
         final String skillsDir;
         final List<SessionHandle> sessions = new ArrayList<SessionHandle>();
+        final List<String> order = new ArrayList<String>();
 
         WorkspaceCtx(String name, Workspace workspace, SessionStore store,
                      ConfirmGate confirmGate, String skillsDir) {
@@ -157,7 +155,7 @@ public class SessionManager {
 
     public SessionManager(ConfirmUi confirmUi, Config config, Path jarDir,
                           WorkspaceManager workspaces, ModelManager models,
-                          List<Skill> allSkills, BrowserSession browserSession,
+                          List<Skill> allSkills, ToolPluginManager plugins,
                           McpManager mcp) {
         this.confirmUi = confirmUi;
         this.config = config;
@@ -165,7 +163,7 @@ public class SessionManager {
         this.workspaces = workspaces;
         this.models = models;
         this.skillSet = new SkillSet(allSkills == null ? new ArrayList<Skill>() : allSkills);
-        this.browserSession = browserSession;
+        this.plugins = plugins;
         this.mcp = mcp;
         DiagnosticLog.initialize(jarDir);
         DiagnosticLog.info("startup", "SessionManager 初始化，jarDir=" + jarDir);
@@ -187,6 +185,9 @@ public class SessionManager {
     public ModelManager models() { return models; }
     /** MCP 管理器（设置窗 MCP 页/启用开关共用；Main 装配后非 null） */
     public McpManager mcpManager() { return mcp; }
+
+    /** 可插拔工具管理器（设置窗「工具」页共用；Main 装配后非 null） */
+    public ToolPluginManager plugins() { return plugins; }
 
     public void addListener(Listener l) { listeners.add(l); }
 
@@ -258,7 +259,7 @@ public class SessionManager {
         for (SessionStore.SessionMeta meta : restored) {
             try {
                 Session s = ctx.store.load(meta.id);
-                ModelConfig mc = models.current();
+                ModelConfig mc = modelForSession(s);
                 LlmClient llm = newLlm(mc);
                 ContextManager cm = new ContextManager(mc.maxContextTokens, mc.compressThreshold,
                         mc.keepRecentMessages, llm,
@@ -320,9 +321,12 @@ public class SessionManager {
         workspace.setExtraAllowedDirs(projSkills == null
                 ? new ArrayList<String>() : java.util.Collections.singletonList(projSkills));
         ConfirmGate gate = new ConfirmGate(config, confirmUi);
-        return new WorkspaceCtx(w.workSpaceName, workspace,
+        WorkspaceCtx ctx = new WorkspaceCtx(w.workSpaceName, workspace,
                 new SessionStore(WorkspaceManager.sessionDirFor(jarDir, w.workSpaceName)),
                 gate, skillsDir);
+        try { ctx.order.addAll(ctx.store.loadOrder()); }
+        catch (IOException e) { notifyError("读取会话顺序失败: " + e.getMessage()); }
+        return ctx;
     }
 
     /** 会话临时目录：jarDir/.session/tmp/<sessionId>（工具落盘与模型临时文件统一位置） */
@@ -358,8 +362,8 @@ public class SessionManager {
         CheckpointStore checkpoints = new CheckpointStore(Paths.get(workspace.workDir()),
                 Paths.get(workspace.workDir()).resolve(".minion").resolve("checkpoints").resolve(sessionId));
         registry.register(new ReadTool(workspace, skillsDir, tmpDir, gate));
-        registry.register(new WriteTool(workspace, skillsDir, tmpDir, checkpoints));
-        registry.register(new EditTool(workspace, skillsDir, tmpDir, checkpoints));
+        registry.register(new WriteTool(workspace, skillsDir, tmpDir, checkpoints, gate));
+        registry.register(new EditTool(workspace, skillsDir, tmpDir, checkpoints, gate));
         registry.register(new GlobTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new GrepTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new BashTool(workspace, tmpDirOf(sessionId)));
@@ -378,21 +382,24 @@ public class SessionManager {
         registry.register(new TextProcessTool(workspace, checkpoints));
         registry.register(new KnowledgeTool(workspace));
         registry.register(new MemoryTool(workspace, checkpoints));
-        registry.register(new ContextTool(session, models.current().maxContextTokens, config));
+        registry.register(new ContextTool(session, modelForSession(session).maxContextTokens, config));
         registry.register(new PermissionTool(config));
         registry.register(new SecretsTool(secretStore));
         registry.register(new SkillAdminTool(skillsDir, workspace));
         registry.register(new CheckpointTool(checkpoints));
-        registry.register(new DiagnosticsTool(config, workspace, python, jarDir));
+        registry.register(new DiagnosticsTool(config, workspace, python, jarDir,
+                plugins == null ? null : plugins.store().browserConfig()));
         registry.register(new LogsTool(workspace));
         registry.register(new UpdateTool(jarDir));
         registry.register(new WebFetchTool());
-        if (browserSession != null) {
-            registry.register(new BrowserTool(browserSession));
-            registry.register(new BrowserActionTool(browserSession, workspace));
-            registry.register(new BrowserEvalTool(browserSession));
-            registry.register(new BrowserScreenshotTool(browserSession, workspace, skillsDir, tmpDir, gate));
-            registry.register(new BrowserDebugTool(browserSession));
+        // 可插拔工具：无条件注册并打插件标签，可见性交给 gate 在 schemas()/get() 时判定
+        // （拉模式——改开关无需遍历会话，AgentLoop 下一轮 registry.schemas() 自动生效）
+        if (plugins != null) {
+            ToolContext tc = new ToolContext(workspace, skillsDir, tmpDir, gate);
+            for (ToolPlugin p : plugins.plugins()) {
+                for (Tool t : p.createTools(tc)) registry.register(p.id(), t);
+            }
+            registry.setGate(plugins);
         }
         if (mcp != null) {
             for (McpServer s : mcp.servers()) {
@@ -457,6 +464,7 @@ public class SessionManager {
         if (ctx == null) return null; // 终审修复：deleteWorkspace 有运行中会话时 ctx 先移除、currentWorkspaceName 后台回退（≤5s 窗口），防 FX 线程 NPE
         ModelConfig mc = models.current();
         Session s = Session.create(ctx.workspace.workDir(), mc.modelName);
+        s.modelDisplayName = mc.displayName;
         s.title = title;
         LlmClient llm = newLlm(mc);
         SkillSet.Result sk = skillsOf(currentWorkspaceName);
@@ -507,6 +515,10 @@ public class SessionManager {
             @Override public void accept(String path) { notifyArtifactCreated(h, path); }
         });
         ctx.sessions.add(h);
+        if (!ctx.order.isEmpty()) {
+            ctx.order.add(0, h.id);
+            saveSessionOrder(ctx);
+        }
         registerConnectedMcpTools(h); // 兜底：连接已完成场景（listener 遍历不到新建会话时）
         try {
             ctx.store.save(s); // 立即落盘（含空会话）
@@ -548,27 +560,53 @@ public class SessionManager {
     /** 新建 LlmClient（模型配置工厂；GUI 弹窗切模型也用它） */
     public LlmClient newLlm(ModelConfig mc) {
         return new DeepSeekClient(mc.url, mc.apiKey, mc.modelName,
-                mc.thinking, mc.reasoningEffort, mc.provider);
+                mc.thinking, mc.reasoningEffort, mc.provider, mc.maxOutputTokens, mc.sessionId);
     }
 
-    /**
-     * 模型/参数变更 propagate：全部工作空间全部会话换新 LLM 客户端 + 压缩参数热更新。
-     * 旧客户端登记待回收（close 会 cancel 运行中请求，不可立即关）；会话空闲时回收。
-     */
+    public ModelConfig modelForSession(SessionHandle h) {
+        return h == null ? models.current() : modelForSession(h.session);
+    }
+
+    private ModelConfig modelForSession(Session session) {
+        ModelConfig chosen = session.modelDisplayName == null
+                ? null : models.get(session.modelDisplayName);
+        return chosen == null ? models.current() : chosen;
+    }
+
+    /** 只切换指定会话；不修改全局默认模型。 */
+    public boolean selectModelForSession(SessionHandle h, String name) {
+        ModelConfig mc = models.get(name);
+        WorkspaceCtx ctx = h == null ? null : ctxByName.get(h.workspaceName);
+        if (mc == null || ctx == null || h.deleted || !ctx.sessions.contains(h)) return false;
+        if (name.equals(h.session.modelDisplayName)) return true;
+        replaceSessionModel(h, mc);
+        if (!h.running) persist(h); // 运行中的会话在本轮结束时自然落盘，避免并发遍历消息
+        return true;
+    }
+
+    private void replaceSessionModel(SessionHandle h, ModelConfig mc) {
+        LlmClient fresh = newLlm(mc);
+        LlmClient old = h.llm;
+        h.llm = fresh;
+        h.retireLlm(old);
+        h.loop.setLlm(fresh);
+        ContextManager cm = h.loop.contextManager();
+        if (cm != null) {
+            cm.setLlm(fresh);
+            cm.update(mc.maxContextTokens, mc.compressThreshold, mc.keepRecentMessages);
+        }
+        Tool contextTool = h.loop.registry().get("Context");
+        if (contextTool instanceof ContextTool) ((ContextTool) contextTool).setMaxTokens(mc.maxContextTokens);
+        h.session.modelName = mc.modelName;
+        h.session.modelDisplayName = mc.displayName;
+    }
+
+    /** 配置修改后按各会话自己的选择刷新客户端；全局激活模型作为新会话默认值。 */
     public void applyModelChanged() {
-        ModelConfig mc = models.current();
         for (WorkspaceCtx ctx : ctxByName.values()) {
             for (SessionHandle h : ctx.sessions) {
-                LlmClient fresh = newLlm(mc);
-                LlmClient old = h.llm;
-                h.llm = fresh;
-                h.retireLlm(old); // 换引用后登记旧客户端（guard old != llm 防误登记当前客户端）
-                h.loop.setLlm(fresh); // 下轮请求生效
-                ContextManager cm = h.loop.contextManager();
-                if (cm != null) {
-                    cm.setLlm(fresh);
-                    cm.update(mc.maxContextTokens, mc.compressThreshold, mc.keepRecentMessages);
-                }
+                replaceSessionModel(h, modelForSession(h));
+                if (!h.running) persist(h);
             }
         }
     }
@@ -580,11 +618,40 @@ public class SessionManager {
         for (SessionHandle h : ctx.sessions) if (!h.session.archived) visible.add(h);
         visible.sort(new Comparator<SessionHandle>() {
             @Override public int compare(SessionHandle a, SessionHandle b) {
+                if (!ctx.order.isEmpty()) {
+                    int ai = ctx.order.indexOf(a.id), bi = ctx.order.indexOf(b.id);
+                    if (ai >= 0 && bi >= 0) return Integer.compare(ai, bi);
+                    if (ai >= 0) return -1;
+                    if (bi >= 0) return 1;
+                }
                 if (a.session.pinned != b.session.pinned) return a.session.pinned ? -1 : 1;
                 return b.id.compareTo(a.id);
             }
         });
         return visible;
+    }
+
+    /** 同项目中把会话拖到目标的上方或下方；排序即时落盘，重启后保持。 */
+    public boolean reorderSession(SessionHandle source, SessionHandle target, boolean before) {
+        WorkspaceCtx ctx = ctxByName.get(currentWorkspaceName);
+        if (ctx == null || source == null || target == null || source == target
+                || source.deleted || target.deleted || source.session.archived || target.session.archived
+                || !ctx.sessions.contains(source) || !ctx.sessions.contains(target)) return false;
+        List<SessionHandle> visible = sessions();
+        visible.remove(source);
+        int index = visible.indexOf(target);
+        if (index < 0) return false;
+        visible.add(before ? index : index + 1, source);
+        ctx.order.clear();
+        for (SessionHandle h : visible) ctx.order.add(h.id);
+        for (SessionHandle h : ctx.sessions) if (h.session.archived) ctx.order.add(h.id);
+        saveSessionOrder(ctx);
+        return true;
+    }
+
+    private void saveSessionOrder(WorkspaceCtx ctx) {
+        try { ctx.store.saveOrder(ctx.order); }
+        catch (IOException e) { notifyError("保存会话顺序失败: " + e.getMessage()); }
     }
 
     /** 按 id 查找会话（跨所有工作空间）：页签点击路径——页签与工作空间无关 */
@@ -617,6 +684,7 @@ public class SessionManager {
         h.pool.shutdownNow();
         h.closeAll(); // 会话删除即释放其 LLM 客户端（当前 + 待回收，okhttp 资源）
         ctx.sessions.remove(h);
+        if (ctx.order.remove(h.id)) saveSessionOrder(ctx);
         try {
             ctx.store.delete(h.id);
         } catch (Exception e) {

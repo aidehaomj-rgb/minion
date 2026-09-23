@@ -28,6 +28,8 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuButton;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.Tab;
@@ -78,6 +80,7 @@ public class MainWindow {
     private StackPane chatHost;
     private ArtifactPreviewPane artifactPreview;
     private Button reportButton;
+    private MenuButton modelButton;
     private TitleBar titleBar; // 自绘标题栏（openSettings 刷新顶部模型名用）
     private HBox tabsBar; // 右侧顶部页签栏（无会话时整行隐藏）
     /** 已打开会话 id 集合：页签存在性的唯一权威（页签 ⇔ openedIds 含 id）；切工作空间保留 */
@@ -224,6 +227,14 @@ public class MainWindow {
             SessionHandle h = manager.currentSession();
             if (h != null) openArtifactPreview(h.lastArtifactPath);
         });
+        modelButton = new MenuButton();
+        modelButton.getStyleClass().add("btn-ghost");
+        modelButton.getStyleClass().add("model-picker");
+        modelButton.setMaxWidth(160);
+        modelButton.setTextOverrun(javafx.scene.control.OverrunStyle.ELLIPSIS);
+        modelButton.setTooltip(new Tooltip("仅切换当前会话的模型；运行中从下次请求生效"));
+        refreshModelMenu();
+        inputView.setModelSelector(modelButton);
         tabsBar = new HBox(8, tabs, reportButton);
         HBox.setHgrow(tabs, Priority.ALWAYS);
         tabsBar.getStyleClass().add("tabs-bar");
@@ -325,6 +336,8 @@ public class MainWindow {
                         addTab(h);
                     }
                     selectTab(h);
+                    refreshModelMenu();
+                    if (titleBar != null) titleBar.modelLabel().setText(modelLabelText());
                     closeArtifactPreview(); // 预览属于原会话；新会话可通过“报告”再次打开自己的报告
                     updateReportButton(h);
                     if (chatView != null) chatView.rememberVvalue(chatScroll.getVvalue()); // 切走前记滚动位置
@@ -376,6 +389,8 @@ public class MainWindow {
                     viewCache.clear(); // 工作空间切换：不跨空间残留缓存视图；openedIds 保留（页签与空间无关）
                     wsList.refresh();
                     sessionList.refresh();
+                    refreshModelMenu();
+                    if (titleBar != null) titleBar.modelLabel().setText(modelLabelText());
                 });
             }
             @Override public void onSessionDeleted(SessionHandle h) {
@@ -412,19 +427,40 @@ public class MainWindow {
 
     /** 顶部模型标签文本：显示当前模型的模型名（modelName），缺失时回退标识名（displayName） */
     private String modelLabelText() {
-        ModelConfig c = manager.models().current();
+        ModelConfig c = manager.modelForSession(manager.currentSession());
         String name = (c != null && c.modelName != null && !c.modelName.trim().isEmpty())
                 ? c.modelName.trim() : manager.models().currentName();
         return "模型: " + name;
     }
 
+    private void refreshModelMenu() {
+        if (modelButton == null) return;
+        SessionHandle current = manager.currentSession();
+        ModelConfig selected = manager.modelForSession(current);
+        String selectedName = selected == null ? "" : selected.displayName;
+        modelButton.setDisable(current == null);
+        modelButton.setText("模型: " + selectedName);
+        modelButton.getItems().clear();
+        for (ModelConfig model : manager.models().list()) {
+            final String name = model.displayName;
+            MenuItem item = new MenuItem((name.equals(selectedName) ? "✓  " : "    ") + name);
+            item.setOnAction(e -> {
+                manager.selectModelForSession(manager.currentSession(), name);
+                refreshModelMenu();
+                if (titleBar != null) titleBar.modelLabel().setText(modelLabelText());
+            });
+            modelButton.getItems().add(item);
+        }
+    }
+
     /** 右上角 ⚙：打开设置窗，关闭后刷新顶部模型名（TitleBar.modelLabel() 持有引用） */
     private void openSettings() {
         SettingsDialog.show(stage, manager.models(), manager, MinionApp.config(),
-                manager.mcpManager());
+                manager.mcpManager(), manager.plugins());
         if (titleBar != null) {
             titleBar.modelLabel().setText(modelLabelText());
         }
+        refreshModelMenu();
     }
 
     /**
@@ -466,6 +502,8 @@ public class MainWindow {
         runningIndicator.setCompressing(false);
         updateReportButton(null);
         closeArtifactPreview();
+        refreshModelMenu();
+        if (titleBar != null) titleBar.modelLabel().setText(modelLabelText());
     }
 
     private void updateReportButton(SessionHandle h) {

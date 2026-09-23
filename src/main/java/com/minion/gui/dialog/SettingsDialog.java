@@ -5,7 +5,9 @@ import com.minion.core.config.ModelConfig;
 import com.minion.core.config.ModelManager;
 import com.minion.core.mcp.McpManager;
 import com.minion.core.mcp.McpServer;
+import com.minion.core.tools.plugin.ToolPluginManager;
 import com.minion.gui.icon.IconFactory;
+import com.minion.gui.plugin.ToolsPane;
 import com.minion.gui.session.SessionManager;
 import com.minion.gui.theme.Theme;
 import javafx.event.ActionEvent;
@@ -46,12 +48,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/** 设置窗（右上角 ⚙）：左列导航 基础设置 / 模型 / MCP / 关于，右侧内容切换；模型操作后触发 applyModelChanged 实时生效 */
+/** 设置窗（右上角 ⚙）：左列导航 基础设置 / 模型 / MCP / 工具 / 关于，右侧内容切换；模型操作后触发 applyModelChanged 实时生效 */
 public class SettingsDialog {
 
     public static void show(Window owner, final ModelManager models,
                             final SessionManager manager, final Config config,
-                            final McpManager mcp) {
+                            final McpManager mcp, final ToolPluginManager plugins) {
         Dialog<Void> d = new Dialog<Void>();
         d.initOwner(owner);
         d.setTitle("设置");
@@ -72,18 +74,20 @@ public class SettingsDialog {
 
         // 左列导航：TabPane 侧放文字旋转 90°（历史"字倒了"根因）不可用；ListView 复用现有深色样式
         final ListView<String> nav = new ListView<String>();
-        nav.getItems().addAll("基础设置", "模型", "MCP", "关于");
+        nav.getItems().addAll("基础设置", "模型", "MCP", "工具", "关于");
         nav.setPrefWidth(120);
         nav.setMinWidth(120); // HBox 空间不足时按 HGrow 优先级分配，无 HGrow 的子项会被压到最小宽度；minWidth 保证导航列不被压塌
         final Node model = modelPane(models, manager);
         final Node mcpNode = mcpPane(mcp, owner);
+        final Node toolsNode = ToolsPane.build(plugins, owner);
         final Node about = aboutPane();
         final StackPane content = new StackPane();
         nav.getSelectionModel().selectedItemProperty().addListener((obs, ov, item) -> {
             if (item == null) return;
             content.getChildren().setAll("基础设置".equals(item) ? basic.root
                     : "模型".equals(item) ? model
-                    : "MCP".equals(item) ? mcpNode : about);
+                    : "MCP".equals(item) ? mcpNode
+                    : "工具".equals(item) ? toolsNode : about);
         });
         nav.getSelectionModel().select(0); // 默认选中基础设置（选中监听触发内容显示）
 
@@ -221,8 +225,10 @@ public class SettingsDialog {
         TextField apiKey = new TextField(mc == null ? "" : mc.apiKey);
         apiKey.setPromptText("sk-...");
         TextField modelName = new TextField(mc == null ? "" : mc.modelName);
+        TextField sessionId = new TextField(mc == null ? "" : mc.sessionId);
+        sessionId.setPromptText("SFM Agent 必填；其他模型留空");
         ComboBox<String> provider = new ComboBox<String>();
-        provider.getItems().addAll("qwen", "deepseek");
+        provider.getItems().addAll("qwen", "deepseek", "sfm-agent");
         if (mc == null) {
             provider.setValue("deepseek");
         } else {
@@ -240,6 +246,7 @@ public class SettingsDialog {
         effort.getItems().addAll("low", "medium", "high", "xhigh", "max");
         effort.setValue(mc == null ? "max" : mc.reasoningEffort);
         TextField maxCtx = new TextField(mc == null ? "900000" : String.valueOf(mc.maxContextTokens));
+        TextField maxOut = new TextField(mc == null ? "8192" : String.valueOf(mc.maxOutputTokens <= 0 ? 8192 : mc.maxOutputTokens));
         TextField thr = new TextField(mc == null ? "0.8" : String.valueOf(mc.compressThreshold));
         TextField keep = new TextField(mc == null ? "50" : String.valueOf(mc.keepRecentMessages));
 
@@ -248,11 +255,22 @@ public class SettingsDialog {
         grid.addRow(2, new Label("API Key:"), apiKey);
         grid.addRow(3, new Label("模型名:"), modelName);
         grid.addRow(4, new Label("provider:"), provider);
-        grid.addRow(5, new Label("思考:"), thinking);
-        grid.addRow(6, new Label("effort:"), effort);
-        grid.addRow(7, new Label("maxContextTokens:"), maxCtx);
-        grid.addRow(8, new Label("compressThreshold:"), thr);
-        grid.addRow(9, new Label("keepRecentMessages:"), keep);
+        grid.addRow(5, new Label("sessionId:"), sessionId);
+        grid.addRow(6, new Label("思考:"), thinking);
+        grid.addRow(7, new Label("effort:"), effort);
+        grid.addRow(8, new Label("maxOutputTokens:"), maxOut);
+        grid.addRow(9, new Label("maxContextTokens:"), maxCtx);
+        grid.addRow(10, new Label("compressThreshold:"), thr);
+        grid.addRow(11, new Label("keepRecentMessages:"), keep);
+        provider.valueProperty().addListener((obs, old, value) -> {
+            boolean sfm = "sfm-agent".equalsIgnoreCase(value);
+            modelName.setDisable(sfm);
+            thinking.setDisable(sfm);
+            if (sfm) thinking.setSelected(false);
+        });
+        boolean sfm = mc != null && "sfm-agent".equalsIgnoreCase(mc.provider);
+        modelName.setDisable(sfm);
+        thinking.setDisable(sfm);
         d.getDialogPane().setContent(grid);
 
         d.setResultConverter(bt -> {
@@ -263,8 +281,10 @@ public class SettingsDialog {
             out.apiKey = apiKey.getText().trim();
             out.modelName = modelName.getText().trim();
             out.provider = provider.getValue() == null ? "deepseek" : provider.getValue();
+            out.sessionId = sessionId.getText().trim();
             out.thinking = thinking.isSelected();
             out.reasoningEffort = effort.getValue() == null ? "max" : effort.getValue();
+            out.maxOutputTokens = Math.max(256, Math.min(parseInt(maxOut.getText(), 8192), 65536));
             out.maxContextTokens = parseInt(maxCtx.getText(), 900000);
             out.compressThreshold = parseDouble(thr.getText(), 0.8);
             out.keepRecentMessages = parseInt(keep.getText(), 50);
@@ -323,8 +343,17 @@ public class SettingsDialog {
             }
         });
         refresh(list, mcp);
-        // 连接线程回调（onStateChanged 在后台连接线程）：切回 FX 线程刷新列表
-        mcp.addListener(s -> javafx.application.Platform.runLater(() -> refresh(list, mcp)));
+        // 连接线程回调（onStateChanged 在后台连接线程）：切回 FX 线程刷新列表。
+        // 设置窗关闭后 list 脱离场景 → 自注销，防每次打开设置窗累积一个监听（与 ToolsPane 同构）
+        final McpManager.Listener[] mcpListener = new McpManager.Listener[1];
+        mcpListener[0] = s -> javafx.application.Platform.runLater(() -> {
+            if (list.getScene() == null) {
+                mcp.removeListener(mcpListener[0]);
+                return;
+            }
+            refresh(list, mcp);
+        });
+        mcp.addListener(mcpListener[0]);
 
         HBox actions = new HBox(8);
         Button add = new Button("新建");
@@ -605,13 +634,9 @@ public class SettingsDialog {
         private final TextArea toolWhitelist;
         private final TextArea cmdWhitelist;
         private final CheckBox allowOutside;
+        private final CheckBox writeOutside;
         private final CheckBox skipConfirm;
         private final CheckBox enterSends;
-        private final TextField browserPath;
-        private final TextField browserPort;
-        private final TextField browserUserData;
-        private final CheckBox browserHeadless;
-        private final TextField browserTimeout;
 
         BasicPane(final Config config, final Window owner) {
             this.config = config;
@@ -654,6 +679,8 @@ public class SettingsDialog {
             cmdWhitelist.setPrefColumnCount(20);
             allowOutside = new CheckBox("允许读取工作区外文件（Read/Grep/Glob）");
             allowOutside.setSelected(config.readAllowOutside());
+            writeOutside = new CheckBox("允许写入工作区外文件（Write/Edit）");
+            writeOutside.setSelected(config.writeAllowOutside());
             skipConfirm = new CheckBox("跳过高危操作确认");
             skipConfirm.setSelected(config.confirmSkip());
             enterSends = new CheckBox("Enter 发送消息（Ctrl+Enter 换行）");
@@ -661,50 +688,16 @@ public class SettingsDialog {
             // 勾选立即生效：直接写回 Config（内存+落盘），InputView 按键时读取 → 下次按键即新键位；无需点「应用」
             enterSends.selectedProperty().addListener((obs, ov, nv) ->
                     config.set("input.enterSends", String.valueOf(nv)));
-            Label browserNote = new Label("浏览器配置（以下项需重启后生效）");
-            browserNote.getStyleClass().add("msg-thinking");
-            browserPath = new TextField(config.browserPath());
-            HBox browserPathBox = new HBox(6);
-            HBox.setHgrow(browserPath, Priority.ALWAYS);
-            Button browseExe = new Button("浏览…");
-            browseExe.getStyleClass().add("btn-ghost");
-            browseExe.setOnAction(e -> {
-                javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
-                fc.setTitle("选择浏览器程序");
-                fc.getExtensionFilters().addAll(
-                        new javafx.stage.FileChooser.ExtensionFilter("可执行文件", "*.exe"),
-                        new javafx.stage.FileChooser.ExtensionFilter("所有文件", "*.*"));
-                // 当前值若是存在的文件，初始定位到其父目录
-                String cur = browserPath.getText().trim();
-                java.io.File f = new java.io.File(cur);
-                if (f.isFile() && f.getParentFile() != null && f.getParentFile().isDirectory()) {
-                    fc.setInitialDirectory(f.getParentFile());
-                }
-                java.io.File file = fc.showOpenDialog(owner);
-                if (file != null) browserPath.setText(file.getAbsolutePath());
-            });
-            browserPathBox.getChildren().addAll(browserPath, browseExe);
-            browserPort = new TextField(String.valueOf(config.browserPort()));
-            browserUserData = new TextField(config.browserUserDataDir());
-            browserHeadless = new CheckBox("无头模式");
-            browserHeadless.setSelected(config.browserHeadless());
-            browserTimeout = new TextField(String.valueOf(config.browserTimeoutMs()));
-
             VBox rows = new VBox(10);
             rows.getChildren().addAll(
                     row("技能目录 skills.dir:", skillsBox),
                     row("Python/Anaconda:", pythonBox),
                     row("确认白名单\n(工具, 逗号分隔):", toolWhitelist),
                     row("确认白名单\n(命令, 逗号分隔):", cmdWhitelist),
-                    row("读逃逸:", allowOutside),
+                    row("空间外读:", allowOutside),
+                    row("空间外写:", writeOutside),
                     row("确认开关:", skipConfirm),
-                    row("发送键:", enterSends),
-                    browserNote,
-                    row("browser.path:", browserPathBox),
-                    row("browser.port:", browserPort),
-                    row("browser.userDataDir:", browserUserData),
-                    row("browser.headless:", browserHeadless),
-                    row("browser.timeoutMs:", browserTimeout));
+                    row("发送键:", enterSends));
 
             VBox contentBox = new VBox(10);
             contentBox.getChildren().addAll(rows);
@@ -724,16 +717,8 @@ public class SettingsDialog {
             config.set("confirm.whitelist.commands",
                     cmdWhitelist.getText().trim().replace('\n', ' ').replace('\r', ' '));
             config.set("paths.read.allowOutside", String.valueOf(allowOutside.isSelected()));
+            config.set("paths.write.allowOutside", String.valueOf(writeOutside.isSelected()));
             config.set("confirm.skip", String.valueOf(skipConfirm.isSelected()));
-            config.set("browser.path", browserPath.getText().trim());
-            if (!setInt("browser.port", browserPort.getText(), config)) {
-                error("保存失败", "browser.port 必须是整数，未保存");
-            }
-            config.set("browser.userDataDir", browserUserData.getText().trim());
-            config.set("browser.headless", String.valueOf(browserHeadless.isSelected()));
-            if (!setInt("browser.timeoutMs", browserTimeout.getText(), config)) {
-                error("保存失败", "browser.timeoutMs 必须是整数，未保存");
-            }
         }
     }
 
@@ -766,13 +751,6 @@ public class SettingsDialog {
 
     private static int parseInt(String s, int def) {
         try { return Integer.parseInt(s.trim()); } catch (Exception e) { return def; }
-    }
-
-    /** 保存前校验整数型配置项：非法（非整数/负数/空）→ 不写回并返回 false（调用方弹错）；合法 → 写回 */
-    static boolean setInt(String key, String text, Config config) {
-        if (parseInt(text, -1) < 0) return false;
-        config.set(key, text.trim());
-        return true;
     }
 
     private static double parseDouble(String s, double def) {

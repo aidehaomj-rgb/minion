@@ -32,6 +32,7 @@ public class ModelManagerTest {
         assertEquals(900000, c.maxContextTokens);
         assertEquals("", c.apiKey);
         assertEquals("max", c.reasoningEffort);
+        assertEquals(8192, c.maxOutputTokens);
         ModelConfig q = m.get("qwen3-max");
         assertNotNull(q);
         assertEquals("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", q.url);
@@ -39,6 +40,7 @@ public class ModelManagerTest {
         assertEquals("qwen", q.provider);
         assertTrue(q.thinking);
         assertEquals("xhigh", q.reasoningEffort);
+        assertEquals(8192, q.maxOutputTokens);
         assertEquals(131072, q.maxContextTokens);
         assertEquals(0.8, q.compressThreshold, 1e-9);
         assertEquals(50, q.keepRecentMessages);
@@ -61,6 +63,20 @@ public class ModelManagerTest {
         assertEquals("qwen-test", m2.currentName());
         assertEquals(8192, m2.current().maxContextTokens);
         assertEquals("qwen-max", m2.current().modelName);
+    }
+
+    /** 修改模型时 SFM sessionId 必须复制并持久化，重新打开表单不能丢失。 */
+    @Test
+    public void update_persistsSfmSessionId() throws IOException {
+        Path dir = jarDir();
+        ModelManager m = ModelManager.load(dir);
+        ModelConfig c = m.current().copy();
+        c.provider = "sfm-agent";
+        c.modelName = "";
+        c.sessionId = "7b9a3896-c0f6-4148-b2ab-15a82e6fbb75";
+        m.update(c);
+        assertEquals(c.sessionId, m.current().sessionId);
+        assertEquals(c.sessionId, ModelManager.load(dir).current().sessionId);
     }
 
     /** 拒绝删除最后一个模型 */
@@ -135,6 +151,7 @@ public class ModelManagerTest {
         assertEquals("http://custom", c.url);
         assertEquals("sk-x", c.apiKey);
         assertFalse(c.thinking);
+        assertEquals("旧配置缺少 maxOutputTokens 时应自动迁移", 8192, c.maxOutputTokens);
         assertEquals(64000, c.maxContextTokens);
         assertFalse(Files.exists(dir.resolve("model.json.bak")));
     }
@@ -169,4 +186,3 @@ public class ModelManagerTest {
         assertEquals(3, models.size());
     }
 }
-

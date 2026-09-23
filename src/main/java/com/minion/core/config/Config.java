@@ -95,8 +95,10 @@ public class Config {
     /** Python/Anaconda 解释器；留空时自动探测 MINION_PYTHON、Conda 和常见安装目录。 */
     public String pythonPath()   { return get("python.path", ""); }
 
-    /** 读逃逸：true 时 Read/Grep/Glob 可读取工作区外文件（写入类工具不受影响，仍受限） */
+    /** 空间外读：true 时 Read/Grep/Glob 可读取工作区外文件（写入类工具不受影响，仍受限） */
     public boolean readAllowOutside() { return Boolean.parseBoolean(get("paths.read.allowOutside", "false")); }
+    /** 空间外写：true 时 Write/Edit 越界写放行至高危确认链（会话放行/确认跳过/白名单/弹框）；false（默认）时越界写直接拒绝 */
+    public boolean writeAllowOutside() { return Boolean.parseBoolean(get("paths.write.allowOutside", "false")); }
     /** 工具空输出占位：true 时成功空输出发送「输出内容为空」占位（服务端校验通过+模型可识别）；默认 false */
     public boolean emptyOutputPlaceholder() { return Boolean.parseBoolean(get("agent.emptyOutput.placeholder", "false")); }
     public boolean confirmSkip() { return Boolean.parseBoolean(get("confirm.skip", "false")); }
@@ -108,19 +110,6 @@ public class Config {
     public boolean enterSends() { return Boolean.parseBoolean(get("input.enterSends", "true")); }
     public Set<String> whitelistTools()    { return csv(get("confirm.whitelist.tools", "")); }
     public Set<String> whitelistCommands() { return csv(get("confirm.whitelist.commands", "")); }
-    public String browserPath()       { return get("browser.path", ""); }
-    /** 数值非法（手改/历史脏数据写坏）时回落默认值，避免启动时 NumberFormatException 崩溃 */
-    public int browserPort() {
-        try { return Integer.parseInt(get("browser.port", "9222")); }
-        catch (NumberFormatException e) { return 9222; }
-    }
-    public String browserUserDataDir(){ return get("browser.userDataDir", "./.minion/browser-profile"); }
-    public boolean browserHeadless()  { return Boolean.parseBoolean(get("browser.headless", "false")); }
-    public int browserTimeoutMs() {
-        try { return Integer.parseInt(get("browser.timeoutMs", "30000")); }
-        catch (NumberFormatException e) { return 30000; }
-    }
-
     private static Set<String> csv(String s) {
         Set<String> set = new HashSet<String>();
         for (String part : s.split(",")) {
@@ -133,7 +122,7 @@ public class Config {
 
     /**
      * 运行时写回配置：更新内存 + 重写外部 config.properties（保留注释行，替换/追加 key 行）。
-     * 实时生效核对：confirmSkip/whitelist/readAllowOutside 每次使用即读 Config → 立即生效；
+     * 实时生效核对：confirmSkip/whitelist/readAllowOutside/writeAllowOutside 每次使用即读 Config → 立即生效；
      * skills.dir 由新会话 buildCtx 读取 → 新会话生效。
      */
     public void set(String key, String value) {

@@ -7,6 +7,8 @@ public class Usage {
     public int outputTokens;
     public int reasoningTokens;
     public int totalTokens;
+    /** true 表示本地粗估，不能用于校准上下文计数。 */
+    public boolean estimated;
 
     public static Usage fromJson(com.google.gson.JsonObject usage) {
         Usage u = new Usage();
@@ -30,6 +32,7 @@ public class Usage {
     /** 取不到 API usage 时的估算兜底 */
     public static Usage estimate(java.util.List<Message> messages, String output) {
         Usage u = new Usage();
+        u.estimated = true;
         u.inputTokens = com.minion.core.context.TokenCounter.estimateMessages(messages);
         u.outputTokens = com.minion.core.context.TokenCounter.estimate(output);
         u.totalTokens = u.inputTokens + u.outputTokens;

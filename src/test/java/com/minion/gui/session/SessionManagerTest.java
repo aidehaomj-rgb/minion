@@ -61,6 +61,59 @@ public class SessionManagerTest {
         assertEquals(1, m.sessions().size());
     }
 
+    @Test
+    public void draggedSessionOrder_survivesRestartAndNewSession() throws Exception {
+        SessionManager m = newManager();
+        SessionHandle first = m.createSession("一");
+        SessionHandle second = m.createSession("二");
+        SessionHandle third = m.createSession("三");
+        assertTrue(m.reorderSession(first, third, true));
+        assertEquals(first.id, m.sessions().get(0).id);
+        assertEquals(third.id, m.sessions().get(1).id);
+        assertFalse(m.reorderSession(first, first, true));
+
+        Path jar = tmp.getRoot().toPath().resolve("jar");
+        SessionManager restored = new SessionManager(FAKE_UI, Config.load(jar), jar,
+                WorkspaceManager.load(jar), ModelManager.load(jar),
+                new ArrayList<Skill>(), null, null);
+        assertEquals(first.id, restored.sessions().get(0).id);
+        assertEquals(third.id, restored.sessions().get(1).id);
+        SessionHandle newest = restored.createSession("新");
+        assertEquals(newest.id, restored.sessions().get(0).id);
+        assertEquals(second.id, restored.sessions().get(3).id);
+    }
+
+    @Test
+    public void conversationModelSelection_affectsOnlyChosenSessionAndSurvivesRestart() throws Exception {
+        SessionManager m = newManager();
+        SessionHandle first = m.createSession("第一会话");
+        SessionHandle second = m.createSession("第二会话");
+        String defaultName = m.models().currentName();
+        String alternateName = "qwen3-max".equals(defaultName)
+                ? "deepseek-v4-flash" : "qwen3-max";
+        assertTrue(m.selectModelForSession(first, alternateName));
+        assertEquals(alternateName, m.modelForSession(first).displayName);
+        assertEquals(defaultName, m.modelForSession(second).displayName);
+        assertEquals(defaultName, m.models().currentName());
+        com.google.gson.JsonObject status = new com.google.gson.JsonObject();
+        status.addProperty("action", "status");
+        assertTrue(first.loop.registry().get("Context").execute(status).output
+                .contains("/ " + m.modelForSession(first).maxContextTokens));
+
+        Path jar = tmp.getRoot().toPath().resolve("jar");
+        SessionManager restored = new SessionManager(FAKE_UI, Config.load(jar), jar,
+                WorkspaceManager.load(jar), ModelManager.load(jar),
+                new ArrayList<Skill>(), null, null);
+        assertEquals(alternateName, restored.modelForSession(restored.findSession(first.id)).displayName);
+        assertEquals(defaultName, restored.modelForSession(restored.findSession(second.id)).displayName);
+
+        restored.models().setCurrent(alternateName);
+        restored.applyModelChanged();
+        assertEquals(alternateName, restored.modelForSession(restored.findSession(first.id)).displayName);
+        assertEquals(defaultName, restored.modelForSession(restored.findSession(second.id)).displayName);
+        assertEquals(alternateName, restored.modelForSession(restored.createSession("新会话")).displayName);
+    }
+
     /** 删除会话：从列表移除 */
     @Test
     public void deleteSession_removesFromList() throws Exception {
@@ -1051,5 +1104,61 @@ public class SessionManagerTest {
             created.add(f);
             return f;
         }
+    }
+
+    /** 带可插拔工具管理器的会话管理器（tools.json 落在临时 jar 目录） */
+    private SessionManager newManager(com.minion.core.tools.plugin.ToolPluginManager plugins) throws Exception {
+        Path jar = tmp.newFolder("jar-plugins").toPath();
+        Config config = Config.load(jar);
+        WorkspaceManager ws = WorkspaceManager.load(jar);
+        ModelManager models = ModelManager.load(jar);
+        return new SessionManager(FAKE_UI, config, jar, ws, models,
+                new ArrayList<Skill>(), plugins, null);
+    }
+
+    /** 插件工具无条件注册进会话 registry，可见性由 gate 按启用状态决定 */
+    @Test
+    public void pluginToolsGatedInSessionRegistry() throws Exception {
+        Path jar = tmp.newFolder("jar-tools").toPath();
+        com.minion.core.tools.plugin.ToolPluginManager plugins =
+                new com.minion.core.tools.plugin.ToolPluginManager(
+                        com.minion.core.tools.plugin.ToolStore.load(jar));
+        SessionManager m = newManager(plugins);
+        SessionHandle h = m.createSession(null);
+        com.minion.core.tools.ToolRegistry reg = h.loop.registry();
+
+        // 默认全不启用：插件工具一个都不可见，内置工具照常
+        assertNull(reg.get("Browser"));
+        assertNull(reg.get("DbMysql"));
+        assertNull(reg.get("DbPostgres"));
+        assertNull(reg.get("DbOracle"));
+        assertNotNull("内置工具不受 gate 影响", reg.get("Read"));
+        assertNotNull(reg.get("Bash"));
+
+        // 启用后同一个 registry 立即可见（拉模式：无需重建会话）
+        plugins.setEnabled("browser", true);
+        assertNotNull(reg.get("Browser"));
+        assertNotNull(reg.get("BrowserScreenshot"));
+        plugins.setEnabled("oracle", true);
+        assertNotNull(reg.get("DbOracle"));
+        assertNull("未启用的 mysql 仍不可见", reg.get("DbMysql"));
+
+        // schemas 同步反映（这就是「描述词是否注入」的判定处）
+        int withBrowserAndOracle = reg.schemas().size();
+        plugins.setEnabled("browser", false);
+        assertEquals(withBrowserAndOracle - 4, reg.schemas().size());
+        assertNull(reg.get("Browser"));
+        assertNotNull(reg.get("DbOracle"));
+        assertSame("SessionManager 应暴露同一个 plugins 实例", plugins, m.plugins());
+    }
+
+    /** 未装配插件管理器（测试/异常路径）：会话照常创建，只有内置工具 */
+    @Test
+    public void nullPluginManagerStillCreatesSession() throws Exception {
+        SessionManager m = newManager((com.minion.core.tools.plugin.ToolPluginManager) null);
+        SessionHandle h = m.createSession(null);
+        assertNotNull(h.loop.registry().get("Read"));
+        assertNull(h.loop.registry().get("Browser"));
+        assertNull(m.plugins());
     }
 }

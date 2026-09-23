@@ -11,9 +11,10 @@ import com.minion.core.tools.ToolResult;
 
 /** 给模型和用户提供可解释的上下文占用与组成。 */
 public final class ContextTool implements Tool {
-    private final Session session; private final int maxTokens; private final Config config;
+    private final Session session; private volatile int maxTokens; private final Config config;
     public ContextTool(Session session,int maxTokens){this(session,maxTokens,null);}
     public ContextTool(Session session,int maxTokens,Config config){this.session=session;this.maxTokens=maxTokens;this.config=config;}
+    public void setMaxTokens(int maxTokens){this.maxTokens=maxTokens;}
     @Override public String name(){return "Context";}
     @Override public String description(){return "上下文分析：status/messages，显示估算 token、摘要/技能/工具/图片组成，便于决定何时压缩";}
     @Override public JsonObject schema(){return SchemaGenerator.objectSchema("上下文统计",new String[]{"action","limit","outputMode","readMode"},new String[]{"action"});}

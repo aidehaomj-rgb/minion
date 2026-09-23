@@ -54,6 +54,22 @@ public class ConfirmGate {
         return checkOutside(tool, args, path, "越界写入");
     }
 
+    /** 空间外写审批（Write/Edit 越界写专用）：
+     *  开关关 → 直接拒绝（不弹框，无视会话放行/确认跳过/白名单）；
+     *  开关开 → 高危放行链：会话放行/确认跳过/工具白名单命中即放行，否则弹框
+     *    （Y 放行本次 / N 拒绝 / W 会话放行）。
+     *  与 checkWriteOutside（BrowserScreenshot 输出、受空间外读开关）语义不同，勿混用。 */
+    public synchronized boolean checkEscapeWrite(Tool tool, JsonObject args, String path) {
+        if (!config.writeAllowOutside()) return false;
+        if (sessionBypass || config.confirmSkip()) return true;
+        if (isWhitelisted(tool, args)) return true;
+        ConfirmUi.Decision d = ui.ask("! 越界写入 " + tool.name() + " → " + path);
+        if (d == ConfirmUi.Decision.APPROVE) return true;
+        if (d == ConfirmUi.Decision.REJECT) return false;
+        sessionBypass = true; // APPROVE_WHITELIST / APPROVE_SESSION 均会话放行
+        return true;
+    }
+
     private synchronized boolean checkOutside(Tool tool, JsonObject args, String path, String label) {
         if ("full".equals(config.permissionMode()) || config.readAllowOutside() || sessionBypass) return true;
         if ("read-only".equals(config.permissionMode()) && "越界写入".equals(label)) { DiagnosticLog.info("permission", "DENY read-only outside-write " + path); return false; }

@@ -58,6 +58,7 @@ public class InputView extends VBox {
     private final TextArea input = new TextArea();
     private final Button sendButton = new Button();
     private final Button uploadButton = new Button();
+    private final HBox bottomRow = new HBox(8);
     private final HBox pendingGuideRow = new HBox(8);
     private final Label pendingGuideLabel = new Label();
     private final Button guideNowButton = new Button("立即引导");
@@ -247,7 +248,6 @@ public class InputView extends VBox {
         VBox.setVgrow(composer, Priority.ALWAYS);
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox bottomRow = new HBox(8);
         bottomRow.getChildren().addAll(uploadButton, contextRing, spacer, sendButton);
         frame.getChildren().addAll(pendingGuideRow, composer, bottomRow);
 
@@ -287,6 +287,12 @@ public class InputView extends VBox {
         GridPane.setHalignment(node, javafx.geometry.HPos.RIGHT);
         GridPane.setValignment(node, javafx.geometry.VPos.CENTER);
         GridPane.setMargin(node, new Insets(0, 12, 0, 0));
+    }
+
+    /** 输入框底部固定入口：放在发送箭头左侧，不受会话页签宽度影响。 */
+    public void setModelSelector(Node selector) {
+        if (selector == null) return;
+        bottomRow.getChildren().add(bottomRow.getChildren().size() - 1, selector);
     }
 
     /** 确认插入的最终文本：@ 文件补全补回 @ 前缀（FileSuggester 的 insertText 为纯路径）。
