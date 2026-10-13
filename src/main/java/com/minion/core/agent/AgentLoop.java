@@ -30,11 +30,19 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-/** 主 agent 循环：请求 → 工具执行 → 回传，直到模型不再调用工具。 */
+/** 主 agent 循环：请求 → 工具执行 → 回传，拟结束回复经统一门禁确认。 */
 public class AgentLoop {
     static final String TASK_COMPLETE_MARKER = "[[MINION_TASK_COMPLETE]]";
 
     public static final int DEFAULT_ROUND_LIMIT = 1000;
+    /** 两次有明确执行计划但无动作后升级协议，不能靠反复“继续”耗尽上下文。 */
+    private static final int ACTION_RECOVERY_AFTER = 2;
+    /** 只匹配句尾主动计划；有限修饰词避免“做全面比对”等变体漏判。 */
+    private static final java.util.regex.Pattern TERMINAL_COMPARISON_PLAN = java.util.regex.Pattern.compile(
+            "(?:^|[。！？!?]\\s*)(?:让我|我(?:将|会|准备|打算)|现在(?:我)?|接下来(?:我)?(?:会|将)?|下一步(?:我)?(?:会|将)?|还需要)"
+            + "(?:再|先|立即|现在|继续|开始|做(?:一次|一个|一轮|一遍|一份)?|进行|全面|完整|逐项|逐行|详细|进一步|实际|着手){0,8}"
+            + "(?:(?:比对|对比|比较|匹配)(?!结果|结论|情况|报告|已|完成|完毕|结束)|交叉验证|编写|编制|写入|制作|核验|查验|检查|核对|验证|分析|处理|执行|生成|读取|查看|补充|复核|确认|排查|扫描|派发|汇总)"
+            + "[^。！？!?]*[：:，,。.!！]*$");
 
     private volatile LlmClient llm;
     private final ToolRegistry registry;
@@ -46,11 +54,25 @@ public class AgentLoop {
     private ContextManager contextManager; // null = 不启用压缩；final 移除
     private final Workspace workspace;
     private final Session session;
+    private final ToolExecutionGuard executionGuard;
+    private volatile java.util.function.BiFunction<String,String,AgentRuntime> runtimeFactory;
+    private final java.util.concurrent.ConcurrentMap<String,SubAgentLoop> activeChildren = new java.util.concurrent.ConcurrentHashMap<String,SubAgentLoop>();
+    private volatile String budgetText="尚未发出请求";
+    public String contextBudget() { return budgetText; }
+    public Workspace workspace() { return workspace; }
+    public boolean evidencePathAllowed(java.nio.file.Path p) {
+        return com.minion.core.tools.PathsGuard.inside(workspace.workDir(),p)
+                ||com.minion.core.tools.PathsGuard.insideExtra(workspace,p)
+                ||com.minion.core.tools.PathsGuard.inside(promptBuilder.tempDir(),p);
+    }
+    public void setAgentRuntimeFactory(java.util.function.BiFunction<String,String,AgentRuntime> factory) { runtimeFactory=factory; }
 
     /** 可选：会话自动落盘（Task 18）。null = 不保存 */
     private SessionStore store;
 
     private volatile boolean interrupted = false;
+    private volatile boolean lastTurnSucceeded;
+    public boolean lastTurnSucceeded() { return lastTurnSucceeded; }
     private List<Skill> allSkills = new ArrayList<Skill>();
     /** 待注入的技能加载队列（FX 线程 /skill 与工具线程 Skill 工具入队；主循环检查点 drain 后注入历史）。
      *  队列级去重：同名已在队列 → 跳过（同轮防重复插入）；历史级幂等由 Skill 工具报告、模型判断 */
@@ -86,6 +108,11 @@ public class AgentLoop {
         this.contextManager = contextManager;
         this.workspace = workspace;
         this.session = session;
+        this.executionGuard = new ToolExecutionGuard(workspace,false);
+        this.executionGuard.allowTrackingRoot(promptBuilder.tempDir());
+        if (session.taskState == null) session.taskState = new TaskState();
+        session.taskState.restoreFromHistory(session.messages);
+        session.taskState.recoverAfterRestart();
         // daemon 线程：main() 返回后 JVM 可正常退出（T21 REPL）
         this.pool = Executors.newFixedThreadPool(threads, r -> {
             Thread t = new Thread(r, "minion-tools");
@@ -101,18 +128,74 @@ public class AgentLoop {
         registry.register(new com.minion.core.tools.TodoWriteTool(session.todos));
         this.askUserTool = new com.minion.core.tools.AskUserQuestionTool(ui);
         registry.register(askUserTool);
+        registry.register(new com.minion.core.tools.AgentControlTool(this,workspace));
         // 模型热切换回归修复：lambda 写在构造器内，简单名 llm 会按作用域规则捕获「构造器形参」
         // （创建会话时的旧客户端引用），导致 setLlm 切模型后主 agent 用新模型、子 agent 仍用旧模型
         // （事故：选 qwen 却由子 agent 烧光 deepseek 额度并报 402 余额不足）。
         // 必须显式 this.llm 读 volatile 字段，才与主循环请求路径（456/485 行）同源。
-        setSubAgentRunner(args -> {
-            String desc = args.has("description") ? args.get("description").getAsString() : "无描述";
-            ui.onSubAgentStart(desc);
-            SubAgentLoop sub = new SubAgentLoop(buildSystemPrompt(), desc, workspace.workDir(),
-                    this.llm, registry, confirmGate, ui);
-            sub.emptyOutputPlaceholder = emptyOutputPlaceholder; // 与主循环同开关（子 agent 同请求体风险）
-            return sub.run();
-        });
+        setSubAgentRunner(args -> launchChild(args));
+    }
+
+    private String launchChild(JsonObject args) {
+        String desc=text(args,"description","无描述");
+        if(args.has("prompt")&&!args.get("prompt").isJsonNull()) desc+="\n补充要求/返回格式: "+args.get("prompt").getAsString();
+        String mode=text(args,"mode",session.subAgentMode==null?"worker":session.subAgentMode);
+        if(!"worker".equals(mode)&&!"explore".equals(mode)) return "子Agent失败: mode只支持worker/explore";
+        TaskState.Child child=session.taskState.startChild(desc);
+        String path=java.nio.file.Paths.get(workspace.workDir(),".minion","subagents",session.id,child.id+".json").toAbsolutePath().toString();
+        session.taskState.configureChild(child.id,mode,text(args,"allowedTools",session.subAgentTools),text(args,"model",session.subAgentModelName),path);
+        return executeChild(session.taskState.child(child.id),false);
+    }
+    private static String text(JsonObject o,String key,String fallback) {
+        return o.has(key)&&!o.get(key).isJsonNull()?o.get(key).getAsString():fallback;
+    }
+    private AgentRuntime childRuntime(String model,String id) {
+        if(runtimeFactory!=null) return runtimeFactory.apply(model,id);
+        if(model!=null&&!model.isEmpty()) throw new IllegalArgumentException("当前入口未配置子Agent模型工厂，不能忽略指定模型");
+        return new AgentRuntime(llm,session.modelName,contextManager==null?60000:contextManager.maxTokens(),
+                contextManager==null?0.8:contextManager.threshold(),contextManager==null?8192:contextManager.outputReserveTokens(),registry,workspace,false);
+    }
+    private String executeChild(TaskState.Child child,boolean resume) {
+        String result="子Agent未执行"; SubAgentLoop sub=null; boolean registered=false, duplicate=false;
+        ChildAgentUi childUi=new ChildAgentUi(ui,child.id);
+        try(AgentRuntime runtime=childRuntime(child.model,child.id)) {
+            sub=new SubAgentLoop(buildSystemPrompt(),child.assignment,runtime.workspace.workDir(),runtime.client,runtime.tools,confirmGate,childUi);
+            sub.setContextWindow(runtime.maxContext,runtime.threshold,runtime.outputReserveTokens);
+            sub.setExecutionScope(runtime.workspace,session.taskState,child.id,new AgentToolPolicy("explore".equals(child.mode),child.allowedTools));
+            sub.setOwnClient(runtime.owned);
+            sub.setRequestProfile(session.contextProfile);
+            java.nio.file.Path record=java.nio.file.Paths.get(workspace.workDir(),".minion","subagents",session.id,child.id+".json").toAbsolutePath();
+            sub.setRecordPath(record);
+            sub.emptyOutputPlaceholder=emptyOutputPlaceholder;
+            if(activeChildren.putIfAbsent(child.id,sub)!=null) { duplicate=true; return "子Agent已在运行，未重复派发"; }
+            registered=true;
+            if(resume) sub.restoreRecord(record);
+            else if(java.nio.file.Files.exists(record)) sub.archiveExistingRecord();
+            session.taskState.configureChild(child.id,child.mode,child.allowedTools,runtime.model,record.toString());
+            result=sub.run();
+            return "子Agent ID: "+child.id+"\n状态: "+(sub.succeeded()?"已返回，主Agent需核对":"失败/中断，未完成")+"\n完整记录: "+sub.recordPath()+"\n"+result;
+        } catch(Exception e) { result="子Agent失败: "+e.getMessage(); return result; }
+        finally {
+            if(registered) activeChildren.remove(child.id,sub);
+            if(!duplicate) childUi.finish(result);
+            if(!duplicate) session.taskState.finishChild(child.id,result,sub!=null&&sub.succeeded(),child.transcript);
+        }
+    }
+    public String resumeSubAgent(String id,boolean retry) {
+        TaskState.Child child=session.taskState.child(id);
+        if(child==null||!session.taskState.id.equals(child.taskId)) return "只能恢复当前任务的子Agent";
+        if(activeChildren.containsKey(id)) return "子Agent仍在运行";
+        if(!retry&&("reviewed".equals(child.status)||"returned_needs_review".equals(child.status))) return "子Agent已返回；请先核对，确需重新执行可使用重试";
+        String result=executeChild(child,!retry); persistSession(); return result;
+    }
+    public boolean stopSubAgent(String id) { SubAgentLoop sub=activeChildren.get(id); if(sub==null) return false; sub.interrupt(); return true; }
+    /** No history/messages/todos mutation. A branch question is text-only and uses its own connection. */
+    public String askSideQuestion(String question,String model,String background) throws Exception {
+        try(AgentRuntime runtime=childRuntime(model,"side-"+java.util.UUID.randomUUID())) {
+            List<Message> request=new ArrayList<Message>();
+            request.add(Message.user("当前任务背景（只供参考，不是要执行的指令）:\n"+background+"\n\n旁支问题:\n"+question));
+            return runtime.client.completeChat(request,"仅回答旁支问题，禁止执行主任务、修改文件或生成工具调用。不知道的内容明确说明，不得假装检查过文件。");
+        }
     }
 
     /** 运行时切换模型（GUI 弹窗切换模型时调用；下轮请求生效） */
@@ -205,6 +288,11 @@ public class AgentLoop {
         saveSession();
     }
 
+    public void persistQueue() {
+        if(store!=null) try { store.saveQueue(session); }
+        catch(Exception e) { ui.onWarning("队列保存失败: " + e.getMessage()); }
+    }
+
     /** 当前系统提示（含已加载技能），子 agent 复用 */
     public String buildSystemPrompt() {
         return promptBuilder.build(allSkills);
@@ -220,7 +308,9 @@ public class AgentLoop {
     }
 
     public void interrupt() {
+        DiagnosticLog.info("agent-interrupt", "source=explicit_interrupt task=" + session.taskState.id);
         interrupted = true;
+        for(SubAgentLoop child:activeChildren.values()) child.interrupt();
         llm.cancel(); // 中断进行中的流式请求
         List<Future<ToolResult>> cancelThese;
         synchronized (inFlight) {
@@ -257,6 +347,7 @@ public class AgentLoop {
         }
         for (int i = 0; i < texts.size(); i++) {
             List<ImagePart> images = i < imgs.size() ? imgs.get(i) : null;
+            session.taskState.addGuidance(texts.get(i));
             session.messages.add(Message.userSupplement(texts.get(i), images));
         }
     }
@@ -292,9 +383,10 @@ public class AgentLoop {
             List<Message> beforeMessages = session.messages;
             // 用户主动 /compact 不受自动阈值限制；配置窗口可能大于服务端真实窗口，
             // 即使界面仅显示 39%，也必须能强制缩减当前活跃工具链。
-            session.messages = contextManager.compressForRecovery(session.messages);
+            session.messages = contextManager.compressForRecovery(session.messages, session.taskState.render(session.todos), session.taskState.objective);
             int afterTokens = contextManager.estimate(session.messages);
             if (session.messages != beforeMessages) {
+                persistSession();
                 ui.onWarning("已压缩上下文（" + beforeTokens + " → " + afterTokens + " token，历史摘要已置前）");
             } else if (contextManager.lastCompressAttempted()) {
                 // take>0 但压缩 LLM 调用失败（网络/超窗）原样返回：与"无可压缩"区分开，避免误导
@@ -311,6 +403,7 @@ public class AgentLoop {
     /** 推送上下文统计（GUI 环形进度圈）：contextManager 未启用时不推送 */
     private void pushContextStats() {
         if (contextManager == null) return;
+        contextManager.setTaskAnchorTokens(TokenCounter.estimate(session.taskState.render(session.todos)));
         ui.onContextStats(contextManager.estimate(session.messages), contextManager.maxTokens());
     }
 
@@ -330,7 +423,14 @@ public class AgentLoop {
         session.workDir = s.workDir;
         session.modelName = s.modelName;
         session.modelDisplayName = s.modelDisplayName;
+        session.subAgentModelName=s.subAgentModelName; session.subAgentMode=s.subAgentMode;
+        session.subAgentTools=s.subAgentTools; session.contextProfile=s.contextProfile;
+        session.preferredContextLimit=s.preferredContextLimit;
         session.title = s.title;
+        session.taskState = s.taskState != null ? s.taskState : new TaskState();
+        session.taskState.restoreFromHistory(session.messages);
+        session.taskState.recoverAfterRestart();
+        session.queuedTasks = s.queuedTasks != null ? s.queuedTasks : new ArrayList<Session.QueuedTask>();
         scrubHalfTurn(); // 恢复历史同样清洗半轮残留（外部/旧格式文件可能含残缺 toolCalls）
         scrubInvalidToolArguments();
         if (s.todos != null) session.todos.replace(s.todos.items); // 原地装载（replace 内部 clear+addAll）
@@ -352,6 +452,8 @@ public class AgentLoop {
         session.messages.clear();
         session.pendingSupplements.clear();
         session.todos.clear();
+        session.taskState = new TaskState();
+        session.queuedTasks.clear();
         session.usage.reset();
         session.regenerateId();
         workspace.resetCwd();
@@ -440,7 +542,14 @@ public class AgentLoop {
     public void runUserTurn(String input) { runUserTurn(input, null); }
 
     public void runUserTurn(String input, List<ImagePart> images) {
+        runUserTurn(input, images, false);
+    }
+
+    /** Queued inputs explicitly start a new task, even when their text says "continue". */
+    public void runUserTurn(String input, List<ImagePart> images, boolean forceNewTask) {
         interrupted = false;
+        lastTurnSucceeded = false;
+        if (session.taskState.begin(input, forceNewTask)) {session.todos.clear();session.taskState.bindReferenceHistory(session.messages);}
         lastIneffectiveAutoCompressTokens = -1;
         int repairedToolCalls = scrubInvalidToolArguments();
         if (repairedToolCalls > 0) {
@@ -450,7 +559,6 @@ public class AgentLoop {
         }
         long start = System.currentTimeMillis(); // 统计行：轮次耗时
         int reportFromIndex = session.messages.size();
-        boolean toolBackedContext = hasToolContext(session.messages);
         List<String> reportTools = new ArrayList<String>();
         boolean taskCompleted = false;
         // 上次回合遗留的挂起补充先入历史（模型提问自然收尾/中断遗留），与本次输入拼接发送
@@ -466,11 +574,18 @@ public class AgentLoop {
         int interruptedStreamAttempts = 0;
         int malformedToolRecoveries = 0;
         int prematureStopRecoveries = 0;
-        boolean silentResponseCompressionAttempted = false;
+        boolean noActionCompressionAttempted = false;
         String lengthContinuationHint = null;
         boolean nextRequestWithoutThinking = false;
+        boolean nextRequestForAction = false;
+        int repetitionRecoveries = 0; // 本轮总预算；真实工具动作不重置，防止间歇循环无限续接。
+        List<StopGate.Receipt> stopReceipts=new ArrayList<StopGate.Receipt>();
+        StopGate.Progress stopProgress=new StopGate.Progress();
+        final int stopHistoricalEvidenceCount=session.taskState.evidence.size();
         try {
             while (!interrupted) {
+                if(contextManager!=null) contextManager.setRequestProfile(session.contextProfile);
+                if (contextManager != null) contextManager.setTaskAnchorTokens(TokenCounter.estimate(session.taskState.render(session.todos)));
                 if (rounds >= roundLimit) {
                     ui.onWarning("达到工具轮数上限(" + roundLimit + ")，已停止本轮");
                     break;
@@ -485,7 +600,7 @@ public class AgentLoop {
                         List<Message> beforeMessages = session.messages;
                         ui.onWarning("上下文接近安全上限，正在自动压缩（" + beforeTokens + "/"
                                 + contextManager.maxTokens() + " token）");
-                        session.messages = contextManager.compress(session.messages);
+                        session.messages = contextManager.compress(session.messages, session.taskState.render(session.todos), session.taskState.objective);
                         int afterTokens = contextManager.estimate(session.messages);
                         if (session.messages != beforeMessages) {
                             lastIneffectiveAutoCompressTokens = -1;
@@ -504,10 +619,12 @@ public class AgentLoop {
                         ui.onCompressingChanged(false);
                     }
                 }
-                String system = promptBuilder.build(allSkills);
+                String system = promptBuilder.build(allSkills) + session.taskState.render(session.todos);
                 List<Message> request = new ArrayList<Message>();
                 request.add(Message.system(system));
-                request.addAll(session.messages);
+                List<Message> modelMessages = contextManager == null
+                        ? session.messages : contextManager.prepareForRequest(session.messages);
+                request.addAll(modelMessages);
                 if (lengthContinuationHint != null) {
                     // 仅加入本次 API 请求，不写入会话/界面，避免伪造一条用户消息。
                     request.add(Message.user(lengthContinuationHint));
@@ -515,6 +632,8 @@ public class AgentLoop {
                 }
                 final boolean requestWithoutThinking = nextRequestWithoutThinking;
                 nextRequestWithoutThinking = false;
+                final boolean requestForAction = nextRequestForAction;
+                nextRequestForAction = false;
 
                 final List<ToolCall>[] toolCalls = new List[1];
                 final Usage[] usage = new Usage[1];
@@ -523,7 +642,7 @@ public class AgentLoop {
                 final StringBuilder content = new StringBuilder();
                 final StringBuilder thinking = new StringBuilder();
                 final boolean[] inRetry = new boolean[1]; // 瞬时错误重试循环进行中（首个流式增量到达即复位指示器）
-                final com.minion.core.llm.StreamHandler handler = new com.minion.core.llm.StreamHandler() {
+                final com.minion.core.llm.StreamHandler handler = new com.minion.core.llm.RepetitionGuard(new com.minion.core.llm.StreamHandler() {
                     @Override
                     public void onThinking(String delta) {
                         resetRetryOnFirstDelta();
@@ -542,6 +661,7 @@ public class AgentLoop {
                         finish[0] = finishReason;
                         usage[0] = u;
                         toolCalls[0] = tcs;
+                        ui.onResponseEnd();
                     }
                     /** 重试成功后的首个流式回调：立即复位指示器（"重试中"文案消失，恢复常规轮换） */
                     void resetRetryOnFirstDelta() {
@@ -555,9 +675,9 @@ public class AgentLoop {
                         finish[0] = "error";
                         err[0] = e; // 暂存：检查点统一决定显示错误还是图片降级重试
                     }
-                };
+                });
                 try {
-                    streamChat(request, handler, requestWithoutThinking);
+                    streamChat(request, handler, requestWithoutThinking, requestForAction);
                 } catch (LlmException e) {
                     if (interrupted) {
                         // 用户主动中断（如 DeepSeekClient.cancel → Canceled）：不重试不打警告，
@@ -590,7 +710,7 @@ public class AgentLoop {
                                 break;
                             }
                             try {
-                                streamChat(request, handler, requestWithoutThinking);
+                                streamChat(request, handler, requestWithoutThinking, requestForAction);
                                 // 成功后静默恢复（不打扰正文）：首个流式增量/onFinish 已复位指示器，
                                 // 若流中断（onError 回调）则落下方 finish=="error" 检查点统一处理
                                 break;
@@ -628,13 +748,30 @@ public class AgentLoop {
 
                 if (usage[0] != null) session.usage.record(usage[0]);
                 if (contextManager != null && usage[0] != null && !usage[0].estimated) {
-                    contextManager.observeInputTokens(session.messages, usage[0].inputTokens);
+                    contextManager.observeInputTokens(modelMessages, usage[0].inputTokens);
                     pushContextStats();
                 }
                 DiagnosticLog.info("agent-response", "finish=" + finish[0]
                         + " localMessages=" + session.messages.size()
                         + " contentChars=" + content.length()
                         + " toolCalls=" + (toolCalls[0] == null ? 0 : toolCalls[0].size()));
+                if (com.minion.core.llm.RepetitionGuard.FINISH.equals(finish[0])) {
+                    if (interrupted) break;
+                    // UI保留收到的全文；重复响应不入模型历史，也不更新任务进度为完成。
+                    DiagnosticLog.info("stream-repetition", "scope=main attempt=" + repetitionRecoveries
+                            + " contentChars=" + content.length() + " thinkingChars=" + thinking.length());
+                    if (repetitionRecoveries >= com.minion.core.llm.RepetitionGuard.MAX_RECOVERIES) {
+                        DiagnosticLog.info("agent-exit", "reason=repetition_budget_exhausted");
+                        ui.onError("模型流式重复循环恢复3次仍失败，已暂停，任务未完成；请查看日志或切换模型。");
+                        break;
+                    }
+                    repetitionRecoveries++;
+                    lengthContinuationHint = com.minion.core.llm.RepetitionGuard.HINT;
+                    nextRequestForAction = true;
+                    ui.onWarning("检测到单次响应重复工具承诺，已结束该响应，正在工具动作恢复（第 " + repetitionRecoveries + " 次）");
+                    persistSession();
+                    continue;
+                }
                 if ("error".equals(finish[0])) {
                     if (err[0] != null && isContextOverflow(err[0])
                             && noOutputYet(content, thinking)
@@ -692,6 +829,7 @@ public class AgentLoop {
                     assistantMsg.reasoningContent = thinking.length() == 0 ? null : thinking.toString();
                     assistantMsg.toolCalls = toolCalls[0];
                     session.messages.add(assistantMsg);
+                    if(hasContent) session.taskState.progress(content.toString());
                     pushContextStats(); // 回复入历史：进度增长
                 }
 
@@ -741,12 +879,16 @@ public class AgentLoop {
                     // 只有思考 -> 下一轮关思考；关思考后返回空包 -> 恢复思考。
                     // 某些 Qwen 网关在 enable_thinking=false 时无法生成任何 token，不能持续强关。
                     nextRequestWithoutThinking = hadThinking;
-                    if (!hadThinking && prematureStopRecoveries >= 2
-                            && !silentResponseCompressionAttempted && contextManager != null) {
-                        silentResponseCompressionAttempted = true;
+                    // 兼容服务在有效窗口耗尽时也可能连续返回“只有思考”，不能只等空包才压缩。
+                    // 小会话的偶发思考不触发强制压缩；空包保持原有恢复行为。
+                    if (prematureStopRecoveries >= 2
+                            && !noActionCompressionAttempted && contextManager != null
+                            && (!hadThinking || contextManager.estimate(session.messages) >= 4096)) {
+                        noActionCompressionAttempted = true;
                         if (recoverFromSilentResponses()) {
                             prematureStopRecoveries = 0;
                             nextRequestWithoutThinking = false;
+                            continue;
                         }
                     }
                     ui.onWarning("模型未产生可执行动作，正在自动继续任务（第 "
@@ -759,50 +901,60 @@ public class AgentLoop {
                     break;
                 }
 
-                // 长篇工具任务不能仅凭 finish=stop 判完成：部分 Qwen 网关会把达到服务端
-                // 输出上限的半截报告也标为 stop。要求末尾完成握手；缺失则从断点续写。
-                boolean requiresCompletionHandshake = (toolBackedContext || !reportTools.isEmpty())
-                        && content.length() >= 1000;
-                if ((toolCalls[0] == null || toolCalls[0].isEmpty())
-                        && requiresCompletionHandshake && !hasTaskCompleteMarker(content.toString())
-                        && prematureStopRecoveries < 12) {
-                    prematureStopRecoveries++;
-                    lengthContinuationHint = "[系统完成握手] 本次工具任务的回复末尾没有完成标记，"
-                            + "可能仍是阶段性内容或被服务端截断。若尚未完成，请紧接上一段从断点继续，"
-                            + "不要重复；若所有结果与交付物已经完整生成并验证，请仅补充遗漏内容，"
-                            + "并在全部正文最后单独输出 " + TASK_COMPLETE_MARKER + "。";
-                    ui.onWarning("最终交付尚未确认，正在从断点自动继续（第 "
-                            + prematureStopRecoveries + " 次）");
-                    persistSession();
-                    continue;
-                }
-
-                // 小模型偶尔会把“找到文件了/我先看看”等阶段性播报作为 stop 返回。
-                // 已经执行过工具且明显仍是进度句时自动追问，不让会话数量或一次误判终止任务。
-                boolean unfinishedReply = (toolCalls[0] == null || toolCalls[0].isEmpty())
-                        && (toolBackedContext || !reportTools.isEmpty())
-                        && (looksLikeInterimAnswer(content.toString())
-                        || looksLikeInterruptedReply(content.toString()));
-                if (unfinishedReply && prematureStopRecoveries < 12) {
-                    prematureStopRecoveries++;
-                    lengthContinuationHint = "[系统完成性检查] 你刚才的回复只是阶段性进度或在句子中途结束，原始任务尚未交付完成。"
-                            + "请从刚才的断点继续；若需要工具则立即调用，直到实际生成并验证用户要求的结果。不要重复已完成的工作。";
-                    ui.onWarning("检测到阶段性回复，正在自动继续任务（第 "
-                            + prematureStopRecoveries + " 次）");
-                    persistSession();
-                    continue;
-                }
-                if (unfinishedReply) {
-                    ui.onError("模型连续 12 次返回未完成的阶段性回复，已停止自动续接；本轮未标记为完成。"
-                            + "请检查模型服务的 finish_reason 与输出限制后重试。 ");
-                    break;
-                }
-
-                if (toolCalls[0] == null || toolCalls[0].isEmpty()
-                        || !"tool_calls".equals(finish[0])) {
-                    taskCompleted = hasContent && hasTaskCompleteMarker(content.toString());
-                    DiagnosticLog.info("agent-exit", "reason=model_response_end finish=" + finish[0]
-                            + " modelReportedComplete=" + taskCompleted + " toolRounds=" + rounds);
+                // 每个拟结束正文统一核验；字数、词汇和完成标记不能直接放行。
+                if (toolCalls[0] == null || toolCalls[0].isEmpty()) {
+                    if (hasPendingSupplements()) {
+                        drainSupplements();
+                        lengthContinuationHint="[系统结束检查] 有新用户补充，旧交付未通过验收。先处理最新补充，不得执行旧目标。";
+                        continue;
+                    }
+                    StopGate.Snapshot snapshot=stopSnapshot(content.toString(),stopReceipts,stopHistoricalEvidenceCount,reportFromIndex);
+                    ui.onWarning("正在核验当前任务是否完成（独立只读检查）");
+                    StopGate.Decision decision=StopGate.evaluate(llm,snapshot,session.usage::record,()->interrupted||Thread.currentThread().isInterrupted());
+                    if(interrupted || Thread.currentThread().isInterrupted()) break;
+                    if (hasPendingSupplements() || !snapshot.sameFacts(stopSnapshot(content.toString(),stopReceipts,stopHistoricalEvidenceCount,reportFromIndex))) {
+                        drainSupplements();
+                        lengthContinuationHint="[系统结束检查] 核验期间目标/补充/证据发生变化，旧审批已作废。重新核对最新要求。";
+                        continue;
+                    }
+                    session.taskState.recordStop(decision);
+                    DiagnosticLog.info("stop-gate","scope=root status="+decision.status+" reason="+decision.reason);
+                    if("waiting_user".equals(decision.status)||"unknown".equals(decision.status)) {
+                        lastTurnSucceeded=false;taskCompleted=false;
+                        ui.onWarning("任务尚未完成/交付未确认，"+("waiting_user".equals(decision.status)?"等待用户补充或授权":"结束核验无法确认")
+                                +"："+decision.reason+"；已保留断点，不自动发送后续队列。");
+                        break;
+                    }
+                    if("continue".equals(decision.status)) {
+                        int denied=stopProgress.deny();decision.noProgress=denied;
+                        int limit=hasTaskCompleteMarker(content.toString())?StopGate.COMPLETION_CONFLICT_LIMIT:StopGate.NO_PROGRESS_LIMIT;
+                        if(denied>limit) {
+                            lastTurnSucceeded=false;taskCompleted=false;
+                            ui.onError("任务尚未完成/交付尚未确认："+decision.reason+"。无实质进展的收尾预算已用尽，停止自动续接；断点已保留，未标记为完成。");
+                            break;
+                        }
+                        lengthContinuationHint="[系统统一结束检查] 当前目标尚未交付："+decision.reason+"。下一步："+decision.nextStep
+                                +("task".equals(decision.kind)?"。立即调用现有授权工具落实缺项；已完成步骤不能重跑，不得扩大用户范围。"
+                                +"子Agent需读取证据后AgentControl review；实际完成待办后TodoWrite；合法更新文件实际复核后refresh_checkpoint(note=复核及更新原因)或完整checkpoint。"
+                                +"缺少资料/授权调用AskUserQuestion。status只是查询，完成标记不是完成证据。"
+                                :"。补足用户要求的回答，已交付的段落不要重写；不能为了结束检查增加文件操作或新的工作范围，缺少必要信息请明确询问用户。");
+                        nextRequestForAction=denied>=ACTION_RECOVERY_AFTER&&"task".equals(decision.kind);
+                        nextRequestWithoutThinking=denied>=ACTION_RECOVERY_AFTER&&"answer".equals(decision.kind);
+                        ui.onWarning("阶段性回复/最终交付尚未确认，统一结束检查要求继续（无进展 "+denied+" 次）："+decision.reason);
+                        persistSession();
+                        continue;
+                    }
+                    synchronized(session.pendingSupplements) {
+                        if(!session.pendingSupplements.isEmpty()) {
+                            lengthContinuationHint="[系统结束检查] 用户新增补充使完成审批失效，先处理补充。";
+                        } else {
+                            taskCompleted="task".equals(decision.kind)||hasTaskCompleteMarker(content.toString());
+                            lastTurnSucceeded=true;
+                            session.taskState.progress(content.toString());
+                        }
+                    }
+                    if(!lastTurnSucceeded) {drainSupplements();continue;}
+                    DiagnosticLog.info("agent-exit","reason=stop_gate_approved finish="+finish[0]+" toolRounds="+rounds);
                     break;
                 }
                 // 只统计连续无动作：一旦模型成功产生工具调用，恢复计数归零。
@@ -840,8 +992,12 @@ public class AgentLoop {
                         }
                         session.messages.add(Message.toolResult(
                                 calls.get(i).id, calls.get(i).name,
-                                ToolResult.outputForApi(result.output, emptyOutputPlaceholder)));
+                                new ToolOutputStore(workspace.workDir(), session.id).forContext(
+                                        ToolResult.outputForApi(result.output, emptyOutputPlaceholder),calls.get(i))));
                         reportTools.add(calls.get(i).name + " — " + (result.ok ? "成功" : "失败"));
+                        ToolCall executed=calls.get(i);
+                        StopGate.Receipt receipt=new StopGate.Receipt("tool:"+executed.id+"@"+stopReceipts.size(),executed.name,executed.arguments,result);
+                        stopReceipts.add(receipt);stopProgress.observe(receipt);
                         ui.onToolResult(calls.get(i).name, result);
                     }
                 } finally {
@@ -879,15 +1035,21 @@ public class AgentLoop {
             ui.onError("异常: " + e.getMessage());
         }
         if (interrupted) {
+            lastTurnSucceeded = false;
+            DiagnosticLog.info("agent-exit", "reason=explicit_interrupt task=" + session.taskState.id);
             ui.onWarning("本轮已被中断");
             scrubHalfTurn(); // 兜底：任何中断退出路径（含工具阶段）的 toolCalls 半轮残留清洗
         }
         // 所有退出路径的兜底落盘：正常结束 / 轮数上限 / 错误 / 中断 / 异常
+        if (taskCompleted && lastTurnSucceeded && !interrupted) {
+            appendCompletionTime(java.time.Clock.systemUTC());
+        }
+        session.taskState.finish(lastTurnSucceeded);
         persistSession();
         if (!reportTools.isEmpty()) {
             try {
                 java.nio.file.Path report=TaskReportWriter.write(workspace,session,reportFromIndex,
-                        reportTools,taskCompleted,System.currentTimeMillis()-start);
+                        reportTools,taskCompleted && lastTurnSucceeded,System.currentTimeMillis()-start);
                 ui.onWarning("本轮执行记录已保存: "+report);
                 ui.onArtifactCreated(report.toAbsolutePath().normalize().toString());
             } catch (Exception e) {
@@ -915,23 +1077,32 @@ public class AgentLoop {
     }
 
     private void streamChat(List<Message> request, com.minion.core.llm.StreamHandler handler,
-                            boolean withoutThinking) throws LlmException {
-        if (withoutThinking) llm.streamChatWithoutThinking(request, registry.schemas(), handler);
-        else llm.streamChat(request, registry.schemas(), handler);
+                            boolean withoutThinking, boolean forAction) throws LlmException {
+        List<JsonObject> schemas=registry.schemas();
+        budgetText=com.minion.core.context.ContextBudget.describe(request,schemas,
+                contextManager==null?0:contextManager.configuredMaxTokens(),contextManager==null?0:contextManager.maxTokens(),
+                contextManager==null?0:contextManager.autoCompressAtTokens(),session.contextProfile);
+        if (forAction && !schemas.isEmpty()) {
+            ui.onWarning("模型连续只返回执行计划，正在切换工具动作恢复；工具仍按原权限确认执行");
+            DiagnosticLog.info("agent-continue", "reason=action_protocol_recovery");
+            llm.streamChatForAction(request, schemas, handler);
+        } else if (withoutThinking) llm.streamChatWithoutThinking(request, schemas, handler);
+        else llm.streamChat(request, schemas, handler);
     }
 
-    /** 保守识别明确的阶段性播报；只在本轮已用过工具时启用，避免干扰普通问答。 */
+    /** 旧措辞诊断与历史测试兼容；生产完成放行不调用本方法，统一由StopGate决定。 */
     static boolean looksLikeInterimAnswer(String text) {
         if (text == null) return false;
         String s = text.trim().replace('\r', ' ').replace('\n', ' ');
         if (s.isEmpty() || hasTaskCompleteMarker(s)) return false;
+        if (hasToolActionPromise(s)) return true;
         // 长篇分析后以“让我再查验…”结尾仍是进度回复。只检查末尾，避免把正文中
         // 提到的计划误当成未完成；原有短回复规则继续保持保守。
         if (s.length() > 240) {
             String tail = s.substring(Math.max(0, s.length() - 200));
-            return tail.matches(".*(?:让我再|我再|接下来(?:我)?(?:会|要|将)?|下一步(?:我)?(?:会|要|将)?|现在(?:我)?(?:会|要|将)?|还需(?:要)?|需要继续)"
-                    + "(?:查验|检查|核对|验证|分析|处理|执行|生成|读取|查看|补充|复核|确认|排查|扫描)[^。！？!?]*[：:，,。]*$");
+            return endsWithActionPlan(tail);
         }
+        if (endsWithActionPlan(s)) return true;
         String lower = s.toLowerCase(java.util.Locale.ROOT);
         return lower.startsWith("我先") || lower.startsWith("先看")
                 || lower.startsWith("接下来") || lower.startsWith("下一步")
@@ -945,7 +1116,117 @@ public class AgentLoop {
                 || lower.endsWith("继续处理") || lower.endsWith("继续分析");
     }
 
-    /** 工具任务的正文若停在连接词或未闭合的引述/括号/代码块，不能因 finish=stop 标为完成。 */
+    /** 只识别末尾明确的下一步意图；不因已交付正文中提及过去计划而续接。 */
+    private static boolean endsWithActionPlan(String text) {
+        if (TERMINAL_COMPARISON_PLAN.matcher(text).find()) return true;
+        return text.matches(".*(?:让我(?:再|先)?|我(?:再|先|将|会)|继续(?:推进|执行|处理|派发)[。！!，, ]*(?:先|再)?"
+                + "|接下来(?:我)?(?:会|要|将)?(?:先|再)?|下一步(?:我)?(?:会|要|将)?(?:先|再)?"
+                + "|现在(?:我)?(?:会|要|将)?(?:先|再)?|还需(?:要)?|需要继续)"
+                + "(?:查验|检查|核对|验证|分析|处理|执行|生成|读取|查看|补充|复核|确认|排查|扫描|派发|汇总)"
+                + "[^。！？!?]*[：:，,。.!！]*$");
+    }
+
+    /** 工具调用的口头承诺不是执行事实；仅识别靠近末尾的主动意图。 */
+    private static boolean hasToolActionPromise(String text) {
+        String tail = text.substring(Math.max(0, text.length() - 300));
+        return tail.matches("(?i).*(?:我(?:现在|立即|将|会)(?:实际)?(?:调用|使用)|我实际(?:调用|使用)|先(?:调用|使用)|立即(?:调用|使用)|让我(?:先)?(?:调用|使用))"
+                + "(?:bash|python|read|write|edit|task|todowrite|agentcontrol|工具)[^。！？!?]*"
+                + "(?:[。.!！][ ]*(?:执行工具调用|现在|执行|good|execute)[。.!！]*)*[。.!！]*$");
+    }
+
+    /** 旧措辞诊断与测试兼容；生产waiting_user由统一结束核验决定。 */
+    static boolean looksLikeUserBlock(String text) {
+        if (text == null || hasTaskCompleteMarker(text)) return false;
+        String s = text.trim().replace('\r',' ').replace('\n',' ');
+        return s.matches(".*(?:缺少|缺失|无法访问|找不到|尚未提供|需要您|需要你|等待您|等待你|等待用户)[^。！？!?]*"
+                + "(?:请(?:您|你)?(?:先)?(?:提供|上传|补充|选择|确认|授权)|才能继续|后(?:才能|再)继续|确认|授权)[^。！？!?]*[。.!！?？]*$")
+                || s.matches(".*(?:请(?:您|你)?(?:先)?(?:提供|上传|补充|选择|确认|授权))[^。！？!?]*"
+                + "(?:才能继续|后(?:才能|再)继续|等待(?:您|你|用户)(?:回答|确认|授权))[^。！？!?]*[。.!！?？]*$")
+                || s.matches("(?i).*(?:waiting for (?:your|user)|need your) (?:input|confirmation|approval|permission).*" );
+    }
+
+    private boolean hasStructuredWork() {
+        synchronized(session.todos) { if (!session.todos.items.isEmpty()) return true; }
+        return !session.taskState.childSnapshot().isEmpty();
+    }
+
+    private StopGate.Snapshot stopSnapshot(String candidate,List<StopGate.Receipt> current,int historicalCount,int fromIndex) {
+        JsonObject facts=new JsonObject();List<StopGate.Receipt> receipts=new ArrayList<StopGate.Receipt>();
+        List<FileEvidence> files=new ArrayList<FileEvidence>();
+        String id,goal;List<String> guidance;
+        synchronized(session.taskState) {
+            id=session.taskState.id;goal=session.taskState.objective;guidance=new ArrayList<String>(session.taskState.guidance);
+            facts.add("referenceContext",new com.google.gson.Gson().toJsonTree(session.taskState.referenceContext));
+            facts.addProperty("referenceContextTruncated",session.taskState.referenceContextTruncated);
+            com.google.gson.JsonArray children=new com.google.gson.JsonArray();
+            int childCount=0,reviewedCount=0;
+            for(TaskState.Child child:session.taskState.childSnapshot()) {
+                childCount++;if("reviewed".equals(child.status)){reviewedCount++;continue;}
+                JsonObject c=new JsonObject();c.addProperty("id",child.id);c.addProperty("status",child.status);
+                c.addProperty("assignment",child.assignment==null?"":child.assignment.substring(0,Math.min(300,child.assignment.length())));children.add(c);
+            }
+            facts.add("pendingChildren",children);facts.addProperty("childCount",childCount);facts.addProperty("reviewedChildren",reviewedCount);
+            int historicalShown=0;
+            for(int i=session.taskState.evidence.size()-1;i>=0;i--) {
+                TaskState.Evidence e=session.taskState.evidence.get(i);if(!id.equals(e.taskId)||!"root".equals(e.scope))continue;
+                if(i<historicalCount&&historicalShown++<24)receipts.add(0,new StopGate.Receipt("evidence:"+i,e.tool,"",e.success?ToolResult.success(e.result):ToolResult.error(e.result)));
+                if(e.file!=null)files.add(e.file);
+            }
+            java.util.Collections.reverse(files);
+            files.addAll(session.taskState.checkpointFiles);
+        }
+        // 文件IO不占用任务台账锁，避免大文件核验阻塞JavaFX任务面板/子Agent进度。
+        facts.addProperty("checkpoint",authorizedCheckpointStatus());
+        facts.add("knownFiles",StopGate.fileFacts(files,this::evidencePathAllowed));
+        facts.addProperty("todos",session.todos.render());facts.addProperty("toolsUsed",!receipts.isEmpty()||!current.isEmpty());
+        facts.addProperty("structured",hasStructuredWork());
+        com.google.gson.JsonArray priorReplies=new com.google.gson.JsonArray();
+        for(int i=session.messages.size()-2;i>=Math.max(0,fromIndex)&&priorReplies.size()<4;i--) {
+            Message m=session.messages.get(i);if(m.role!=Message.Role.ASSISTANT||m.content==null||(m.toolCalls!=null&&!m.toolCalls.isEmpty()))continue;
+            JsonObject part=new JsonObject();part.addProperty("text",m.content.substring(0,Math.min(2000,m.content.length())));
+            part.addProperty("truncated",m.content.length()>2000);priorReplies.add(part);
+        }
+        facts.add("earlierDeliveredReplies",priorReplies);
+        synchronized(session.pendingSupplements){facts.add("pendingSupplements",new com.google.gson.Gson().toJsonTree(session.pendingSupplements));}
+        receipts.addAll(current);
+        return new StopGate.Snapshot(id,goal,guidance,facts,receipts,candidate,pendingExecutionReason());
+    }
+
+    private boolean hasPendingSupplements() {
+        synchronized(session.pendingSupplements){return !session.pendingSupplements.isEmpty();}
+    }
+
+    /** 仅当前任务的结构化事实；旧任务子Agent不能阻挡新问题。 */
+    private String pendingExecutionReason() {
+        List<String> reasons = new ArrayList<String>();
+        if (hasPendingTodos()) reasons.add("主任务待办尚未完成");
+        for (TaskState.Child child : session.taskState.childSnapshot()) {
+            if (!"reviewed".equals(child.status)) {
+                reasons.add("子Agent尚未核对或仍在运行/失败（" + child.id + "，" + child.status + "）");
+                break;
+            }
+        }
+        List<FileEvidence> files;synchronized(session.taskState){files=new ArrayList<FileEvidence>(session.taskState.checkpointFiles);}
+        for(FileEvidence file:files) {
+            try{if(!evidencePathAllowed(java.nio.file.Paths.get(file.path))){reasons.add("断点证据文件已超出当前权限");break;}}
+            catch(Exception e){reasons.add("断点证据路径无法核验");break;}
+            if(!"unchanged".equals(file.verify())){reasons.add("断点证据文件已变更或缺失");break;}
+        }
+        return reasons.isEmpty() ? null : String.join("；", reasons);
+    }
+
+    public String authorizedCheckpointStatus() {
+        StringBuilder b=new StringBuilder();List<FileEvidence> files;
+        synchronized(session.taskState){b.append("处理范围: ").append(session.taskState.processedRange).append("\n下一步: ").append(session.taskState.nextStep);files=new ArrayList<FileEvidence>(session.taskState.checkpointFiles);}
+        for(FileEvidence file:files) {
+            String status="permission_denied";
+            try{if(evidencePathAllowed(java.nio.file.Paths.get(file.path)))status=file.verify();}catch(Exception ignored){}
+            b.append("\n文件 [").append(status).append("] ").append(file.path).append(" | ").append(file.size).append(" bytes | SHA256 ").append(file.sha256);
+        }
+        return b.toString();
+    }
+
+    /** 旧截断文本诊断与测试兼容；生产完成放行不调用本方法。 */
     static boolean looksLikeInterruptedReply(String text) {
         if (text == null) return false;
         String s = text.trim();
@@ -978,12 +1259,13 @@ public class AgentLoop {
     private boolean recoverFromContextOverflow(int attempt) {
         if (contextManager == null || attempt >= 2) return false;
         int before = contextManager.estimate(session.messages);
+        session.observedContextLimit = contextManager.learnFromContextFailure(before);
         ui.onCompressingChanged(true);
         try {
             ui.onWarning("模型返回上下文超限，正在强制压缩并自动继续任务（第 "
                     + (attempt + 1) + " 次）");
             List<Message> old = session.messages;
-            session.messages = contextManager.compressForRecovery(session.messages);
+            session.messages = contextManager.compressForRecovery(session.messages, session.taskState.render(session.todos), session.taskState.objective);
             int after = contextManager.estimate(session.messages);
             if (session.messages == old || after >= before) {
                 ui.onWarning("强制压缩没有释放足够上下文，无法自动恢复");
@@ -1008,12 +1290,13 @@ public class AgentLoop {
      *  可能高于真实模型窗口，不能再依赖百分比阈值。 */
     private boolean recoverFromSilentResponses() {
         int before = contextManager.estimate(session.messages);
+        session.observedContextLimit = contextManager.learnFromContextFailure(before);
         ui.onCompressingChanged(true);
         try {
             ui.onWarning("模型连续返回空响应，正在强制压缩上下文并重建请求（当前 "
                     + before + " token）");
             List<Message> old = session.messages;
-            session.messages = contextManager.compressForRecovery(session.messages);
+            session.messages = contextManager.compressForRecovery(session.messages, session.taskState.render(session.todos), session.taskState.objective);
             int after = contextManager.estimate(session.messages);
             if (session.messages == old || after >= before) {
                 ui.onWarning("空响应恢复压缩未成功，将切换思考策略继续尝试");
@@ -1039,14 +1322,32 @@ public class AgentLoop {
         return false;
     }
 
+    /** 程序生成完成时间，不让模型猜测；历史中保留末尾完成标记。 */
+    private void appendCompletionTime(java.time.Clock clock) {
+        if (session.messages.isEmpty()) return;
+        Message reply = session.messages.get(session.messages.size() - 1);
+        if (reply.role != Message.Role.ASSISTANT || reply.content==null) return;
+        String line = completionTimeLine(clock);
+        String body = reply.content.trim();
+        if(hasTaskCompleteMarker(body)) body = body.substring(0, body.length() - TASK_COMPLETE_MARKER.length()).trim();
+        reply.content = body + "\n\n" + line + "\n\n" + TASK_COMPLETE_MARKER;
+        session.taskState.progress(reply.content);
+        ui.onContent("\n\n" + line);
+        ui.onResponseEnd();
+    }
+
+    static String completionTimeLine(java.time.Clock clock) {
+        return "完成时间：" + java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                .withZone(java.time.ZoneId.of("Asia/Shanghai")).format(clock.instant()) + "（北京时间）";
+    }
+
     static boolean hasTaskCompleteMarker(String text) {
         return text != null && text.trim().endsWith(TASK_COMPLETE_MARKER);
     }
 
-    private static boolean hasToolContext(List<Message> messages) {
-        if (messages == null) return false;
-        for (int i = messages.size() - 1; i >= 0 && i >= messages.size() - 80; i--) {
-            if (messages.get(i).role == Message.Role.TOOL) return true;
+    private boolean hasPendingTodos() {
+        synchronized(session.todos) {
+            for (TodoList.TodoItem item : session.todos.items) if (!item.done) return true;
         }
         return false;
     }
@@ -1153,12 +1454,18 @@ public class AgentLoop {
             ui.onToolCall(call.name, args);
             ToolResult result;
             try {
-                result = tool.execute(args);
+                result = executionGuard.execute(tool,args);
             } catch (Exception e) {
                 result = ToolResult.error("工具执行异常: " + e.getClass().getSimpleName() + ": " + e.getMessage()
                         + "。请读取最新状态并调整参数后重试");
             }
             DiagnosticLog.tool(call.name, elapsedMs(started), result.ok, result.output);
+            FileEvidence file=null;
+            if(result.ok&&args.has("path")&&java.util.Arrays.asList("Read","Write","Edit").contains(call.name)) {
+                try { file=FileEvidence.capture(com.minion.core.tools.PathsGuard.resolve(workspace.cwd().toString(),args.get("path").getAsString())); }
+                catch(Exception ignored) { }
+            }
+            if(!"task".equals(call.name)) session.taskState.recordEvidence("root",call.name,result.ok,result.output,file);
             return result;
         } catch (RuntimeException e) {
             // 防御：参数类型非法等 unchecked 异常不得穿透执行线程

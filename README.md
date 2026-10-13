@@ -1,5 +1,25 @@
 # minion
 
+最新离线更新：[V30 统一结束门禁](docs/releases/V30-统一结束门禁更新.md)。正常回复结束不直接算任务完成，独立只读核验当前目标与实际证据；未完成则有界续接，未知/等待用户明确暂停并保留队列。旧关键词、字数和完成标记不再拥有完成放行权；包含V29及此前改动，保留压缩配置。
+
+上一版离线更新：[V29 完成收尾与完成时间](docs/releases/V29-完成收尾与时间更新.md)。包含V28全部内容，修复旧断点哈希与状态查询造成的反复收尾，完成回复自动附北京时间；保留未完成任务保护和已有配置。
+
+开发中：主任务通过完成校验后，程序自动在回复附“完成时间：yyyy-MM-dd HH:mm:ss（北京时间）”，历史与报告保留；阶段回复、中断及被阻塞的完成声明不添加。暂不打包。
+
+开发中：修复完成声明因旧断点哈希阻塞而反复续跑。AgentControl status显示实时差异；refresh_checkpoint需复核说明并重新采集完整文件快照。收尾恢复独立计数，不因状态查询清零；缺失文件、待办和子任务保护保留。本次尚未打包。
+
+已发布：[V28：V27之后的合并更新](docs/releases/V28-V27后合并更新.md)，包含下述流式保护、默认模型、历史分页及选择性迁移。
+
+开发中：已加入主/子Agent单次流式工具承诺循环检测，提前结束当前请求并有界恢复，避免等待输出上限后继续重复；不改输出预算、压缩阈值和权限。暂未发布更新包。
+
+开发中：设置→模型新增“新会话默认模型”选择，选择后立即保存，仅影响新建会话。重新打开旧会话仍使用该会话保存的模型；输入框模型按钮继续只影响当前会话。
+
+开发中：历史页增加至每页150条可见内容，连续子任务输出合并折叠展示，轮次结束标记不占分页预算；修复执行中历史页仅有导航栏的问题。完整记录保留，暂未打包。
+
+开发中：选择性迁移 aacw1/minion e052ea1 的并发文件保护（Write/Edit 路径锁与临时文件替换）、子Agent独立消息通道、Read full及数据库大字段原样导出。保留检查点、append、越界确认、历史分页和本地压缩配置；不整仓库覆盖，暂未打包。
+
+最新离线修复：[V27 中断误触与工具动作恢复](docs/releases/V27-中断误触与工具动作恢复.md)。发送键不再误触停止；连续只说工具执行计划时明确关闭思考并升级工具动作请求，保留协议兼容回退与原权限确认。长文本完整分页和复制全文，思考结束自动收起；数字选项回答附带对应含义。包含 V23～V26，保留现有模型、压缩配置和历史。
+
 win7&jdk8 本地 Agent，使用 Java 8 开发，面向 Qwen 等 OpenAI Chat Completions 兼容模型。含子 agent、MCP 工具扩展（stdio/SSE/Streamable HTTP）、代码开发、浏览器自动化、Anaconda/Python、Excel/Office、SQL 数据库、本地知识库、项目记忆、上下文压缩、会话管理、离线更新、风险审计和 Skills。
 
 ## 启动（GUI）
@@ -113,7 +133,7 @@ jar 同目录 `session/<workSpaceName>/`，每会话一个 JSON 文件（每轮�
 - `Document`：提取 DOCX/PPTX/PDF/XLSX，创建/替换 DOCX、创建 PPTX、PDF 合并拆分并诊断 OCR/Tesseract
 - `Database`：除 SQLite 外支持 ODBC/SQL Server、MySQL、PostgreSQL；`query` 默认只读，`execute` 需确认，`export` 可输出 CSV/XLSX
 - `SQLite`：`schema` 查看结构、`query` 只读查询、`execute` 建表及增删改；使用 Python 标准库 sqlite3，不需要额外数据库驱动
-- `Knowledge`：项目级离线知识库，保存在 `<工作区>/.minion/knowledge/`；支持 add/import/sync/search/list/read/delete，文件夹增量同步和来源引用，不依赖云端向量服务
+- `Knowledge`：项目知识库保存在 `<工作区>/.minion/knowledge/`；可在基础设置中指定共享目录，或让 Minion 用 `Knowledge.connect` 连接用户指定的绝对目录（需确认）。所有项目的 search/list 都会直接读取共享目录及子目录中的 `.md` 文件，修改后下次查询即生效，无需逐项目导入。共享条目以 `shared/相对路径` 显示，可用此名称 read；add/import/sync/delete 仍只修改当前项目知识库。`disconnect` 可取消共享连接，不删除文件。目录不存在时会提示，不会自动新建或清空它。不依赖云端向量服务。
 - 设置 → 基础设置 → `Python/Anaconda` 可选择内网解释器，例如 `C:\ProgramData\Anaconda3\python.exe`
 
 内置技能包含：`data-analysis`、`sql-database`、`knowledge-base`、`browser-automation`、`web-development`、`windows-packaging`、`app-development`。外部技能同名时覆盖内置技能。

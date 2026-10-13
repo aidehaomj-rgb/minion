@@ -281,6 +281,23 @@ public class DeepSeekClientTest {
     }
 
     @Test
+    public void completeChat_triesWithoutThinkingThenFallsBackWhenGatewayReturnsNoText() throws Exception {
+        server.enqueue(new MockResponse().setBody(
+                "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"只返回思考\"},\"finish_reason\":\"stop\"}]}\n\n"
+                        + "data: [DONE]\n\n"));
+        server.enqueue(new MockResponse().setBody(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"摘要正文\"},\"finish_reason\":\"stop\"}]}\n\n"
+                        + "data: [DONE]\n\n"));
+        String result = newClient("qwen", true, "xhigh").completeChat(
+                Collections.singletonList(Message.user("待压缩历史")), "摘要指令");
+        assertEquals("摘要正文", result);
+        JsonObject first = JsonParser.parseString(server.takeRequest().getBody().readUtf8()).getAsJsonObject();
+        JsonObject second = JsonParser.parseString(server.takeRequest().getBody().readUtf8()).getAsJsonObject();
+        assertFalse(first.get("enable_thinking").getAsBoolean());
+        assertTrue(second.get("enable_thinking").getAsBoolean());
+    }
+
+    @Test
     public void cancel_killsAllInFlightRequests() throws Exception {
         // 两个并发请求都延迟响应体，保持 in-flight；cancel() 必须同时取消两者（多子 agent 并行安全）
         // 注：body 延迟 2s，确保 cancel 后 server 侧线程在 teardown 5s 等待窗口内自然结束

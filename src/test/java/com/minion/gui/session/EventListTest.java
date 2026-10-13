@@ -9,6 +9,100 @@ import java.util.List;
 import static org.junit.Assert.*;
 
 public class EventListTest {
+    @Test
+    public void childDeltasMergeIntoOneVisibleHistoryEntry() {
+        EventList l = new EventList();
+        l.add(new Ev(EventList.Kind.USER_MESSAGE, "older", null));
+        for (int i = 0; i < 1000; i++) l.add(new Ev(EventList.Kind.SUB_AGENT_DELTA, "x", null));
+        l.add(new Ev(EventList.Kind.RESPONSE_END, null, null));
+        EventList.Page page = l.pageBefore(l.size(), 1);
+        assertEquals(1, page.start);
+        assertEquals(2, page.events.size());
+        assertEquals(EventList.Kind.SUB_AGENT_DELTA, page.events.get(0).kind);
+        assertEquals(1000, page.events.get(0).text.length());
+        assertEquals("older", l.pageBefore(page.start, 1).events.get(0).text);
+        assertEquals(1002, l.size());
+    }
+
+    @Test
+    public void endMarkersDoNotConsumeVisiblePageBudget() {
+        EventList l = new EventList();
+        for (int i = 0; i < 310; i++) {
+            l.add(new Ev(EventList.Kind.USER_MESSAGE, "m" + i, null));
+            l.add(new Ev(EventList.Kind.RESPONSE_END, null, null));
+        }
+        EventList.Page page = l.pageBefore(l.size(), 150);
+        assertEquals(320, page.start);
+        assertEquals(300, page.events.size());
+        assertEquals("m160", page.events.get(0).text);
+        l.add(new Ev(EventList.Kind.CONTENT, "live", null));
+        assertEquals(620, l.pageBefore(page.end, 150).end);
+        assertEquals("live", l.pageBefore(l.size(), 150).events.get(298).text);
+    }
+
+    @Test
+    public void childOutputDoesNotMergeAcrossTaskBoundaries() {
+        EventList l = new EventList();
+        l.add(new Ev(EventList.Kind.SUB_AGENT_DELTA, "first", null));
+        l.add(new Ev(EventList.Kind.SUB_AGENT_DONE, "done", null));
+        l.add(new Ev(EventList.Kind.SUB_AGENT_DELTA, "second", null));
+        EventList.Page page = l.pageBefore(l.size(), 2);
+        assertEquals(1, page.start);
+        assertEquals("done", page.events.get(0).text);
+        assertEquals("second", page.events.get(1).text);
+    }
+
+    @Test
+    public void historyPagesMergeStreamChunksAndKeepOriginals() {
+        EventList l = new EventList();
+        l.add(new Ev(EventList.Kind.USER_MESSAGE, "first", null));
+        for (int i = 0; i < 2500; i++) l.add(new Ev(EventList.Kind.CONTENT, "x", null));
+        l.add(new Ev(EventList.Kind.TOOL_CALL, "Read", "args"));
+        EventList.Page recent = l.pageBefore(l.size(), 2);
+        assertEquals(1, recent.start);
+        assertEquals(2502, recent.end);
+        assertEquals(2500, recent.events.get(0).text.length());
+        assertEquals(EventList.Kind.TOOL_CALL, recent.events.get(1).kind);
+        EventList.Page old = l.pageBefore(recent.start, 2);
+        assertEquals(0, old.start);
+        assertEquals(recent.start, old.end);
+        assertEquals("first", old.events.get(0).text);
+        l.add(new Ev(EventList.Kind.CONTENT, "new", null));
+        assertEquals(2502, l.pageBefore(recent.end, 2).end);
+        assertEquals(2503, l.size());
+        assertEquals("x", l.snapshot().get(1).text);
+    }
+
+    @Test
+    public void historyPagingVisitsEveryEventOnce() {
+        EventList l = new EventList();
+        for (int i = 0; i < 2464; i++) l.add(new Ev(EventList.Kind.USER_MESSAGE, "m" + i, null));
+        int cursor = l.size(), count = 0;
+        while (cursor > 0) {
+            EventList.Page p = l.pageBefore(cursor, 80);
+            assertEquals(cursor, p.end);
+            assertTrue(p.start < cursor);
+            for (int i = 0; i < p.events.size(); i++) assertEquals("m" + (p.start + i), p.events.get(i).text);
+            count += p.events.size();
+            cursor = p.start;
+        }
+        assertEquals(2464, count);
+        assertTrue(l.pageBefore(0, 80).events.isEmpty());
+    }
+
+    @Test
+    public void emptyReasoningDeltasDoNotSplitReply() {
+        EventList l = new EventList();
+        l.add(new Ev(EventList.Kind.USER_MESSAGE, "question", null));
+        for (int i = 0; i < 1000; i++) {
+            l.add(new Ev(EventList.Kind.THINKING, "", null));
+            l.add(new Ev(EventList.Kind.CONTENT, "x", null));
+        }
+        EventList.Page p = l.pageBefore(l.size(), 2);
+        assertEquals(0, p.start);
+        assertEquals(2, p.events.size());
+        assertEquals(1000, p.events.get(1).text.length());
+    }
 
     private EventList newList() { return new EventList(); }
 
@@ -133,5 +227,43 @@ public class EventListTest {
         assertEquals(1, seen.size());
         assertEquals(EventList.Kind.SYSTEM, seen.get(0).kind);
         assertEquals("已加载技能: x", seen.get(0).text);
+    }
+
+    @Test
+    public void rebindRecent_limitsLongHistoryButKeepsNewEvents() {
+        EventList l = newList();
+        for (int i = 0; i < 10000; i++) {
+            l.add(new Ev(EventList.Kind.USER_MESSAGE, "history-" + i, null));
+        }
+        final List<Ev> live = new ArrayList<Ev>();
+        EventList.Replay replay = l.rebindRecent(live::add, 0, 200, 300000);
+        assertEquals(200, replay.events.size());
+        assertEquals(9800, replay.skipped);
+        assertEquals(10000, replay.nextIndex);
+        assertEquals("history-9800", replay.events.get(0).text);
+        assertEquals("history-9999", replay.events.get(199).text);
+        assertEquals(10000, l.size()); // 原始历史未裁剪
+        l.add(new Ev(EventList.Kind.CONTENT, "new", null));
+        assertEquals(1, live.size());
+        assertEquals("new", live.get(0).text);
+    }
+
+    @Test
+    public void rebindRecent_appliesCharacterBudgetAndPreservesCursor() {
+        EventList l = newList();
+        l.add(new Ev(EventList.Kind.TOOL_RESULT, "a", "12345"));
+        l.add(new Ev(EventList.Kind.TOOL_RESULT, "b", "12345"));
+        l.add(new Ev(EventList.Kind.CONTENT, "c", null));
+        EventList.Replay replay = l.rebindRecent(e -> { }, 0, 10, 7);
+        assertEquals(2, replay.events.size());
+        assertEquals("b", replay.events.get(0).text);
+        assertEquals(1, replay.skipped);
+        assertEquals(3, replay.nextIndex);
+        l.setActive(false, null);
+        l.add(new Ev(EventList.Kind.CONTENT, "d", null));
+        EventList.Replay second = l.rebindRecent(e -> { }, replay.nextIndex, 10, 7);
+        assertEquals(1, second.events.size());
+        assertEquals("d", second.events.get(0).text);
+        assertEquals(0, second.skipped);
     }
 }

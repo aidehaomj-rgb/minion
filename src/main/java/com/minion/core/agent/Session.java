@@ -21,6 +21,14 @@ public class Session {
     public String modelName;
     /** 本会话选择的模型配置标识；旧会话缺失时使用当前默认模型。 */
     public String modelDisplayName;
+    /** Child defaults are per conversation, not global model settings. */
+    public volatile String subAgentModelName;
+    public volatile String subAgentMode="worker";
+    public volatile String subAgentTools="";
+    public volatile String contextProfile="balanced";
+    public volatile int preferredContextLimit;
+    /** 服务端超限/空响应后学习到的当前会话安全窗口；0 表示尚未学习。 */
+    public int observedContextLimit;
     /** 会话管理元数据：置顶优先展示；归档后从默认侧栏隐藏但仍保留落盘。 */
     public boolean pinned;
     public boolean archived;
@@ -28,6 +36,14 @@ public class Session {
     public String cwd;
     public List<Message> messages = new ArrayList<Message>();
     public TodoList todos = new TodoList();
+    public TaskState taskState = new TaskState();
+    public List<QueuedTask> queuedTasks = new ArrayList<QueuedTask>();
+    public static class QueuedTask {
+        public String text;
+        public long createdAt;
+        public boolean guidance;
+        public List<ImagePart> images = new ArrayList<ImagePart>();
+    }
     public UsageTracker usage = new UsageTracker();
 
     /** 运行中用户补充的挂起队列（尚未入 messages 历史；检查点/下次发送时批量注入后清空）。

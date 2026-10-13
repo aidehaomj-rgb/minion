@@ -49,6 +49,12 @@ public class DeepSeekClient implements LlmClient {
     /** 看门狗调度池（实例级，随 close 释放）：单线程 daemon，取消即出队、空闲可回收 */
     private final ScheduledExecutorService watchdogScheduler = newWatchdogScheduler();
     private volatile boolean closed;
+    /** 仅实例内记忆网关能力；不修改用户模型配置。 */
+    private volatile boolean requiredToolChoiceUnsupported;
+    private final Map<Thread,okhttp3.Call> stopReviews=new ConcurrentHashMap<Thread,okhttp3.Call>();
+    private static final int STOP_REVIEW_MAX_OUTPUT_TOKENS=1024;
+    private static final int STOP_REVIEW_MAX_BODY_BYTES=65536;
+    long stopReviewTimeoutMs=30000;
 
     private static ScheduledExecutorService newWatchdogScheduler() {
         ScheduledThreadPoolExecutor ex = new ScheduledThreadPoolExecutor(1, r -> {
@@ -92,6 +98,11 @@ public class DeepSeekClient implements LlmClient {
 
     private Request buildRequest(List<Message> messages, List<JsonObject> tools,
                                  boolean disableThinking) {
+        return buildRequest(messages, tools, disableThinking, false);
+    }
+
+    private Request buildRequest(List<Message> messages, List<JsonObject> tools,
+                                 boolean disableThinking, boolean requireAction) {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("stream", true);
@@ -99,6 +110,13 @@ public class DeepSeekClient implements LlmClient {
         // 按供应商生成思考参数（deepseek: thinking/reasoning_effort；qwen: enable_thinking）
         String effectiveProvider = effectiveProvider();
         JsonObject tp = thinkingParams(effectiveProvider, thinking && !disableThinking, reasoningEffort);
+        // DeepSeek 默认可开启思考；恢复时省略 thinking 并不等于关闭。
+        // required 在思考模式下不受支持，必须显式 disabled 后才发送。
+        if (disableThinking && "deepseek".equalsIgnoreCase(effectiveProvider)) {
+            tp = new JsonObject();
+            JsonObject disabled = new JsonObject(); disabled.addProperty("type", "disabled");
+            tp.add("thinking", disabled);
+        }
         if (tp != null) {
             for (Map.Entry<String, JsonElement> e : tp.entrySet()) body.add(e.getKey(), e.getValue());
         }
@@ -122,6 +140,10 @@ public class DeepSeekClient implements LlmClient {
             JsonArray arr = new JsonArray();
             for (JsonObject t : tools) arr.add(t);
             body.add("tools", arr);
+            if (requireAction) {
+                body.addProperty("tool_choice", "required");
+                body.addProperty("parallel_tool_calls", false);
+            }
         }
         Request.Builder rb = new Request.Builder()
                 .url(url)
@@ -165,6 +187,11 @@ public class DeepSeekClient implements LlmClient {
         for (okhttp3.Call c : inFlightCalls) {
             c.cancel();
         }
+        for(okhttp3.Call c:stopReviews.values()) c.cancel();
+    }
+
+    @Override public void cancelStopReview(Thread owner) {
+        if(owner!=null) {okhttp3.Call c=stopReviews.get(owner);if(c!=null)c.cancel();}
     }
 
     /**
@@ -202,6 +229,38 @@ public class DeepSeekClient implements LlmClient {
         streamChatInternal(messages, tools, handler, true);
     }
 
+    @Override
+    public void streamChatForAction(List<Message> messages, List<JsonObject> tools,
+                                    StreamHandler handler) throws LlmException {
+        if ("sfm-agent".equalsIgnoreCase(provider) || tools == null || tools.isEmpty()) {
+            streamChatWithoutThinking(messages, tools, handler);
+            return;
+        }
+        if (requiredToolChoiceUnsupported) {
+            streamChatInternal(messages, tools, handler, true);
+            return;
+        }
+        try {
+            streamChatInternal(messages, tools, handler, true, true);
+        } catch (LlmException e) {
+            if (!isToolChoiceUnsupported(e)) throw e;
+            // HTTP 参数拒绝发生在收到模型内容前；仅这种明确能力错误允许一次协议回退。
+            requiredToolChoiceUnsupported = true;
+            com.minion.core.diagnostics.DiagnosticLog.info("llm-action-recovery",
+                    "required_tool_choice=unsupported fallback=auto");
+            streamChatInternal(messages, tools, handler, true);
+        }
+    }
+
+    private static boolean isToolChoiceUnsupported(LlmException e) {
+        if (e.httpCode != 400 && e.httpCode != 422) return false;
+        String s = (String.valueOf(e.body) + " " + e.getMessage()).toLowerCase(java.util.Locale.ROOT);
+        return (s.contains("tool_choice") || s.contains("tool choice"))
+                && (s.contains("not supported") || s.contains("unsupported") || s.contains("unknown")
+                || s.contains("unrecognized") || s.contains("unrecognised") || s.contains("invalid value")
+                || s.contains("不支持"));
+    }
+
     /**
      * SFM Agent Studio Gateway 协议：
      * POST {stream:true, delta:true, sessionId, message:{text,metadata,attachments}}
@@ -209,6 +268,8 @@ public class DeepSeekClient implements LlmClient {
      * 网关自身负责 agent/tool 执行，因此不发送 Minion 的 tools schema。
      */
     private void streamSfmAgent(List<Message> messages, StreamHandler handler) throws LlmException {
+        // 网关可能已在远端执行动作，本地不知道工具边界；禁用本地工具承诺循环截停。
+        handler.onToolCallDelta();
         if (gatewaySessionId.isEmpty()) {
             throw new LlmException(LlmException.Type.BAD_REQUEST,
                     "SFM Agent 配置缺少 sessionId，请在 设置 → 模型 中填写服务端提供的 sessionId", false);
@@ -307,13 +368,19 @@ public class DeepSeekClient implements LlmClient {
     private void streamChatInternal(List<Message> messages, List<JsonObject> tools,
                                     StreamHandler handler, boolean disableThinking)
             throws LlmException {
+        streamChatInternal(messages, tools, handler, disableThinking, false);
+    }
+
+    private void streamChatInternal(List<Message> messages, List<JsonObject> tools,
+                                    StreamHandler handler, boolean disableThinking, boolean requireAction)
+            throws LlmException {
         List<ToolCall> acc = new ArrayList<ToolCall>();
         StringBuilder content = new StringBuilder();
         StringBuilder thinkingSb = new StringBuilder();
         Usage usage = null;
         String finish = null;
         boolean sawDone = false;
-        final okhttp3.Call call = http.newCall(buildRequest(messages, tools, disableThinking));
+        final okhttp3.Call call = http.newCall(buildRequest(messages, tools, disableThinking, requireAction));
         inFlightCalls.add(call);
         // 首增量看门狗：READ_TIMEOUT 管的是"两个 SSE chunk 之间的间隔"（300s），
         // 治不了"连上了但模型迟迟不产出"。此处独立计时，到点 cancel 解除阻塞并归为 TIMEOUT。
@@ -341,6 +408,9 @@ public class DeepSeekClient implements LlmClient {
                     JsonObject delta = choice.has("delta") && choice.get("delta").isJsonObject()
                             ? choice.getAsJsonObject("delta") : null;
                     if (delta != null) {
+                        // 同一SSE帧含工具参数和正文时，先通知工具存在，避免误截有效动作。
+                        if (delta.has("tool_calls") && delta.get("tool_calls").isJsonArray()
+                                && delta.getAsJsonArray("tool_calls").size() > 0) handler.onToolCallDelta();
                         // 空字符串增量不转发：qwen 流式每 chunk 的 delta 同时携带 content 与
                         // reasoning_content 字段（另一个为空字符串，非 null）——若空串也回调，
                         // ChatView 每正文 chunk 追加一段，界面表现为"同一段回复不停重复"
@@ -364,6 +434,11 @@ public class DeepSeekClient implements LlmClient {
                             watchdog.cancel(false); // 工具调用增量同样是"模型已产出"的信号
                             accumulateToolCalls(delta.getAsJsonArray("tool_calls"), acc);
                         }
+                    }
+                    if (handler.shouldStopResponse() && acc.isEmpty()) {
+                        finish = RepetitionGuard.FINISH;
+                        call.cancel(); // 只关闭本次请求，其他并发子Agent不受影响。
+                        break;
                     }
                     if (choice.has("finish_reason") && !choice.get("finish_reason").isJsonNull()) {
                         finish = choice.get("finish_reason").getAsString();
@@ -398,7 +473,7 @@ public class DeepSeekClient implements LlmClient {
             inFlightCalls.remove(call);
         }
         if (usage == null) {
-            usage = Usage.estimate(messages, content.toString());
+            usage = Usage.estimate(messages, content.toString() + thinkingSb.toString());
         }
         // EOF 本身不是模型完成信号：网关可能以 HTTP 200 提前结束 SSE。
         if (finish == null) finish = sawDone ? (acc.isEmpty() ? "stop" : "tool_calls") : "incomplete";
@@ -441,12 +516,56 @@ public class DeepSeekClient implements LlmClient {
 
     @Override
     public String completeChat(List<Message> messages, String systemPrompt) throws LlmException {
+        // 摘要必须有正文。普通思考模式可能把单次输出预算耗在 reasoning_content，
+        // 导致上下文越长越无法压缩；先请求无思考正文，网关不支持时再回退原模式。
+        String summary = completeChatOnce(messages, systemPrompt, true);
+        if (!summary.trim().isEmpty() || !thinking) return summary;
+        return completeChatOnce(messages, systemPrompt, false);
+    }
+
+    /** 结束检查不进入执行会话，不带工具，超时仅取消当前Call。 */
+    @Override public StopReviewResponse reviewStop(String input,String systemPrompt) throws LlmException {
+        if(closed)throw new LlmException(LlmException.Type.OTHER,"客户端已关闭",false);
+        if("sfm-agent".equalsIgnoreCase(provider))throw new LlmException(LlmException.Type.BAD_REQUEST,"SFM远程Agent不支持隔离结束检查，不能向远端执行会话注入核验请求",false);
+        List<Message> request=new ArrayList<Message>();request.add(Message.system(systemPrompt));request.add(Message.user(input));
+        Request base=buildRequest(request,null,true);okio.Buffer buffer=new okio.Buffer();
+        try {base.body().writeTo(buffer);}catch(IOException e){throw new LlmException(LlmException.Type.OTHER,"无法构建结束核验请求",false);}
+        JsonObject body=JsonParser.parseString(buffer.readUtf8()).getAsJsonObject();
+        body.addProperty("stream",false);body.addProperty("max_tokens",STOP_REVIEW_MAX_OUTPUT_TOKENS);body.remove("stream_options");
+        Request isolated=base.newBuilder().post(RequestBody.create(JSON,body.toString())).build();
+        okhttp3.Call call=http.newCall(isolated);call.timeout().timeout(stopReviewTimeoutMs,TimeUnit.MILLISECONDS);
+        Thread owner=Thread.currentThread();stopReviews.put(owner,call);
+        try(Response response=call.execute()) {
+            if(response.body()==null) {
+                if(!response.isSuccessful())throw LlmException.of(response.code(),"");
+                throw new LlmException(LlmException.Type.OTHER,"结束核验空响应",false);
+            }
+            BufferedSource source=response.body().source();source.request(STOP_REVIEW_MAX_BODY_BYTES+1);
+            if(source.buffer().size()>STOP_REVIEW_MAX_BODY_BYTES)throw new LlmException(LlmException.Type.OTHER,"结束核验响应过长",false);
+            String raw=source.readUtf8();
+            if(!response.isSuccessful())throw LlmException.of(response.code(),raw);
+            JsonObject json=JsonParser.parseString(raw).getAsJsonObject();JsonObject choice=json.getAsJsonArray("choices").get(0).getAsJsonObject();
+            String finish=choice.get("finish_reason").getAsString();JsonObject message=choice.getAsJsonObject("message");
+            JsonElement proposedTools=message.get("tool_calls");
+            boolean hasTools=proposedTools!=null&&!proposedTools.isJsonNull()
+                    &&(!proposedTools.isJsonArray()||proposedTools.getAsJsonArray().size()>0);
+            if(!"stop".equals(finish)||hasTools)throw new LlmException(LlmException.Type.OTHER,"结束核验响应未正常完整结束",false);
+            String text=message.get("content").getAsString();
+            Usage usage=json.has("usage")&&!json.get("usage").isJsonNull()?Usage.fromJson(json.getAsJsonObject("usage")):Usage.estimate(request,text);
+            return new StopReviewResponse(text,usage);
+        } catch(IOException e) {throw new LlmException(isTimeout(e)?LlmException.Type.TIMEOUT:LlmException.Type.NETWORK,"结束核验请求失败: "+e.getMessage(),false);}
+        catch(RuntimeException e){throw new LlmException(LlmException.Type.OTHER,"结束核验返回协议不合法",false);}
+        finally {stopReviews.remove(owner,call);}
+    }
+
+    private String completeChatOnce(List<Message> messages, String systemPrompt,
+                                    boolean disableThinking) throws LlmException {
         final StringBuilder out = new StringBuilder();
         final LlmException[] err = new LlmException[1];
         List<Message> all = new ArrayList<Message>();
         all.add(Message.system(systemPrompt));
         all.addAll(messages);
-        streamChat(all, null, new StreamHandler() {
+        StreamHandler handler = new StreamHandler() {
             @Override
             public void onContent(String delta) { out.append(delta); }
             @Override
@@ -458,7 +577,9 @@ public class DeepSeekClient implements LlmClient {
             }
             @Override
             public void onError(LlmException e) { err[0] = e; }
-        });
+        };
+        if (disableThinking) streamChatWithoutThinking(all, null, handler);
+        else streamChat(all, null, handler);
         if (err[0] != null) throw err[0];
         return out.toString();
     }

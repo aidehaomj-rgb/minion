@@ -81,6 +81,43 @@ public class AgentLoopTest {
         return loop;
     }
 
+    @Test public void defaultChildUsesPromptAndCannotReplaceRootTodo() {
+        AgentLoop loop=newLoop();
+        loop.session().taskState.begin("主目标生成整表",false);
+        loop.session().todos.items.add(new TodoList.TodoItem("主目标未完成",false));
+        ToolCall call=new ToolCall(); call.id="todo-child"; call.name="TodoWrite";
+        call.arguments="{\"items\":[{\"text\":\"子范围\",\"done\":true}]}";
+        llm.addTurnWithTools(Collections.singletonList(call),null); llm.addTurn("子范围结果");
+        JsonObject args=new JsonObject(); args.addProperty("description","只查指定行");
+        args.addProperty("prompt","只返回id与证据，不改变主任务");
+        String result=loop.runSubAgent(args);
+        assertTrue(result.contains("子Agent ID"));
+        assertTrue(llm.requests.get(0).messages.get(1).content.contains("只返回id与证据"));
+        assertEquals("主目标未完成",loop.session().todos.items.get(0).text);
+        assertEquals(1,loop.session().taskState.children.size());
+        assertTrue(loop.session().taskState.children.get(0).assignment.contains("只返回id与证据"));
+        loop.shutdown();
+    }
+
+    @Test public void repeatedCompactCannotReplaceActiveGoalWithOldSummaryOrSteer() {
+        AgentLoop loop=newLoopWithContext(100000,0.8,1);
+        llm.addTurn("阶段记录"); loop.runUserTurn("原目标核查全部记录并生成Excel");
+        loop.offerSupplement("只新增列宽要求，不重新分析");
+        llm.addTurn("当前断点：待生成Excel"); loop.runUserTurn("继续执行");
+        String id=loop.session().taskState.id;
+        llm.compressResult="错误的摘要：去执行旧任务A";
+        loop.compactNow();
+        llm.addTurn("最终完成 [[MINION_TASK_COMPLETE]]"); loop.runUserTurn("继续执行");
+        loop.compactNow();
+        assertEquals(id,loop.session().taskState.id);
+        assertEquals("原目标核查全部记录并生成Excel",loop.session().taskState.objective);
+        assertTrue(loop.session().taskState.guidance.contains("只新增列宽要求，不重新分析"));
+        String system=llm.requests.get(llm.requests.size()-1).messages.get(0).content;
+        assertTrue(system.contains("原目标核查全部记录并生成Excel"));
+        assertTrue(system.contains("只新增列宽要求，不重新分析"));
+        loop.shutdown();
+    }
+
     @Test
     public void singleTurn_noTools() {
         llm.addTurn("好的");
@@ -1021,7 +1058,7 @@ public class AgentLoopTest {
         assertNull(user.images);
         // 降级成功不显示错误，仅提示一次
         assertEquals(0, ui.errors.size());
-        assertEquals(1, ui.warnings.size());
+        assertEquals(1, ui.warnings.stream().filter(s -> !s.contains("正在核验")).count());
         assertTrue(ui.warnings.get(0).contains("图片"));
         // 正常完成：assistant 回复入历史
         assertEquals("好的，已按文字处理", loop.messages().get(1).content);
@@ -1335,7 +1372,7 @@ public class AgentLoopTest {
         assertEquals(2, loop.messages().size()); // user + assistant
         assertEquals("最终回复", loop.messages().get(1).content);
         assertEquals(2, llm.requests.size()); // 原始请求 + 1 次重试
-        assertTrue(ui.warnings.isEmpty());     // 成功后静默恢复，不发"已恢复"；重试提示在指示器不进消息区
+        assertTrue(ui.warnings.stream().allMatch(s -> s.contains("正在核验"))); // 网络重试静默，仅允许结束核验提示
         // 进度序列：进入重试（第1次）→ 成功退出（0）
         assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
         assertTrue(ui.errors.isEmpty());
@@ -1404,7 +1441,7 @@ public class AgentLoopTest {
         loop.retryPolicy = new RetryPolicy(10, 0, 10, 60000); // 测试短固定间隔
         loop.runUserTurn("任务");
         assertEquals(2, llm.requests.size()); // 原始请求 + 1 次重试
-        assertTrue(ui.warnings.isEmpty());
+        assertTrue(ui.warnings.stream().allMatch(s -> s.contains("正在核验")));
         assertTrue(ui.errors.isEmpty());
         assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
     }
@@ -1471,7 +1508,7 @@ public class AgentLoopTest {
         loop.runUserTurn("任务");
         assertEquals(2, llm.requests.size());
         assertTrue(ui.errors.isEmpty());
-        assertTrue(ui.warnings.isEmpty());
+        assertTrue(ui.warnings.stream().allMatch(s -> s.contains("正在核验")));
         assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
         assertEquals("网络超时", ui.retryProgress.get(0).label);
     }
@@ -1677,7 +1714,8 @@ public class AgentLoopTest {
         assertEquals(3, llm.requests.size());
         Message hint = llm.requests.get(2).messages.get(llm.requests.get(2).messages.size() - 1);
         assertEquals(Message.Role.USER, hint.role);
-        assertTrue(hint.content.contains("原始任务尚未交付完成"));
+        assertTrue(hint.content.contains("当前目标尚未交付"));
+        assertEquals(2,llm.stopReviewRequests.size());
         assertTrue(ui.warnings.toString().contains("阶段性回复"));
         assertEquals("分析已完成，结果文件已生成并核验。",
                 loop.messages().get(loop.messages().size() - 1).content);
@@ -1812,8 +1850,8 @@ public class AgentLoopTest {
         llm.addTurn("压缩后恢复输出");
         AgentLoop loop = newLoopWithContext(100000, 0.8, 50);
         for (int i = 0; i < 20; i++) {
-            loop.messages().add(Message.user("历史数据" + i));
-            loop.messages().add(Message.assistant("历史结果" + i));
+            loop.messages().add(Message.user("历史数据" + i + repeat("证据",100)));
+            loop.messages().add(Message.assistant("历史结果" + i + repeat("分析",100)));
         }
         loop.runUserTurn("继续执行");
 
@@ -1821,6 +1859,26 @@ public class AgentLoopTest {
         assertTrue(ui.warnings.toString().contains("强制压缩上下文"));
         assertTrue(ui.warnings.toString().contains("空响应恢复压缩完成"));
         assertEquals("压缩后恢复输出", loop.messages().get(loop.messages().size() - 1).content);
+    }
+
+    @Test
+    public void repeatedThinkingOnlyAtModerateContext_compactsAndContinues() {
+        llm.addTurnWithTools(null, null, "只在思考下一步");
+        llm.addTurnWithTools(null, null, "仍只在思考下一步");
+        llm.addTurn("压缩后继续完成分析");
+        AgentLoop loop = newLoopWithContext(131072, 0.8, 50);
+        for (int i = 0; i < 20; i++) {
+            loop.messages().add(Message.user("历史任务" + i + repeat("数据", 1000)));
+            loop.messages().add(Message.assistant("历史结果" + i + repeat("分析", 1000)));
+        }
+        assertTrue(loop.contextManager().estimate(loop.messages()) > 50000);
+        loop.runUserTurn("继续原任务");
+
+        assertEquals("两次纯思考后应压缩并继续，不等满 12 次", 3, llm.requests.size());
+        assertFalse("强制压缩应请求摘要", llm.completeChatRequests.isEmpty());
+        assertTrue(ui.warnings.toString().contains("强制压缩上下文"));
+        assertTrue(ui.warnings.toString().contains("空响应恢复压缩完成"));
+        assertEquals("压缩后继续完成分析", loop.messages().get(loop.messages().size() - 1).content);
     }
 
     @Test
@@ -1837,8 +1895,9 @@ public class AgentLoopTest {
 
         assertEquals(3, llm.requests.size());
         Message hint = llm.requests.get(2).messages.get(llm.requests.get(2).messages.size() - 1);
-        assertTrue(hint.content.contains("完成握手"));
-        assertTrue(hint.content.contains("从断点继续"));
+        assertTrue(hint.content.contains("统一结束检查"));
+        assertTrue(hint.content.contains("已完成步骤不能重跑"));
+        assertEquals(2,llm.stopReviewRequests.size());
         assertTrue(ui.warnings.toString().contains("最终交付尚未确认"));
     }
 
@@ -1913,6 +1972,8 @@ public class AgentLoopTest {
     @Test
     public void continuationTurn_usesPreviousToolContextForProgressDetection() {
         AgentLoop loop = newLoop();
+        loop.session().taskState.begin("生成最终筛查Excel",false);
+        loop.session().taskState.recordEvidence("root","example",true,"扫描完成",null);
         ToolCall prior = new ToolCall();
         prior.id = "prior-tool";
         prior.name = "example";
@@ -1921,13 +1982,17 @@ public class AgentLoopTest {
         priorAssistant.toolCalls = Collections.singletonList(prior);
         loop.messages().add(priorAssistant);
         loop.messages().add(Message.toolResult("prior-tool", "example", "扫描完成"));
+        llm.stopStatuses.add("continue");llm.stopStatuses.add("completed");llm.stopKind="task";
         llm.addTurn("继续。扫描和复核已完成，现在生成最终筛查结果 Excel。");
+        ToolCall deliver=new ToolCall();deliver.id="deliver";deliver.name="example";deliver.arguments="{\"text\":\"最终交付已核验\"}";
+        llm.addTurnWithTools(Collections.singletonList(deliver),null);
         llm.addTurn("Excel 已生成并验证。");
         loop.runUserTurn("继续完成之前的任务");
 
-        assertEquals("跨回合阶段性回复必须继续", 2, llm.requests.size());
+        assertEquals("跨回合阶段性回复必须继续并落实动作", 3, llm.requests.size());
         assertTrue(ui.warnings.toString().contains("阶段性回复"));
-        assertEquals("Excel 已生成并验证。", loop.messages().get(loop.messages().size() - 1).content);
+        assertTrue(loop.messages().get(loop.messages().size() - 1).content.startsWith("Excel 已生成并验证。"));
+        assertTrue(llm.stopReviewRequests.get(0).contains("扫描完成"));
     }
 
     private static String repeat(String value, int count) {

@@ -235,7 +235,10 @@ public class MainWindow {
         modelButton.setTooltip(new Tooltip("仅切换当前会话的模型；运行中从下次请求生效"));
         refreshModelMenu();
         inputView.setModelSelector(modelButton);
-        tabsBar = new HBox(8, tabs, reportButton);
+        Button taskButton=new Button("任务");
+        taskButton.setTooltip(new Tooltip("主任务断点、子Agent、队列、上下文预算和旁支提问"));
+        taskButton.setOnAction(e -> { SessionHandle h=manager.currentSession(); if(h!=null) new TaskDashboard(stage,manager,h).show(); });
+        tabsBar = new HBox(8, tabs, taskButton, reportButton);
         HBox.setHgrow(tabs, Priority.ALWAYS);
         tabsBar.getStyleClass().add("tabs-bar");
         tabs.getTabs().addListener((ListChangeListener<Tab>) c -> {
@@ -272,6 +275,9 @@ public class MainWindow {
 
         // 注册 manager 监听（Tab 维护；内容与 Task 5 一致，含 clearChatPane）
         manager.addListener(new SessionManager.Listener() {
+            @Override public void onSessionQueueChanged(SessionHandle h) {
+                inputView.onQueueChanged(h);
+            }
             @Override public void onSessionTitleChanged(SessionHandle h) {
                 Platform.runLater(() -> {
                     updateTab(h);

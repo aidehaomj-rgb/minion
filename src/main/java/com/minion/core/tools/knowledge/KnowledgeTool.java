@@ -1,6 +1,7 @@
 package com.minion.core.tools.knowledge;
 
 import com.google.gson.JsonObject;
+import com.minion.core.config.Config;
 import com.minion.core.tools.PathsGuard;
 import com.minion.core.tools.SchemaGenerator;
 import com.minion.core.tools.TextFiles;
@@ -13,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -24,25 +26,47 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Stream;
 
-/** 项目级轻量知识库：Markdown 落盘 + 中英文关键词/中文二元组检索，无云端与向量模型依赖。 */
+/** 项目知识库 + 可选的跨项目只读 Markdown 知识库。 */
 public class KnowledgeTool implements Tool {
     private static final int MAX_NOTE_CHARS = 200_000;
     private final Workspace workspace;
-    public KnowledgeTool(Workspace workspace) { this.workspace=workspace; }
+    private final Config config;
+    public KnowledgeTool(Workspace workspace) { this(workspace, null); }
+    public KnowledgeTool(Workspace workspace, Config config) { this.workspace=workspace; this.config=config; }
     @Override public String name(){return "Knowledge";}
-    @Override public String description(){return "项目本地知识库（.minion/knowledge）：add、import/sync 批量导入文件夹，search 带来源引用检索，list/read/delete；数据不离开内网";}
+    @Override public String description(){return "查询知识库时使用 search，无需逐项目导入。connect 用 path 连接用户指定的外部 Markdown 文件夹供所有项目共用（需确认），disconnect 取消连接；search/list 同时查询项目和共享目录；read 用 shared/相对路径读取共享条目；增删只修改项目知识库";}
     @Override public JsonObject schema(){return SchemaGenerator.objectSchema("本地知识库工具",
             new String[]{"action","title","content","source","query","name","limit","path","recursive"},new String[]{"action"});}
-    @Override public boolean isHighRisk(JsonObject args){return "delete".equalsIgnoreCase(text(args,"action"));}
+    @Override public boolean isHighRisk(JsonObject args){String action=text(args,"action");return "delete".equalsIgnoreCase(action)||"connect".equalsIgnoreCase(action);}
     @Override public ToolResult execute(JsonObject args)throws Exception{
-        String action=text(args,"action").toLowerCase(Locale.ROOT); Path root=root(); Files.createDirectories(root);
+        String action=text(args,"action").toLowerCase(Locale.ROOT); Path root=root();
+        if(!java.util.Arrays.asList("read","search","list").contains(action)) Files.createDirectories(root);
+        if("connect".equals(action))return connect(text(args,"path"));
+        if("disconnect".equals(action))return disconnect();
         if("add".equals(action))return add(root,args);
         if("import".equals(action)||"sync".equals(action))return importPath(root,args);
         if("list".equals(action))return list(root);
         if("search".equals(action))return search(root,text(args,"query"),integer(args,"limit",10));
         if("read".equals(action))return read(root,text(args,"name"));
         if("delete".equals(action))return delete(root,text(args,"name"));
-        return ToolResult.error("未知 action: "+action+"（支持 add/import/sync/search/list/read/delete）");
+        return ToolResult.error("未知 action: "+action+"（支持 connect/disconnect/add/import/sync/search/list/read/delete）");
+    }
+    private ToolResult connect(String raw){
+        if(config==null)return ToolResult.error("当前会话没有共享知识库配置能力");
+        if(raw==null||raw.trim().isEmpty())return ToolResult.error("connect 需要 path（已存在的绝对目录）");
+        try{
+            Path target=Paths.get(raw.trim());
+            if(!target.isAbsolute())return ToolResult.error("共享知识库必须使用绝对路径: "+raw);
+            target=target.toRealPath();
+            if(!Files.isDirectory(target))return ToolResult.error("共享知识库不是目录: "+target);
+            config.set("knowledge.shared.dir",target.toString());
+            return ToolResult.success("已连接跨项目共享知识库（只读）: "+target+"；所有项目下次查询即生效");
+        }catch(Exception e){return ToolResult.error("无法连接共享知识库: "+raw+"（"+e.getMessage()+"）");}
+    }
+    private ToolResult disconnect(){
+        if(config==null)return ToolResult.error("当前会话没有共享知识库配置能力");
+        config.set("knowledge.shared.dir","");
+        return ToolResult.success("已取消共享知识库连接；各项目原有知识库不受影响");
     }
     private ToolResult add(Path root,JsonObject args)throws Exception{
         String title=text(args,"title").trim(),content=text(args,"content"),source=text(args,"source").trim();
@@ -56,12 +80,27 @@ public class KnowledgeTool implements Tool {
         return ToolResult.success("已加入知识库: "+root.relativize(file));
     }
     private ToolResult list(Path root)throws Exception{
-        List<Path> files=files(root); if(files.isEmpty())return ToolResult.success("知识库为空");
-        StringBuilder out=new StringBuilder("知识条目（").append(files.size()).append("）：");
-        for(Path p:files)out.append('\n').append("- ").append(p.getFileName()).append(" (").append(Files.size(p)).append(" bytes)");
+        List<Path> local=files(root), shared=sharedFiles();
+        if(local.isEmpty()&&shared.isEmpty())return ToolResult.success("知识库为空"+sharedNotice());
+        StringBuilder out=new StringBuilder("知识条目（项目 ").append(local.size()).append("，共享 ").append(shared.size()).append("）：");
+        int shown=0;
+        for(Path p:local){if(shown++>=200)break;out.append('\n').append("- ").append(p.getFileName()).append(" (").append(Files.size(p)).append(" bytes)");}
+        Path sharedRoot=sharedRoot();
+        for(Path p:shared){if(shown++>=200)break;out.append('\n').append("- shared/").append(sharedRoot.relativize(p).toString().replace('\\','/'))
+                .append(" (").append(Files.size(p)).append(" bytes)");}
+        if(local.size()+shared.size()>200)out.append("\n仅显示前 200 条，请用 search 缩小范围。");
+        out.append(sharedNotice());
         return ToolResult.success(out.toString());
     }
     private ToolResult read(Path root,String name)throws Exception{
+        if(name!=null&&name.startsWith("shared/")){
+            Path shared=sharedRoot();
+            if(shared==null||!Files.isDirectory(shared))return ToolResult.error("共享知识库目录不可用: "+(shared==null?"未配置":shared));
+            Path p=shared.resolve(name.substring("shared/".length())).normalize();
+            if(!p.startsWith(shared)||!PathsGuard.inside(shared.toString(),p)||!Files.isRegularFile(p)||!p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".md"))
+                return ToolResult.error("共享知识条目不存在或路径越界: "+name);
+            return ToolResult.success(TextFiles.decode(Files.readAllBytes(p)).text);
+        }
         Path p=safeResolve(root,name); if(p==null||!Files.isRegularFile(p))return ToolResult.error("知识条目不存在: "+name);
         return ToolResult.success(TextFiles.decode(Files.readAllBytes(p)).text);
     }
@@ -72,16 +111,20 @@ public class KnowledgeTool implements Tool {
     private ToolResult search(Path root,String query,int limit)throws Exception{
         if(query==null||query.trim().isEmpty())return ToolResult.error("search 需要 query");
         limit=Math.max(1,Math.min(limit,30)); Set<String> terms=terms(query); List<Hit> hits=new ArrayList<Hit>();
-        for(Path p:files(root)){
+        List<Path> all=files(root); all.addAll(sharedFiles()); Path sharedRoot=sharedRoot();
+        for(Path p:all){
             String content=TextFiles.decode(Files.readAllBytes(p)).text, lower=content.toLowerCase(Locale.ROOT); int score=0,first=-1;
             for(String term:terms){int at=lower.indexOf(term);if(at>=0){score+=term.length()>=2?3:1;if(first<0||at<first)first=at;}}
             if(lower.contains(query.toLowerCase(Locale.ROOT))){score+=20;first=lower.indexOf(query.toLowerCase(Locale.ROOT));}
             if(score>0)hits.add(new Hit(p,score,snippet(content,first),sourceOf(content)));
         }
         Collections.sort(hits,new Comparator<Hit>(){@Override public int compare(Hit a,Hit b){return Integer.compare(b.score,a.score);}});
-        if(hits.isEmpty())return ToolResult.success("未找到相关知识");
+        if(hits.isEmpty())return ToolResult.success("未找到相关知识"+sharedNotice());
         StringBuilder out=new StringBuilder();
-        for(int i=0;i<Math.min(limit,hits.size());i++){Hit h=hits.get(i);if(out.length()>0)out.append("\n\n");out.append("[").append(h.path.getFileName()).append("] score=").append(h.score);if(!h.source.isEmpty())out.append(" | 来源: ").append(h.source);out.append('\n').append(h.snippet);}
+        for(int i=0;i<Math.min(limit,hits.size());i++){Hit h=hits.get(i);if(out.length()>0)out.append("\n\n");
+            String name=sharedRoot!=null&&h.path.startsWith(sharedRoot)?"shared/"+sharedRoot.relativize(h.path).toString().replace('\\','/'):h.path.getFileName().toString();
+            out.append("[").append(name).append("] score=").append(h.score);if(!h.source.isEmpty())out.append(" | 来源: ").append(h.source);out.append('\n').append(h.snippet);}
+        out.append(sharedNotice());
         return ToolResult.success(out.toString());
     }
     private ToolResult importPath(Path root,JsonObject args)throws Exception{
@@ -108,7 +151,27 @@ public class KnowledgeTool implements Tool {
         return ToolResult.success("知识库导入完成：新增="+added+" 更新="+updated+" 跳过="+skipped+" 失败="+failed+errors);
     }
     private Path root(){return java.nio.file.Paths.get(workspace.workDir()).toAbsolutePath().normalize().resolve(".minion").resolve("knowledge");}
-    private static List<Path> files(Path root)throws Exception{List<Path> out=new ArrayList<Path>();try(DirectoryStream<Path>d=Files.newDirectoryStream(root,"*.md")){for(Path p:d)if(Files.isRegularFile(p))out.add(p);}Collections.sort(out);return out;}
+    private Path sharedRoot(){
+        String raw=config==null?"":config.sharedKnowledgeDir().trim();
+        if(raw.isEmpty())return null;
+        try { return Paths.get(raw).toAbsolutePath().normalize(); }
+        catch(Exception e){return null;}
+    }
+    private String sharedNotice(){
+        if(config==null||config.sharedKnowledgeDir().trim().isEmpty())return "";
+        Path shared=sharedRoot();
+        return shared!=null&&Files.isDirectory(shared)?"":"\n共享知识库目录不可用: "+config.sharedKnowledgeDir();
+    }
+    private List<Path> sharedFiles()throws Exception{
+        Path shared=sharedRoot(); List<Path> out=new ArrayList<Path>();
+        if(shared==null||!Files.isDirectory(shared))return out;
+        try(Stream<Path> stream=Files.walk(shared)){
+            stream.filter(p->Files.isRegularFile(p)&&p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".md")
+                    &&PathsGuard.inside(shared.toString(),p)).limit(10000).forEach(out::add);
+        }
+        Collections.sort(out);return out;
+    }
+    private static List<Path> files(Path root)throws Exception{List<Path> out=new ArrayList<Path>();if(!Files.isDirectory(root))return out;try(DirectoryStream<Path>d=Files.newDirectoryStream(root,"*.md")){for(Path p:d)if(Files.isRegularFile(p))out.add(p);}Collections.sort(out);return out;}
     private static Path safeResolve(Path root,String name){if(name==null||name.trim().isEmpty())return null;Path p=root.resolve(name).normalize();return p.startsWith(root)&&p.getParent().equals(root)?p:null;}
     private static String safeName(String s){String n=s.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]","_").trim();if(n.length()>60)n=n.substring(0,60);return n.isEmpty()?"knowledge":n;}
     private static Set<String> terms(String q){String s=q.toLowerCase(Locale.ROOT).trim();Set<String> out=new LinkedHashSet<String>();for(String x:s.split("[^\\p{L}\\p{N}_]+"))if(!x.isEmpty())out.add(x);for(int i=0;i+1<s.length();i++){char a=s.charAt(i),b=s.charAt(i+1);if(isCjk(a)&&isCjk(b))out.add(s.substring(i,i+2));}return out;}

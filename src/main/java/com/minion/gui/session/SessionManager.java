@@ -2,6 +2,8 @@ package com.minion.gui.session;
 
 import com.google.gson.Gson;
 import com.minion.core.agent.AgentLoop;
+import com.minion.core.agent.AgentRuntime;
+import com.minion.core.agent.TaskState;
 import com.minion.core.agent.RetryProgress;
 import com.minion.core.agent.Session;
 import com.minion.core.agent.SystemPromptBuilder;
@@ -107,6 +109,7 @@ public class SessionManager {
         default void onArtifactCreated(SessionHandle h, String path) { }
         /** 会话被删除（deleteSession / deleteWorkspace 均通知，含非当前空间）：UI 清理页签与缓存 */
         default void onSessionDeleted(SessionHandle h) { }
+        default void onSessionQueueChanged(SessionHandle h) { }
     }
 
     /** 删除工作空间时等待会话退出的总超时（秒）：AgentLoop 中断后走退出落盘路径，正常远快于此 */
@@ -260,14 +263,21 @@ public class SessionManager {
             try {
                 Session s = ctx.store.load(meta.id);
                 ModelConfig mc = modelForSession(s);
+                boolean missingModel = s.modelDisplayName != null && models.get(s.modelDisplayName) == null;
+                String previousModel = s.modelDisplayName;
+                s.modelDisplayName = mc.displayName;
+                s.modelName = mc.modelName;
                 LlmClient llm = newLlm(mc);
                 ContextManager cm = new ContextManager(mc.maxContextTokens, mc.compressThreshold,
                         mc.keepRecentMessages, llm,
                         TokenCounter.estimate(new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
                                 tmpDirOf(meta.id).toString(), config.emptyOutputPlaceholder(), projSkills)
                                 .build(sk.skills)));
+                configureSafeContext(cm, mc, s);
                 SessionController controller = new SessionController();
                 controller.replayHistory(s.messages); // 历史消息灌入事件流：点击会话即可重放显示
+                if (missingModel) controller.onWarning("原会话模型「" + previousModel
+                        + "」已不存在，已回退到「" + mc.displayName + "」，可在输入框重新选择。");
                 AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s),
                         new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
                                 tmpDirOf(meta.id).toString(), config.emptyOutputPlaceholder(), projSkills),
@@ -275,6 +285,7 @@ public class SessionManager {
                 loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
                 loop.setAllSkills(sk.skills); // 会话级快照：本会话独享、不可变
                 loop.setSessionStore(ctx.store); // 落盘接线：恢复后随每轮/退出兜底落盘
+                configureAgentRuntime(loop,ctx,s);
                 loop.restoreSession(s); // 原地装载 + 半轮残留清洗 + cwd 恢复
                 SessionHandle h = new SessionHandle(s.id, ctx.name, s, loop, controller,
                         s.title, false, llm);
@@ -353,9 +364,11 @@ public class SessionManager {
      * （tmpDirOf(sessionId)），工具对象随会话创建、随会话删除。
      */
     private ToolRegistry newRegistry(WorkspaceCtx ctx, Session session) {
+        return newRegistry(ctx,session,ctx.workspace);
+    }
+    private ToolRegistry newRegistry(WorkspaceCtx ctx, Session session, Workspace workspace) {
         ToolRegistry registry = new ToolRegistry();
         String skillsDir = ctx.skillsDir;
-        Workspace workspace = ctx.workspace;
         ConfirmGate gate = ctx.confirmGate;
         String sessionId = session.id;
         String tmpDir = tmpDirOf(sessionId).toString();
@@ -380,9 +393,10 @@ public class SessionManager {
         registry.register(new DatabaseTool(workspace, python, checkpoints, secretStore));
         registry.register(new DocumentTool(workspace, python, checkpoints));
         registry.register(new TextProcessTool(workspace, checkpoints));
-        registry.register(new KnowledgeTool(workspace));
+        registry.register(new KnowledgeTool(workspace, config));
         registry.register(new MemoryTool(workspace, checkpoints));
-        registry.register(new ContextTool(session, modelForSession(session).maxContextTokens, config));
+        ModelConfig contextModel = modelForSession(session);
+        registry.register(new ContextTool(session, safeContextLimit(contextModel, session), config));
         registry.register(new PermissionTool(config));
         registry.register(new SecretsTool(secretStore));
         registry.register(new SkillAdminTool(skillsDir, workspace));
@@ -462,7 +476,7 @@ public class SessionManager {
     public SessionHandle createSession(String title) {
         WorkspaceCtx ctx = ctxByName.get(currentWorkspaceName);
         if (ctx == null) return null; // 终审修复：deleteWorkspace 有运行中会话时 ctx 先移除、currentWorkspaceName 后台回退（≤5s 窗口），防 FX 线程 NPE
-        ModelConfig mc = models.current();
+        ModelConfig mc = models.defaultModel();
         Session s = Session.create(ctx.workspace.workDir(), mc.modelName);
         s.modelDisplayName = mc.displayName;
         s.title = title;
@@ -476,6 +490,7 @@ public class SessionManager {
                 TokenCounter.estimate(new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
                         tmpDirOf(s.id).toString(), config.emptyOutputPlaceholder(), projSkills)
                         .build(sk.skills)));
+        configureSafeContext(cm, mc, s);
         SessionController controller = new SessionController();
         AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s),
                 new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
@@ -484,6 +499,7 @@ public class SessionManager {
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
         loop.setAllSkills(sk.skills);   // 会话级快照：本会话独享、不可变
         loop.setSessionStore(ctx.store); // 落盘接线：每轮/退出兜底落盘生效
+        configureAgentRuntime(loop,ctx,s);
         SessionHandle h = new SessionHandle(s.id, currentWorkspaceName, s, loop, controller,
                 title, title == null, llm);
         controller.setAskStateListener(new java.util.function.Consumer<String>() {
@@ -563,14 +579,143 @@ public class SessionManager {
                 mc.thinking, mc.reasoningEffort, mc.provider, mc.maxOutputTokens, mc.sessionId);
     }
 
+    private void configureAgentRuntime(AgentLoop loop,WorkspaceCtx ctx,Session parent) {
+        loop.setAgentRuntimeFactory((name,id) -> {
+            ModelConfig mc=name==null||name.trim().isEmpty()?modelForSession(parent):models.get(name);
+            if(mc==null) throw new IllegalArgumentException("子Agent指定模型不存在: "+name);
+            Workspace isolated=new Workspace(ctx.workspace.workDir());
+            List<String> roots=new ArrayList<String>(ctx.workspace.extraAllowedDirs());
+            roots.add(tmpDirOf(parent.id).toString());
+            roots.add(tmpDirOf(parent.id+"-agent-"+id).toString());
+            roots.add(ctx.skillsDir);
+            isolated.setExtraAllowedDirs(roots);
+            isolated.restore(loop.workspace().cwd().toString());
+            Session child=Session.create(isolated.workDir(),mc.modelName);
+            child.id=parent.id+"-agent-"+id; child.modelDisplayName=mc.displayName;
+            LlmClient client=newLlm(mc);
+            try {
+                int safe=safeContextLimit(mc,child);
+                TaskState.Child prior=parent.taskState.child(id);
+                if(prior!=null&&mc.displayName.equals(prior.model)&&prior.maxContextTokens>=8192) safe=Math.min(safe,prior.maxContextTokens);
+                ToolRegistry tools=newRegistry(ctx,child,isolated);
+                tools.register(new com.minion.core.tools.TodoWriteTool(child.todos));
+                return new AgentRuntime(client,mc.displayName,safe,mc.compressThreshold,mc.maxOutputTokens,tools,isolated,true);
+            } catch(RuntimeException e) { client.close(); throw e; }
+        });
+    }
+
+    public void configureAgentDefaults(SessionHandle h,String model,String mode,String tools) {
+        if(h==null||h.deleted) throw new IllegalArgumentException("会话不存在");
+        if(model!=null&&!model.isEmpty()&&models.get(model)==null) throw new IllegalArgumentException("模型不存在");
+        if(!"worker".equals(mode)&&!"explore".equals(mode)) throw new IllegalArgumentException("模式只支持worker/explore");
+        h.session.subAgentModelName=model; h.session.subAgentMode=mode; h.session.subAgentTools=tools==null?"":tools.trim();
+        if(!h.running) persist(h);
+    }
+
+    public void configureContext(SessionHandle h,String profile,int safeWindow) {
+        if(h==null||h.deleted) throw new IllegalArgumentException("会话不存在");
+        int configured=modelForSession(h).maxContextTokens;
+        if(safeWindow!=0&&(safeWindow<8192||safeWindow>configured)) throw new IllegalArgumentException("安全窗口需为8192到模型配置上限之间；0表示自动");
+        if(!"compact".equals(profile)&&!"balanced".equals(profile)) throw new IllegalArgumentException("profile支持balanced/compact");
+        h.session.contextProfile=profile; h.session.preferredContextLimit=safeWindow;
+        ContextManager cm=h.loop.contextManager();
+        if(cm!=null) { cm.setRequestProfile(profile); configureSafeContext(cm,modelForSession(h),h.session); }
+        if(!h.running) persist(h);
+    }
+    public void resetObservedContext(SessionHandle h) {
+        if(h==null||h.deleted||h.running) throw new IllegalArgumentException("请等待会话空闲后重置；请先确认服务端窗口已调整");
+        h.session.observedContextLimit=0;
+        configureSafeContext(h.loop.contextManager(),modelForSession(h),h.session); persist(h);
+    }
+
+    /** Restore a single child without re-issuing the user's root task or draining queued work. */
+    public String controlSubAgent(SessionHandle h,String id,String action) {
+        if(h==null||h.deleted) return "会话不存在";
+        if("stop".equals(action)) return h.loop.stopSubAgent(id)?"已请求停止子Agent，保留断点":"子Agent不在运行";
+        if(!"resume".equals(action)&&!"retry".equals(action)) return "支持stop/resume/retry";
+        if(h.running) return "恢复/重试前请先停止主任务并等待结束，避免重复执行";
+        TaskState.Child child=h.session.taskState.child(id);
+        if(child==null||!java.util.Objects.equals(child.taskId,h.session.taskState.id)) return "未找到当前任务的子Agent";
+        final long generation=h.beginDispatch(); notifyRunningChanged(h,true);
+        h.pool.submit(() -> {
+            try { h.controller.onSystem(h.loop.resumeSubAgent(id,"retry".equals(action))); }
+            finally { if(h.finishDispatch(generation)) notifyRunningChanged(h,false); }
+        });
+        return "已安排单个子Agent"+("retry".equals(action)?"重试（新一轮，旧记录归档）":"从记录恢复（先核对文件，仅补缺项）");
+    }
+
+    public boolean cancelQueued(SessionHandle h,int index) {
+        if(h==null||!h.removeQueued(index)) return false;
+        persistQueue(h); return true;
+    }
+    public void cancelQueuedTask(SessionHandle h,SessionHandle.QueuedMessage expected) {
+        synchronized(h) {
+            List<SessionHandle.QueuedMessage> items=h.queuedSnapshot();
+            for(int i=0;i<items.size();i++) if(items.get(i).createdAt==expected.createdAt&&items.get(i).text.equals(expected.text)) { cancelQueued(h,i+1); return; }
+        }
+        throw new IllegalArgumentException("队列已变化，任务可能已开始；未取消其他任务");
+    }
+    public void background(Runnable work) { branches.submit(work); }
+    public void saveSettings(SessionHandle h) { if(!h.running) persist(h); }
+
+    public static final class SideQuestion {
+        public String question,answer,model,record;
+        public long time;
+    }
+    private final java.util.concurrent.ExecutorService branches=java.util.concurrent.Executors.newFixedThreadPool(2,r -> {
+        Thread t=new Thread(r,"minion-side-question"); t.setDaemon(true); return t;
+    });
+
+    public void askSideQuestion(SessionHandle h,String question,String model,java.util.function.Consumer<SideQuestion> done) {
+        if(h==null||h.deleted||question==null||question.trim().isEmpty()) throw new IllegalArgumentException("请输入旁支问题");
+        if(question.length()>12000) throw new IllegalArgumentException("旁支问题限12000字符");
+        String state=h.session.taskState.render(null);
+        final String background=state.length()>6000?state.substring(0,6000):state;
+        branches.submit(() -> {
+            SideQuestion q=new SideQuestion(); q.question=question; q.model=model==null?modelForSession(h).displayName:model; q.time=System.currentTimeMillis();
+            try {
+                q.answer=h.loop.askSideQuestion(question,model,background);
+                Path file=Paths.get(h.session.workDir,".minion","side-questions",h.id,q.time+"-"+java.util.UUID.randomUUID()+".json");
+                Files.createDirectories(file.getParent()); q.record=file.toAbsolutePath().toString();
+                Files.write(file,new Gson().toJson(q).getBytes(StandardCharsets.UTF_8));
+            } catch(Exception e) { q.answer="旁支提问失败: "+e.getMessage(); }
+            done.accept(q);
+        });
+    }
+
+    public List<SideQuestion> sideQuestionHistory(SessionHandle h) {
+        List<SideQuestion> result=new ArrayList<SideQuestion>();
+        Path dir=Paths.get(h.session.workDir,".minion","side-questions",h.id);
+        if(!Files.isDirectory(dir)) return result;
+        try(Stream<Path> paths=Files.list(dir)) {
+            paths.filter(p -> p.getFileName().toString().endsWith(".json")).sorted(Comparator.reverseOrder()).limit(50).forEach(p -> {
+                try { if(Files.size(p)<2*1024*1024) result.add(new Gson().fromJson(new String(Files.readAllBytes(p),StandardCharsets.UTF_8),SideQuestion.class)); } catch(Exception ignored) { }
+            });
+        } catch(IOException ignored) { }
+        return result;
+    }
+
     public ModelConfig modelForSession(SessionHandle h) {
-        return h == null ? models.current() : modelForSession(h.session);
+        return h == null ? models.defaultModel() : modelForSession(h.session);
     }
 
     private ModelConfig modelForSession(Session session) {
         ModelConfig chosen = session.modelDisplayName == null
                 ? null : models.get(session.modelDisplayName);
-        return chosen == null ? models.current() : chosen;
+        if (chosen != null) return chosen;
+        // 旧版会话只保存服务端modelName；只有唯一匹配才迁移，避免同名不同接口误选。
+        if (session.modelDisplayName == null || session.modelDisplayName.trim().isEmpty()) {
+            ModelConfig unique = null;
+            for (ModelConfig candidate : models.list()) {
+                if (session.modelName != null && session.modelName.equals(candidate.modelName)) {
+                    if (unique != null) return models.current();
+                    unique = candidate;
+                }
+            }
+            if (unique != null) return unique;
+            return models.current(); // 无法识别的旧会话保留旧版全局回退规则。
+        }
+        return models.defaultModel();
     }
 
     /** 只切换指定会话；不修改全局默认模型。 */
@@ -586,6 +731,11 @@ public class SessionManager {
 
     private void replaceSessionModel(SessionHandle h, ModelConfig mc) {
         LlmClient fresh = newLlm(mc);
+        // 手动安全窗口属于旧模型；切换到另一个模型时不能把旧60K窗口带过去。
+        // 修改同一模型设置时仍保留本会话的手动窗口。
+        if (!java.util.Objects.equals(h.session.modelDisplayName, mc.displayName)
+                || !java.util.Objects.equals(h.session.modelName, mc.modelName))
+            h.session.preferredContextLimit = 0;
         LlmClient old = h.llm;
         h.llm = fresh;
         h.retireLlm(old);
@@ -594,14 +744,42 @@ public class SessionManager {
         if (cm != null) {
             cm.setLlm(fresh);
             cm.update(mc.maxContextTokens, mc.compressThreshold, mc.keepRecentMessages);
+            h.session.observedContextLimit = 0;
+            configureSafeContext(cm, mc, h.session);
         }
         Tool contextTool = h.loop.registry().get("Context");
-        if (contextTool instanceof ContextTool) ((ContextTool) contextTool).setMaxTokens(mc.maxContextTokens);
+        if (contextTool instanceof ContextTool)
+            ((ContextTool) contextTool).setMaxTokens(cm == null ? mc.maxContextTokens : cm.maxTokens());
         h.session.modelName = mc.modelName;
         h.session.modelDisplayName = mc.displayName;
     }
 
-    /** 配置修改后按各会话自己的选择刷新客户端；全局激活模型作为新会话默认值。 */
+    /**
+     * 旧版针对用户内网Qwen3.8空响应现象的经验保护，不代表模型官方窗口。
+     * 对该型号自动模式先按60k运行，其他型号不套用此限制；若服务端仍更小，
+     * AgentLoop 会从超限/空响应继续学习并把结果保存在 session.observedContextLimit。
+     */
+    private static void configureSafeContext(ContextManager cm, ModelConfig mc, Session session) {
+        cm.setOutputReserveTokens(mc.maxOutputTokens);
+        cm.setInitialSafeMax(safeContextLimit(mc, session));
+    }
+
+    private static int safeContextLimit(ModelConfig mc, Session session) {
+        int safe = mc.maxContextTokens;
+        // 以实际模型名判断；用户沿用旧“千问3.8”标识配置DeepSeek时也不能误套60K。
+        String id = (mc.modelName != null && !mc.modelName.trim().isEmpty() ? mc.modelName
+                : mc.displayName == null ? "" : mc.displayName).toLowerCase(java.util.Locale.ROOT);
+        if ((session==null||session.preferredContextLimit==0)&&(id.contains("qwen3.8") || id.contains("qwen-3.8")
+                || id.contains("qwen_3.8") || id.contains("千问3.8"))) {
+            safe = Math.min(safe, 60000);
+        }
+        if(session!=null&&session.preferredContextLimit>0) safe=Math.min(safe,session.preferredContextLimit);
+        if (session != null && session.observedContextLimit > 0)
+            safe = Math.min(safe, session.observedContextLimit);
+        return safe;
+    }
+
+    /** 配置修改后按各会话自己的选择刷新客户端；修改新会话默认值不调用本方法。 */
     public void applyModelChanged() {
         for (WorkspaceCtx ctx : ctxByName.values()) {
             for (SessionHandle h : ctx.sessions) {
@@ -845,9 +1023,14 @@ public class SessionManager {
 
     /** 发送（带图）：图片随消息以 OpenAI 视觉 content 数组传给模型 */
     public void send(final SessionHandle h, final String text, final List<ImagePart> images) {
+        send(h, text, images, false);
+    }
+
+    private void send(final SessionHandle h, final String text, final List<ImagePart> images, final boolean queuedTask) {
         if (h == null) return;
         final WorkspaceCtx ctx = ctxByName.get(h.workspaceName);
         if (ctx == null) return;
+        final long dispatchGeneration = h.beginDispatch();
         h.pool.submit(new Runnable() {
             @Override public void run() {
                 try {
@@ -865,13 +1048,33 @@ public class SessionManager {
                     try {
                         String currentText = text;
                         List<ImagePart> currentImages = images;
+                        boolean forceNew = queuedTask;
                         while (!h.deleted) {
-                            h.loop.runUserTurn(currentText, currentImages);
-                            SessionHandle.QueuedMessage queued = h.pollQueued();
+                            h.loop.runUserTurn(currentText, currentImages, forceNew);
+                            synchronized(h) {
+                                synchronized(h.session.pendingSupplements) {
+                                    if(h.loop.lastTurnSucceeded() && !h.session.pendingSupplements.isEmpty()) {
+                                        currentText="继续当前任务，先处理刚收到的补充要求";
+                                        currentImages=null; forceNew=false;
+                                        continue;
+                                    }
+                                }
+                            }
+                            if (!h.loop.lastTurnSucceeded()) {
+                                if (!h.queuedSnapshot().isEmpty()) h.controller.onSystem("当前任务暂停/失败，后续队列保留，不会自动执行");
+                                break;
+                            }
+                            SessionHandle.QueuedMessage queued;
+                            synchronized(h) {
+                                queued = h.pollQueued();
+                                if(queued==null) h.running=false; // Atomic handoff with stage/promote.
+                            }
                             if (queued == null) break;
+                            persistQueue(h);
                             h.controller.onSystem("开始执行队列中的下一项任务");
                             currentText = queued.text;
-                            currentImages = null;
+                            currentImages = queued.images;
+                            forceNew = true;
                         }
                     } finally {
                         if (h.deleted) {
@@ -880,7 +1083,17 @@ public class SessionManager {
                             try { ctx.store.delete(h.id); }
                             catch (Exception e) { notifyError("删除会话文件失败: " + e.getMessage()); }
                         }
-                        h.running = false;
+                        if (h.finishDispatch(dispatchGeneration)) {
+                            if (h.askPending) { // 中断路径 onAskUserDone 不回调，此处兜底复位
+                                h.askPending = false;
+                                h.askQuestion = null;
+                                notifyAskChanged(h, false);
+                            }
+                            notifyRunningChanged(h, false);
+                        }
+                    }
+                } catch (Exception e) {
+                    if (h.finishDispatch(dispatchGeneration)) {
                         if (h.askPending) { // 中断路径 onAskUserDone 不回调，此处兜底复位
                             h.askPending = false;
                             h.askQuestion = null;
@@ -888,14 +1101,6 @@ public class SessionManager {
                         }
                         notifyRunningChanged(h, false);
                     }
-                } catch (Exception e) {
-                    h.running = false;
-                    if (h.askPending) { // 中断路径 onAskUserDone 不回调，此处兜底复位
-                        h.askPending = false;
-                        h.askQuestion = null;
-                        notifyAskChanged(h, false);
-                    }
-                    notifyRunningChanged(h, false);
                     notifyError("任务执行异常: " + e.getMessage());
                 }
             }
@@ -904,9 +1109,48 @@ public class SessionManager {
 
     public void stop(SessionHandle h) {
         if (h != null && h.running) {
+            com.minion.core.diagnostics.DiagnosticLog.info("session-stop", "source=stop_action session=" + h.id);
             h.loop.interrupt(); // 只取消当前客户端；换模型后 in-flight 请求在旧（已退役）客户端上
             h.closeRetired();   // 一并取消旧客户端的流式请求，防「终止」失效等旧流自然结束（数分钟）
         }
+    }
+
+    public void persistQueue(SessionHandle h) {
+        WorkspaceCtx ctx=ctxByName.get(h.workspaceName);
+        if(ctx!=null && !h.deleted) {
+            try { ctx.store.saveQueue(h.session); }
+            catch(Exception e) { notifyError("任务队列保存失败: " + e.getMessage()); }
+        }
+        for(Listener l:listeners) l.onSessionQueueChanged(h);
+    }
+
+    /** Default is queue; only an explicit promotion steers the running task. */
+    public void stageGuidance(SessionHandle h, String text, List<ImagePart> images) {
+        if(h==null || h.deleted) return;
+        synchronized(h) {
+            h.enqueue(text,images,true);
+            persistQueue(h);
+            if(!h.running) {
+                SessionHandle.QueuedMessage next=h.pollQueued();
+                persistQueue(h);
+                if(next!=null) send(h,next.text,next.images,true);
+            }
+        }
+    }
+
+    public void promoteGuidance(SessionHandle h) {
+        if(h==null || h.deleted) return;
+        synchronized(h) {
+            SessionHandle.QueuedMessage task=h.takeGuide();
+            if(task==null) return;
+            if(h.running) sendSupplement(h,task.text,task.images);
+            else send(h,task.text,task.images,true);
+            persistQueue(h);
+        }
+    }
+
+    public void discardGuidance(SessionHandle h) {
+        if(h!=null) { h.takeGuide(); persistQueue(h); }
     }
 
     /** 运行中补充：入 AgentLoop 挂起队列 + 发聊天标识事件（UI 事件仅在点击时发一次，注入不重发） */
@@ -949,6 +1193,12 @@ public class SessionManager {
     private String dispatchSessionCommand(SessionHandle h, String input) {
         if (input == null) return null;
         String trimmed = input.trim();
+        if("/budget".equalsIgnoreCase(trimmed)) return h.loop.contextBudget();
+        if("/agents".equalsIgnoreCase(trimmed)) return h.session.taskState.render(null);
+        if(trimmed.toLowerCase(java.util.Locale.ROOT).startsWith("/agent ")) {
+            String[] control=trimmed.split("\\s+",3);
+            return control.length<3?"用法: /agent stop|resume|retry <完整子AgentID>":controlSubAgent(h,control[2],control[1]);
+        }
         if (!(trimmed.equalsIgnoreCase("/sessions") || trimmed.toLowerCase().startsWith("/sessions ")
                 || trimmed.equalsIgnoreCase("/session") || trimmed.toLowerCase().startsWith("/session "))) return null;
         String[] parts = trimmed.split("\\s+", 3);
@@ -1019,6 +1269,7 @@ public class SessionManager {
      *  不等就退出会让 killTree 没跑完，bash 子进程变孤儿继续占 CPU（关窗残留实测根因）。
      *  工具任务中断后最多 killTree(5s)+join(5s) 结束，等 8s 足够；杀不掉的极端情况限时返回。 */
     public void shutdown() {
+        branches.shutdownNow();
         for (WorkspaceCtx ctx : ctxByName.values()) {
             for (SessionHandle h : ctx.sessions) {
                 if (h.running) h.loop.interrupt();

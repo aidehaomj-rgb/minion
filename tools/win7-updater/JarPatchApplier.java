@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.jar.Manifest;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
@@ -51,6 +52,20 @@ public final class JarPatchApplier {
         } finally {
             try { out.close(); } finally { input.close(); }
         }
+        // 小更新包若误带 jar 工具自动生成的空 MANIFEST.MF，会把主程序入口覆盖掉。
+        // 移动 .new 到正式 JAR 前验证最终清单，失败时由更新脚本保留旧文件。
+        ZipFile verified = new ZipFile(output);
+        try {
+            ZipEntry entry = verified.getEntry("META-INF/MANIFEST.MF");
+            if (entry == null) throw new IllegalStateException("Patched JAR has no manifest.");
+            InputStream manifestStream = verified.getInputStream(entry);
+            try {
+                Manifest manifest = new Manifest(manifestStream);
+                String mainClass = manifest.getMainAttributes().getValue("Main-Class");
+                if (!"com.minion.Boot".equals(mainClass))
+                    throw new IllegalStateException("Patched JAR has no Minion Main-Class.");
+            } finally { manifestStream.close(); }
+        } finally { verified.close(); }
     }
 
     private static Map<String, byte[]> readPatch(File patch) throws Exception {

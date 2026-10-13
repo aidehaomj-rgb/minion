@@ -4,11 +4,19 @@ public interface AgentUi {
     default void onUserMessage(String text) { }
     default void onThinking(String delta) { }
     default void onContent(String delta) { }
+    /** 一次模型响应结束（不代表主任务完成），供界面折叠思考和分隔后续响应。 */
+    default void onResponseEnd() { }
     default void onToolCall(String name, com.google.gson.JsonObject args) { }
     default void onToolResult(String name, com.minion.core.tools.ToolResult result) { }
     default void onSubAgentStart(String description) { }
     default void onSubAgentDelta(String delta) { }
     default void onSubAgentDone(String summary) { }
+    /** 带稳定子任务标识的独立消息通道，旧实现继续通过原回调接收。 */
+    default void onChildEvent(String id, String kind, String text, Object data) {
+        if ("START".equals(kind)) onSubAgentStart(text);
+        else if ("CONTENT".equals(kind)) onSubAgentDelta(text);
+        else if ("DONE".equals(kind)) onSubAgentDone(text);
+    }
     default void onStatsLine(String line) { }
     default void onError(String message) { }
     default void onWarning(String message) { }

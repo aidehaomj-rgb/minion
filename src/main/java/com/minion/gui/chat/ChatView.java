@@ -10,6 +10,7 @@ import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
+import javafx.scene.control.Button;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -34,6 +35,9 @@ public class ChatView extends VBox {
 
     /** 截断保活上限：段数超限即移除头部旧段（200 段 ≈ 2000+ 行，长会话滚动不卡） */
     private static final int MAX_SEGS = 200;
+    /** 每页可见内容数量；流增量合并后计为一条。 */
+    private static final int HISTORY_PAGE_SIZE = 150;
+
 
     private final EventList events;
     private final SessionHandle handle;
@@ -55,6 +59,19 @@ public class ChatView extends VBox {
     /** 增量重放游标：已渲染到缓冲第几个事件（仅 FX 线程读写；直通渲染完成才推进，下次 bind 不重复） */
     private int replayed = 0;
 
+    /** 旧页签排队的 runLater 在解绑后不得再绘制或扰乱新会话。 */
+    private int bindEpoch = 0;
+    private boolean bound = false;
+    private boolean replaying = false;
+    private final Button older = new Button("加载更早历史");
+    private final Button newer = new Button("较新一页");
+    private final Button latest = new Button("返回最新消息");
+    private final Label pageInfo = new Label();
+    private final HBox historyBar = new HBox(10, older, newer, latest, pageInfo);
+    private final List<Integer> forwardPages = new ArrayList<Integer>();
+    private int pageStart, pageEnd;
+    private boolean browsingHistory;
+
     /** 上次展示结束时的滚动位置（MainWindow 切走时记、切回恢复；缓存视图内容连续，vvalue 语义保留） */
     private double savedVvalue = 1.0;
 
@@ -70,8 +87,10 @@ public class ChatView extends VBox {
         final Label tag;
         final MessageTextArea body;      // 焦点治理目标（collapsible 段 = 内部内容体）
         final CollapsibleText collapsible; // null = 普通段
+        final MessageTextPane textPane;
         final StreamKind kind;
         boolean thinkFinalized; // THINK 段已按最终长度定稿（防 CONTENT 增量重复折叠覆盖手动展开）
+        boolean streamFinalized;
         Seg(String tagText, String tagColorClass, String text, StreamKind kind) {
             this(tagText, tagColorClass, (Node) null, text, false, kind);
         }
@@ -81,8 +100,10 @@ public class ChatView extends VBox {
             tag.getStyleClass().addAll("log-tag", tagColorClass);
             if (summary == null) {
                 collapsible = null;
-                body = new MessageTextArea(text);
+                textPane = new MessageTextPane(text, kind == StreamKind.REPLY);
+                body = textPane.contentArea();
             } else {
+                textPane = null;
                 collapsible = new CollapsibleText(summary, text, defaultExpanded);
                 body = collapsible.contentArea();
             }
@@ -95,10 +116,16 @@ public class ChatView extends VBox {
             this.kind = kind;
         }
         /** 加入段行的节点：折叠段为 CollapsibleText 整体，普通段为正文 */
-        Node node() { return collapsible != null ? collapsible : body; }
+        Node node() { return collapsible != null ? collapsible : textPane; }
     }
 
     private final List<Seg> segs = new ArrayList<Seg>();
+    private Seg mainStreamSegment;
+    private final java.util.Map<String, ChildStream> childStreams = new java.util.HashMap<String, ChildStream>();
+    private static class ChildStream {
+        final StreamBuffer buffer = new StreamBuffer();
+        Seg thinking, reply;
+    }
     private boolean empty = true; // 无任何消息段（仍显示占位提示）
 
     public ChatView(EventList events, SessionHandle handle) {
@@ -108,6 +135,15 @@ public class ChatView extends VBox {
         setSpacing(0); // 段间无缝紧贴（控制台连续输出）
         setStyle("-fx-padding: 16 16 40 16;"); // 底部 40px：为左下角运行状态指示器让位（覆盖距底 10~27px），滚动到底不遮挡最后一行
         clear();
+        older.setOnAction(e -> {
+            forwardPages.add(pageEnd);
+            browsingHistory = true;
+            showPage(pageStart);
+        });
+        newer.setOnAction(e -> {
+            if (!forwardPages.isEmpty()) showPage(forwardPages.remove(forwardPages.size() - 1));
+        });
+        latest.setOnAction(e -> { browsingHistory = false; forwardPages.clear(); bind(true); });
     }
 
     /**
@@ -129,13 +165,6 @@ public class ChatView extends VBox {
     /** 本视图绑定的会话句柄（MainWindow 判断「删除的是当前展示会话」用） */
     public SessionHandle handle() { return handle; }
 
-    /** 直通监听器：渲染完成才推进游标（下次 bind 不重复渲染直通过的事件） */
-    private final EventList.Listener fxListener = new EventList.Listener() {
-        @Override public void onEvent(Ev e) {
-            Platform.runLater(() -> { replayed++; onEventFx(e); });
-        }
-    };
-
     /**
      * 绑定/解绑事件流：active=true 增量重放自上次游标起的新事件 + 后续直通（视图缓存场景不 clear，
      * 流式合并状态与 segs 连续，切走再切回输出无缝）；active=false 解绑直通，事件只入缓冲。
@@ -143,35 +172,103 @@ public class ChatView extends VBox {
      */
     public void bind(boolean active) {
         if (active) {
-            // rebind 锁内原子：快照 [replayed, size) + 注册直通；间隙 add 既不丢也不重复
-            List<Ev> tail = events.rebind(fxListener, replayed);
-            replayed = events.size(); // rebind 后已渲染位置；此后的直通事件在渲染完成时 replayed++
-            for (Ev e : tail) onEventFx(e); // FX 线程同步渲染，先于队列中直通事件执行
+            final int epoch = ++bindEpoch;
+            bound = true;
+            EventList.Listener listener = e -> Platform.runLater(() -> {
+                if (!bound || bindEpoch != epoch) return;
+                replayed++;
+                if (!browsingHistory) {
+                    pageEnd = replayed;
+                    onEventFx(displayEvent(e));
+                }
+                updateHistoryBar();
+            });
+            // 重放预算必须在 EventList 锁内与注册直通一起确定；旧版全量重放长会话会在
+            // FX 线程创建成千上万个 TextArea，即使随后 trim 到 200 段也已把界面拖垮。
+            EventList.Replay tail = events.rebindRecent(listener, events.size(), 1, 1);
+            replayed = tail.nextIndex;
+            showPage(browsingHistory ? pageEnd : replayed);
         } else {
+            bound = false;
+            bindEpoch++;
             events.setActive(false, null);
         }
     }
 
-    public void clear() {
-        getChildren().clear();
+    private void showPage(int before) {
+        EventList.Page page = events.pageBefore(before, HISTORY_PAGE_SIZE);
+        pageStart = page.start;
+        pageEnd = page.end;
+        resetNodes();
         segs.clear();
+        empty = true;
+        mainStreamSegment = null;
+        stream.onRoundBoundary();
+        replaying = true;
+        childStreams.clear();
+        try {
+            for (Ev e : page.events) onEventFx(displayEvent(e));
+            finalizeThinking();
+            for (ChildStream child : childStreams.values()) {
+                if (child.thinking != null) child.thinking.collapsible.finalizeThinking();
+            }
+            if (empty) getChildren().add(new Label(page.end == 0
+                    ? EMPTY_HINT : "此页暂无可显示内容；可加载更早历史或返回最新消息"));
+        } finally { replaying = false; }
+        updateHistoryBar();
+    }
+
+    private void resetNodes() {
+        getChildren().clear();
+        getChildren().add(historyBar);
+    }
+
+    private void updateHistoryBar() {
+        older.setDisable(pageStart == 0);
+        newer.setDisable(forwardPages.isEmpty());
+        latest.setDisable(!browsingHistory);
+        pageInfo.setText(browsingHistory ? "历史浏览中（每页最多150条，新消息不会打断）；返回最新可继续查看" : "旧记录可分批查看（每页最多150条）");
+    }
+
+    /** 完整事件交给分页控件，不修改 EventList、Session.messages 或落盘 JSON。 */
+    private static Ev displayEvent(Ev e) {
+        return e; // 完整事件保留；正文控件以分页限制布局量。
+    }
+
+    static String clipForDisplay(String text) {
+        return text;
+    }
+
+    public void clear() {
+        resetNodes();
+        forwardPages.clear();
+        browsingHistory = false;
+        pageStart = pageEnd = 0;
+        updateHistoryBar();
+        segs.clear();
+        childStreams.clear();
         stream.onRoundBoundary();
         empty = true;
         replayed = 0; // 清空后游标归零：下次 bind 从 0 全量重放（clear 仅删除会话回收路径调用）
+        mainStreamSegment = null;
         getChildren().add(hint());
     }
 
     private void onEventFx(Ev e) {
+        if (e.subAgentId != null) { onChildEventFx(e); return; }
         // 轮次边界（用户消息/补充/工具调用到达）先行重置流式缓冲：AgentLoop 一轮 runUserTurn 内
         // 多轮 agent 回合间无 USER_MESSAGE，若不清零则多轮回复文本跨轮累积进同一段，
         // 每轮内容越滚越长，表现为"一直在回复同一段内容"（线上实证，用户误判上下文错乱）
-        if (StreamBuffer.isRoundBoundary(e.kind)) stream.onRoundBoundary();
+        if (StreamBuffer.isRoundBoundary(e.kind)) { stream.onRoundBoundary(); mainStreamSegment=null; }
         // 思考段定稿：任何非思考事件到达即思考结束，按最终长度折叠（≥阈值折叠、短展开）
         if (e.kind != EventList.Kind.THINKING) finalizeThinking();
         switch (e.kind) {
+            case RESPONSE_END:
+                for (Seg seg : segs) seg.streamFinalized = true;
+                break;
             case USER_MESSAGE:
                 append("【输入】", "log-input", e.text, StreamKind.NONE);
-                if (scrollBottomRequest != null) scrollBottomRequest.run(); // 发送消息后强制滚动到底
+                if (!replaying && scrollBottomRequest != null) scrollBottomRequest.run();
                 break;
             case USER_SUPPLEMENT:
                 append("【输入】", "log-input", e.text, StreamKind.NONE);
@@ -187,7 +284,7 @@ public class ChatView extends VBox {
             case CONTENT:
                 stream.onContent(e.text);
                 // 纯文本展示（Label 不可选问题之解）：markdown 展平去语法记号，段内原生拖选复制
-                String plain = MarkdownRenderer.toPlainText(stream.content());
+                String plain = stream.content(); // Markdown 只解析当前分页，避免每个增量重解析整篇超长正文。
                 // 回复内容仍为空（思考后直接调工具等场景，LLM 空 content chunk 增量）：
                 // 不打印【回复】标签——空标签+空白正文的"幽灵段"；缓冲只追加不会中途变空
                 if (plain.trim().isEmpty()) break;
@@ -234,12 +331,63 @@ public class ChatView extends VBox {
                 appendCollapsible("【工具】", "log-tool",
                         statusSummary(IconFactory.play(), "子任务: " + e.text), null, StreamKind.NONE);
                 break;
+            case SUB_AGENT_DELTA:
+                // 原始子任务增量没有身份字段，不能把交错输出误标成某个子 Agent。
+                // 仅重放合并后的历史内容，实时输出仍通过子任务状态/结果查看。
+                if (replaying && e.text != null && !e.text.trim().isEmpty()) {
+                    appendCollapsible("【工具】", "log-tool",
+                            statusSummary(IconFactory.play(), "子任务输出（按记录顺序）"), e.text);
+                }
+                break;
             case SUB_AGENT_DONE:
                 appendCollapsible("【工具】", "log-tool",
                         statusSummary(IconFactory.check(), "子任务完成: " + e.text), null, StreamKind.NONE);
                 break;
             default:
                 break;
+        }
+    }
+
+    /** 独立子任务缓冲，交错到达也只更新自己的段，不污染主代理流。 */
+    private void onChildEventFx(Ev e) {
+        String tag="【子Agent "+e.subAgentId.substring(0,Math.min(8,e.subAgentId.length()))+"】";
+        ChildStream child=childStreams.get(e.subAgentId);
+        if(child==null){child=new ChildStream();childStreams.put(e.subAgentId,child);}
+        if(e.kind!=EventList.Kind.THINKING && child.thinking!=null) {
+            child.thinking.collapsible.finalizeThinking();child.thinking=null;
+        }
+        if(e.kind==EventList.Kind.THINKING || e.kind==EventList.Kind.CONTENT) {
+            if(e.text==null || e.text.isEmpty())return;
+            boolean think=e.kind==EventList.Kind.THINKING;
+            if(think)child.buffer.onThinking(e.text);else child.buffer.onContent(e.text);
+            String text=think?child.buffer.thinking():child.buffer.content();
+            Seg seg=think?child.thinking:child.reply;
+            if(seg!=null && segs.contains(seg)) {
+                if(think)seg.collapsible.setStreamText(text);else seg.textPane.setText(text,!replaying);
+            } else {
+                if(think)appendCollapsible(tag,"log-think",statusSummary(IconFactory.play(),"思考"),text,StreamKind.NONE,true);
+                else append(tag,"log-reply",text,StreamKind.NONE);
+                seg=segs.get(segs.size()-1);
+                if(think)child.thinking=seg;else child.reply=seg;
+            }
+            return;
+        }
+        child.buffer.onRoundBoundary();child.reply=null;
+        switch(e.kind) {
+            case RESPONSE_END: break;
+            case SUB_AGENT_START:
+                appendCollapsible(tag,"log-tool",statusSummary(IconFactory.play(),"子任务: "+e.text),null);break;
+            case SUB_AGENT_DONE:
+                appendCollapsible(tag,"log-tool",statusSummary(IconFactory.check(),"子任务已返回"),e.text);
+                childStreams.remove(e.subAgentId);break;
+            case TOOL_CALL:
+                appendCollapsible(tag,"log-tool",toolSummary(toolCallSummary(e.text,e.data)),toolCallBody(e.text,e.data));break;
+            case TOOL_RESULT:
+                String data=e.data==null?"":e.data.toString();boolean ok=data.startsWith("ok");
+                appendCollapsible(tag,ok?"log-tool":"log-error",statusSummary(ok?IconFactory.success():IconFactory.error(),e.text+(ok?" 成功":" 失败")),toolResultBody(e.text,data));break;
+            case ERROR: append(tag,"log-error",e.text,StreamKind.NONE);break;
+            case WARNING: append(tag,"log-warn",e.text,StreamKind.NONE);break;
+            default: break;
         }
     }
 
@@ -257,7 +405,7 @@ public class ChatView extends VBox {
     /** 追加一段控制台输出（首段先清掉占位提示；kind 仅记录流身份，NONE 静态行恒新起一段） */
     private void append(String tagText, String tagColorClass, String text, StreamKind kind) {
         if (empty) {
-            getChildren().clear();
+            resetNodes();
             empty = false;
         }
         Seg seg = new Seg(tagText, tagColorClass, text, kind);
@@ -301,7 +449,7 @@ public class ChatView extends VBox {
         if (text == null || text.trim().isEmpty()) {
             // 无正文（子任务行/统计行）：CollapsibleText 空内容 → 只渲染摘要行
             if (empty) {
-                getChildren().clear(); // 占位提示随首段出现清除
+                resetNodes(); // 保留历史导航
                 empty = false;
             }
             Seg seg = new Seg(tagText, tagColorClass, summary, "", false, kind);
@@ -312,7 +460,7 @@ public class ChatView extends VBox {
             return;
         }
         if (empty) {
-            getChildren().clear();
+            resetNodes();
             empty = false;
         }
         boolean expanded = forcedExpanded || kind == StreamKind.THINK ? true : defaultExpanded(text);
@@ -323,7 +471,7 @@ public class ChatView extends VBox {
         trimHead();
     }
 
-    /** 思考段定稿：从尾部找最后一个 THINK 段，未定稿则按最终长度设置折叠态（≥阈值折叠、短展开）。
+    /** 思考段定稿：从尾部找最后一个 THINK 段，结束即折叠。
      *  只定稿一次——CONTENT 流式增量重复到达不会覆盖用户手动展开状态；
      *  新一轮思考流式更新（setStreamText）会重置标志，结束后重新定稿 */
     private void finalizeThinking() {
@@ -331,7 +479,7 @@ public class ChatView extends VBox {
             Seg s = segs.get(i);
             if (s.kind == StreamKind.THINK && s.collapsible != null) {
                 if (!s.thinkFinalized) {
-                    s.collapsible.finalizeLength();
+                    s.collapsible.finalizeThinking();
                     s.thinkFinalized = true;
                 }
                 return;
@@ -347,33 +495,36 @@ public class ChatView extends VBox {
         double removedH = 0;
         for (int i = 0; i < excess; i++) {
             // 头部段早已布局（新段只加在尾部），layoutBounds 高度准确
-            removedH += getChildren().get(i).getLayoutBounds().getHeight();
+            removedH += getChildren().get(i + 1).getLayoutBounds().getHeight();
         }
         segs.subList(0, excess).clear();
-        getChildren().remove(0, excess); // ObservableList.remove(from, to)：与 segs 同步删
-        if (trimListener != null) trimListener.accept(removedH);
+        getChildren().remove(1, excess + 1); // 第一个节点为历史导航
+        // 刷新为有完整事件边界的一页，确保被移除的段仍可向前翻阅。
+        if (!replaying) showPage(replayed);
+        if (!replaying && trimListener != null) trimListener.accept(removedH);
     }
 
     /** 流式增量：末段是同一流（THINK/REPLY）→ 就地更新正文不重建节点；NONE 静态行永不参与就地更新，恒新起一段 */
     private void stream(String tagText, String tagColorClass, String text, StreamKind kind) {
-        Seg last = segs.isEmpty() ? null : segs.get(segs.size() - 1);
-        if (last != null && last.kind == kind && kind != StreamKind.NONE) {
+        Seg last = mainStreamSegment != null && segs.contains(mainStreamSegment) ? mainStreamSegment : null;
+        if (last != null && !last.streamFinalized && last.kind == kind && kind != StreamKind.NONE) {
             if (last.collapsible != null) {
                 // 思考段：流式更新强制展开（内容增长需实时可见），并重置定稿标志——
                 // 新一轮思考复用同一段时，结束后需按新长度重新定稿折叠
                 last.collapsible.setStreamText(text);
                 last.thinkFinalized = false;
             } else {
-                last.body.setStreamText(text);
+                last.textPane.setText(text, true);
             }
             return;
         }
-        // 思考段用可折叠结构：流式未知最终长度先默认展开，结束定稿（finalizeThinking）按长度折叠
+        // 思考段流式先展开，单次响应结束即收起，仍可手动查看全文。
         if (kind == StreamKind.THINK) {
             appendCollapsible(tagText, tagColorClass, new Label(""), text, kind);
         } else {
             append(tagText, tagColorClass, text, kind);
         }
+        mainStreamSegment = segs.isEmpty() ? null : segs.get(segs.size()-1);
     }
 
     /** 工具调用参数 → 展示正文：Edit/Write 生成行级 diff（仅变更行），其余完整参数 JSON；
@@ -461,12 +612,13 @@ public class ChatView extends VBox {
         static boolean isRoundBoundary(EventList.Kind kind) {
             return kind == EventList.Kind.USER_MESSAGE
                     || kind == EventList.Kind.USER_SUPPLEMENT
-                    || kind == EventList.Kind.TOOL_CALL;
+                    || kind == EventList.Kind.TOOL_CALL
+                    || kind == EventList.Kind.RESPONSE_END;
         }
 
-        void onThinking(String delta) { thinking.append(delta); }
+        void onThinking(String delta) { if (delta != null) thinking.append(delta); }
 
-        void onContent(String delta) { content.append(delta); }
+        void onContent(String delta) { if (delta != null) content.append(delta); }
 
         /** 轮次边界：清空累积，下一轮回复/思考另起新段 */
         void onRoundBoundary() {

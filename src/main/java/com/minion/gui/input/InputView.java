@@ -100,9 +100,6 @@ public class InputView extends VBox {
     private boolean askPending;
     private String askQuestion;
     /** 运行中用户先暂存、尚未点击“立即引导”的内容；不得提前进入模型或聊天事件流。 */
-    private String pendingGuideText;
-    private final List<ImagePart> pendingGuideImages = new ArrayList<ImagePart>();
-    private SessionHandle pendingGuideSession;
 
     public InputView(final SessionManager manager, final Config config) {
         this.manager = manager;
@@ -169,7 +166,7 @@ public class InputView extends VBox {
             // Enter 发送模式弹层打开时不发送，Enter/Ctrl+Enter 均走弹层确认
             if (isSendKey(e.getCode(), ctrl, shift, alt, meta, enterSends) && !(enterSends && popup.isShowing())) {
                 e.consume();
-                onAction();
+                onAction(false); // 发送键绝不能在清空输入后变成停止键。
                 return;
             }
             // Enter 发送模式：弹层关闭时 Ctrl+Enter 显式插入换行（JavaFX TextArea 对 Ctrl+Enter 无默认换行绑定，须 replaceSelection）
@@ -448,6 +445,12 @@ public class InputView extends VBox {
         return hasContent ? BtnMode.SUPPLEMENT : BtnMode.STOP;
     }
 
+    /** 键盘发送没有“停止”语义，空输入/按键自动重复只消费事件。 */
+    static BtnMode keyboardMode(boolean running, boolean askPending, boolean hasContent) {
+        BtnMode mode = buttonMode(running, askPending, hasContent);
+        return mode == BtnMode.STOP ? BtnMode.SEND_DIM : mode;
+    }
+
     /** 文本/光标变化 → 重新解析补全模式并刷新弹层（弹层异常不得打断输入，兜底隐藏） */
     private void onTextChanged() {
         try {
@@ -592,16 +595,17 @@ public class InputView extends VBox {
         final SessionHandle previous = this.current;
         this.current = h;
         Platform.runLater(() -> {
+            if (current != h) return;
             boolean changed = previous != h;
             if (changed) {
                 clearComposer(); // 草稿属于旧会话，禁止串入新会话
-                clearPendingGuide();
             }
             running = h != null && h.running;
             askPending = h != null && h.askPending;
             askQuestion = h == null ? null : h.askQuestion;
             updateButton();
             updatePrompt();
+            refreshPendingGuideRow();
             // @文件列表预热：绑定会话即后台扫描所属工作空间（每项目独立缓存 5 分钟；
             // 缓存命中零开销——同项目内切会话/切回均不再扫描）
             final String dir = manager.currentWorkspaceDir();
@@ -628,11 +632,12 @@ public class InputView extends VBox {
     public void onRunningChanged(SessionHandle h, boolean running) {
         if (current != h) return;
         Platform.runLater(() -> {
-            this.running = running;
+            if (current != h) return;
+            this.running = h.running; // 延迟的旧回调不能覆盖当前真实运行状态。
             updateButton();
             updatePrompt();
             refreshPendingGuideRow();
-            contextRing.setRunning(running);
+            contextRing.setRunning(this.running);
         });
     }
 
@@ -640,8 +645,9 @@ public class InputView extends VBox {
     public void onAskChanged(SessionHandle h, boolean asking, String question) {
         if (current != h) return;
         Platform.runLater(() -> {
-            this.askPending = asking;
-            this.askQuestion = question;
+            if (current != h) return;
+            this.askPending = h.askPending;
+            this.askQuestion = h.askQuestion;
             updateButton();
             updatePrompt();
         });
@@ -654,7 +660,8 @@ public class InputView extends VBox {
         Platform.runLater(new Runnable() {
             @Override public void run() {
                 double threshold = 0.8; // 兜底；正常从 ContextManager 实时读取
-                if (h.loop.contextManager() != null) threshold = h.loop.contextManager().threshold();
+                if (h.loop.contextManager() != null && max > 0)
+                    threshold = (double) h.loop.contextManager().autoCompressAtTokens() / max;
                 boolean active = used > 0 && max > 0;
                 contextRing.update(used, max, threshold, running);
                 contextRing.setVisible(active);
@@ -735,7 +742,7 @@ public class InputView extends VBox {
         switch (mode) {
             case SEND:       applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "发送 (" + sendKey + ")"); break;
             case SEND_DIM:   applyStyle(arrowIcon, buttonStyleClass(mode), 0.35, "输入消息后发送 (" + sendKey + ")"); break;
-            case SUPPLEMENT: applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "加入待引导区，确认后再发送 (" + sendKey + ")"); break;
+            case SUPPLEMENT: applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "排队为下一项任务；点击立即引导可补充当前任务 (" + sendKey + ")"); break;
             case ANSWER:     applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "回答模型的提问 (" + sendKey + ")"); break;
             case ANSWER_DIM: applyStyle(arrowIcon, buttonStyleClass(mode), 0.35, "输入回答后发送 (" + sendKey + ")"); break;
             case STOP:       applyStyle(stopIcon, buttonStyleClass(mode), 1.0, "终止当前运行 (Esc)"); break;
@@ -758,37 +765,34 @@ public class InputView extends VBox {
 
     private void stagePendingGuide(String text, List<ImagePart> images) {
         if (current == null || text == null || text.trim().isEmpty()) return;
-        pendingGuideSession = current;
-        pendingGuideText = mergePendingGuide(pendingGuideText, text);
-        if (images != null) pendingGuideImages.addAll(images);
+        manager.stageGuidance(current, text, images);
         refreshPendingGuideRow();
     }
 
     private void refreshPendingGuideRow() {
-        boolean show = pendingGuideText != null && !pendingGuideText.trim().isEmpty();
+        SessionHandle.QueuedMessage task=current==null?null:current.pendingGuide();
+        boolean show = task != null;
         pendingGuideRow.setVisible(show);
         pendingGuideRow.setManaged(show);
         if (!show) return;
-        String suffix = pendingGuideImages.isEmpty() ? "" : "（附件 " + pendingGuideImages.size() + " 个）";
-        pendingGuideLabel.setText("待引导：" + pendingGuidePreview(pendingGuideText) + suffix);
+        String suffix = task.images.isEmpty() ? "" : "（附件 " + task.images.size() + " 个）";
+        int count = current.queuedSnapshot().size();
+        pendingGuideLabel.setText("完成后自动执行（队列 " + count + " 项）：" + pendingGuidePreview(task.text) + suffix);
         guideNowButton.setText(running ? "立即引导" : "作为新消息发送");
     }
 
     private void sendPendingGuide() {
-        SessionHandle target = pendingGuideSession;
-        String text = pendingGuideText;
-        List<ImagePart> images = new ArrayList<ImagePart>(pendingGuideImages);
-        if (target == null || text == null || text.trim().isEmpty()) return;
-        clearPendingGuide();
-        if (target.running) manager.sendSupplement(target, text, images);
-        else manager.send(target, text, images);
+        manager.promoteGuidance(current);
+        refreshPendingGuideRow();
     }
 
     private void clearPendingGuide() {
-        pendingGuideText = null;
-        pendingGuideImages.clear();
-        pendingGuideSession = null;
+        manager.discardGuidance(current);
         refreshPendingGuideRow();
+    }
+
+    public void onQueueChanged(SessionHandle h) {
+        Platform.runLater(() -> { if(current==h) refreshPendingGuideRow(); });
     }
 
     private void applyStyle(SVGPath graphic, String styleClass, double opacity, String tip) {
@@ -801,7 +805,17 @@ public class InputView extends VBox {
 
     /** Ctrl+Enter / 按钮点击统一入口：按当前模式分发 */
     private void onAction() {
-        switch (buttonMode(running, askPending, hasContent())) {
+        onAction(true);
+    }
+
+    private void onAction(boolean allowStop) {
+        // 输入区缓存由异步回调更新；实际发消息时使用会话即时状态，防重复发送串轮。
+        if (current != null) {
+            running = current.running;
+            askPending = current.askPending;
+        }
+        switch (allowStop ? buttonMode(running, askPending, hasContent())
+                : keyboardMode(running, askPending, hasContent())) {
             case SEND:
                 onSend();
                 break;
@@ -810,7 +824,7 @@ public class InputView extends VBox {
                 if (text == null || text.trim().isEmpty()) return;
                 List<ImagePart> images = composedImages();
                 clearComposer();
-                stagePendingGuide(text, images); // 只暂存；“立即引导”才真正注入
+                stagePendingGuide(text, images); // 默认下个任务；“立即引导”才注入当前任务
                 break;
             }
             case ANSWER: {
@@ -847,6 +861,7 @@ public class InputView extends VBox {
         // 带图消息不走斜杠命令分发（图片无法本地处理，照发普通消息）
         if (images.isEmpty()) {
             manager.dispatchCommand(target, text); // 斜杠命令本地分发；普通消息走 send
+            refreshPendingGuideRow();
         } else {
             manager.send(target, text, images);
         }

@@ -53,6 +53,12 @@ public class SessionHandle {
     public volatile boolean titlePending;
     /** 是否正在后台运行（UI 徽标/终止按钮依据） */
     public volatile boolean running;
+    private long dispatchGeneration;
+    public synchronized long beginDispatch() { running=true; return ++dispatchGeneration; }
+    public synchronized boolean finishDispatch(long generation) {
+        if(generation!=dispatchGeneration) return false;
+        running=false; return true;
+    }
     /** 最近一次运行已结束、用户尚未点击查看；仅为本次进程 UI 状态，不落盘。 */
     public volatile boolean completionUnread;
 
@@ -71,39 +77,69 @@ public class SessionHandle {
     public volatile String askQuestion;
 
     /** 显式后台任务队列（/queue add）；与 Steering 的“立即补充当前轮”语义分开。 */
-    private final List<QueuedMessage> queuedMessages = new ArrayList<QueuedMessage>();
+    private List<Session.QueuedTask> queue() {
+        return session.queuedTasks;
+    }
 
     public synchronized int enqueue(String text) {
-        if (text == null || text.trim().isEmpty()) return queuedMessages.size();
-        queuedMessages.add(new QueuedMessage(text.trim(), System.currentTimeMillis()));
-        return queuedMessages.size();
+        return enqueue(text, null, false);
+    }
+
+    public synchronized int enqueue(String text, List<com.minion.core.llm.ImagePart> images, boolean guide) {
+        synchronized (queue()) {
+            if (text == null || text.trim().isEmpty()) return queue().size();
+            Session.QueuedTask task = new Session.QueuedTask();
+            task.text=text.trim(); task.createdAt=System.currentTimeMillis(); task.guidance=guide;
+            if(images!=null) task.images.addAll(images);
+            queue().add(task); return queue().size();
+        }
     }
 
     public synchronized QueuedMessage pollQueued() {
-        return queuedMessages.isEmpty() ? null : queuedMessages.remove(0);
+        synchronized (queue()) { return queue().isEmpty() ? null : new QueuedMessage(queue().remove(0)); }
     }
 
     public synchronized List<QueuedMessage> queuedSnapshot() {
-        return Collections.unmodifiableList(new ArrayList<QueuedMessage>(queuedMessages));
+        synchronized (queue()) {
+            List<QueuedMessage> copy = new ArrayList<QueuedMessage>();
+            for(Session.QueuedTask task:queue()) copy.add(new QueuedMessage(task));
+            return Collections.unmodifiableList(copy);
+        }
+    }
+
+    public synchronized QueuedMessage pendingGuide() {
+        for(QueuedMessage task:queuedSnapshot()) if(task.guidance) return task;
+        return null;
+    }
+
+    public synchronized QueuedMessage takeGuide() {
+        synchronized (queue()) {
+            for(int i=0;i<queue().size();i++) if(queue().get(i).guidance) return new QueuedMessage(queue().remove(i));
+            return null;
+        }
     }
 
     public synchronized boolean removeQueued(int oneBasedIndex) {
         int i = oneBasedIndex - 1;
-        if (i < 0 || i >= queuedMessages.size()) return false;
-        queuedMessages.remove(i);
-        return true;
+        synchronized (queue()) {
+            if (i < 0 || i >= queue().size()) return false;
+            queue().remove(i); return true;
+        }
     }
 
     public synchronized int clearQueued() {
-        int count = queuedMessages.size();
-        queuedMessages.clear();
-        return count;
+        synchronized (queue()) { int count=queue().size(); queue().clear(); return count; }
     }
 
     public static final class QueuedMessage {
         public final String text;
         public final long createdAt;
-        QueuedMessage(String text, long createdAt) { this.text = text; this.createdAt = createdAt; }
+        public final boolean guidance;
+        public final List<com.minion.core.llm.ImagePart> images;
+        QueuedMessage(Session.QueuedTask t) {
+            text=t.text; createdAt=t.createdAt; guidance=t.guidance;
+            images=t.images==null ? Collections.emptyList() : new ArrayList<com.minion.core.llm.ImagePart>(t.images);
+        }
     }
 
     public SessionHandle(String id, String workspaceName, Session session,
@@ -112,6 +148,7 @@ public class SessionHandle {
         this.id = id;
         this.workspaceName = workspaceName;
         this.session = session;
+        if(session.queuedTasks==null) session.queuedTasks=new ArrayList<Session.QueuedTask>();
         this.loop = loop;
         this.controller = controller;
         this.title = title;

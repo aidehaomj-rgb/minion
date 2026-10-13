@@ -67,6 +67,11 @@ public class MessageTextArea extends TextArea {
         textProperty().addListener((obs, ov, nv) -> relayout());
         widthProperty().addListener((obs, ov, nv) -> relayout());
         fontProperty().addListener((obs, ov, nv) -> relayout());
+        // 长会话历史重放时节点尚未挂到 Scene；此时给每个 TextArea 排队双 runLater
+        // 毫无布局可校正，还会在关闭页签后继续占用 FX 线程。
+        sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene != null) relayout();
+        });
         // 构造即设置显式 prefHeight：prefHeightProperty 永不为 USE_COMPUTED_SIZE，
         // 绕过 Parent.prefHeightCache 缓存 TextAreaSkin 默认 10 行高度的旧值（见类注释防线 1）
         relayout();
@@ -95,10 +100,12 @@ public class MessageTextArea extends TextArea {
 
     /** 布局后精校：读内部 Text 节点（skin 渲染的真实内容高度）。双 runLater 保证在布局 pass 之后执行 */
     private void scheduleCorrect() {
+        if (getScene() == null) return;
         if (correctScheduled) return; // 节流：流式高频变化只调度一次
         correctScheduled = true;
         Platform.runLater(() -> Platform.runLater(() -> {
             correctScheduled = false;
+            if (getScene() == null) return; // 页签已关闭：丢弃旧视图的布局任务
             // 收敛保护：连续校正超限即放弃本轮（条件不满足且无状态变化时，重试=自续死循环，
             // 线上实证 FX 线程被 runLater 占满；放弃精校仅留保守空隙，不影响高度正确性）
             if (++correctAttempts > MAX_CORRECT_ATTEMPTS) return;

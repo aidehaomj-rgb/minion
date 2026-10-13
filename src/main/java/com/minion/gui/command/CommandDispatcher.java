@@ -31,6 +31,7 @@ public class CommandDispatcher {
         if ("/update".equals(cmd) || "/更新".equals(cmd)) return dispatchLocalTool(h, "Update", updateArgs(parts));
         if ("/checkpoints".equals(cmd) || "/检查点".equals(cmd)) return dispatchLocalTool(h, "Checkpoint", checkpointArgs(parts));
         if ("/queue".equals(cmd) || "/队列".equals(cmd)) return dispatchQueue(h, parts);
+        if ("/task".equals(cmd) || "/agents".equals(cmd)) return h.session.taskState.render(h.session.todos);
         if ("/context".equals(cmd) || "/上下文".equals(cmd)) return dispatchLocalTool(h, "Context", simpleAction(parts,"status"));
         if ("/memory".equals(cmd) || "/记忆".equals(cmd)) return dispatchLocalTool(h, "Memory", simpleAction(parts,"status"));
         if ("/permissions".equals(cmd) || "/权限".equals(cmd)) return dispatchLocalTool(h, "Permission", permissionArgs(parts));
@@ -49,6 +50,7 @@ public class CommandDispatcher {
                 + "/update          检查离线更新包与备份\n"
                 + "/checkpoints     查看文件修改检查点\n"
                 + "/queue add <任务>  排队到当前任务结束后执行\n"
+                + "/task /agents    查看当前目标、断点、子Agent分工与记录\n"
                 + "/sessions [关键词]  搜索会话；/session fork|pin|archive|export\n"
                 + "/context         查看上下文组成与占用\n"
                 + "/memory [status|read]  查看项目长期记忆\n"
@@ -160,14 +162,15 @@ public class CommandDispatcher {
         if ("add".equalsIgnoreCase(parts[1])) {
             String text = joinTail(parts, 2);
             if (text.isEmpty()) return "用法: /queue add <任务内容>";
-            return "已加入任务队列，当前位置 " + h.enqueue(text);
+            int position=h.enqueue(text); h.loop.persistQueue();
+            return "已加入任务队列，当前位置 " + position;
         }
         if ("remove".equalsIgnoreCase(parts[1])) {
             if (parts.length < 3) return "用法: /queue remove <序号>";
-            try { return h.removeQueued(Integer.parseInt(parts[2])) ? "已移除队列任务" : "队列序号不存在"; }
+            try { boolean removed=h.removeQueued(Integer.parseInt(parts[2])); h.loop.persistQueue(); return removed ? "已移除队列任务" : "队列序号不存在"; }
             catch (NumberFormatException e) { return "队列序号必须是数字"; }
         }
-        if ("clear".equalsIgnoreCase(parts[1])) return "已清空队列任务 " + h.clearQueued() + " 条";
+        if ("clear".equalsIgnoreCase(parts[1])) { int count=h.clearQueued(); h.loop.persistQueue(); return "已清空队列任务 " + count + " 条"; }
         return "用法: /queue [list|add <任务>|remove <序号>|clear]";
     }
 

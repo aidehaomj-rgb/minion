@@ -39,6 +39,9 @@ public class AskUserQuestionTool implements Tool {
     private final AgentUi ui;
     /** 当前挂起的等待（单槽：同轮多次调用共享同一回答；null=未挂起） */
     private volatile CompletableFuture<String> pending;
+    /** 与等待槽同生命周期的提问快照；编号只能对应用户实际看到的那份选项。 */
+    private Ask pendingAsk;
+    private static final String ANSWER_TYPE = "minion.ask.answer.v1";
     /** 连续「提不出提问内容」次数：任一规范提问即归零（AgentLoop 无轮次上限，须自带刹车） */
     private int invalidStreak;
     /** 畸形提问挂起阈值：第 1 次回传失败让模型自纠，累计到此次数的畸形提问改为挂起交回用户 */
@@ -124,33 +127,91 @@ public class AskUserQuestionTool implements Tool {
         String question = ask.placeholder(); // 软兜底挂起时即「参数格式异常」提示文案
         CompletableFuture<String> fut;
         final boolean owner;
+        final Ask displayedAsk;
         synchronized (this) {
             fut = this.pending; // 同轮多次调用共享同一 future：重入链到已有挂起而非新建
             if (fut == null) {
                 fut = new CompletableFuture<String>();
                 this.pending = fut;
+                this.pendingAsk = ask;
                 owner = true;
             } else {
                 owner = false;
             }
+            displayedAsk = this.pendingAsk;
         }
         if (owner) ui.onAskUserStart(question);
         try {
             String answer = fut.get(); // 阻塞到 answerAskUser 或线程中断（终止）
             if (owner) ui.onAskUserDone(answer);
-            return ToolResult.success(answer);
+            return ToolResult.success(answerForModel(displayedAsk, answer));
         } finally {
             // 仅清自己占据的槽位：跟随者先结束时不得误清新一轮的 pending
-            if (this.pending == fut) this.pending = null;
+            synchronized (this) {
+                if (owner && this.pending == fut) {
+                    this.pending = null;
+                    this.pendingAsk = null;
+                }
+            }
         }
     }
 
     /** 用户回答入口（AgentLoop.answerAskUser 转发）；无挂起时忽略并返回 false */
     public boolean complete(String answer) {
+        if (answer == null || answer.trim().isEmpty()) return false;
         CompletableFuture<String> fut = pending;
         if (fut == null) return false;
-        fut.complete(answer);
-        return true;
+        return fut.complete(answer); // 重复提交不能覆盖第一份已收到的回答。
+    }
+
+    /** 仅完整、有效的编号回答才展开，不从自由文本中猜测或提取数字。 */
+    static String answerForModel(Ask ask, String answer) {
+        if (ask == null || ask.options.isEmpty() || answer == null) return answer;
+        String normalized = java.text.Normalizer.normalize(answer.trim(), java.text.Normalizer.Form.NFKC);
+        String[] parts = normalized.split("\\s*[,，、]\\s*", -1);
+        if (parts.length > 1 && !ask.multiSelect) return answer;
+        List<Integer> selected = new ArrayList<Integer>();
+        for (String part : parts) {
+            String s = part.trim();
+            if (s.matches("\\[[0-9]+\\]")) s = s.substring(1,s.length()-1);
+            else if (s.matches("第[0-9]+项")) s = s.substring(1,s.length()-1);
+            else if (s.matches("(?:选|选择)[0-9]+")) s = s.replaceFirst("^(?:选择|选)", "");
+            if (!s.matches("[0-9]+")) return answer;
+            final int number;
+            try { number = Integer.parseInt(s); } catch (NumberFormatException e) { return answer; }
+            if (number < 1 || number > ask.options.size()) return answer;
+            if (!selected.contains(number)) selected.add(number);
+        }
+        JsonObject result = new JsonObject();
+        result.addProperty("type", ANSWER_TYPE);
+        result.addProperty("question", ask.question);
+        result.addProperty("answer", answer);
+        result.addProperty("selectionStatus", "selected");
+        JsonArray options = new JsonArray();
+        for (Integer index : selected) {
+            Option option = ask.options.get(index - 1);
+            JsonObject value = new JsonObject();
+            value.addProperty("index", index);
+            value.addProperty("label", option.label);
+            value.addProperty("description", option.description);
+            options.add(value);
+        }
+        result.add("selectedOptions", options);
+        result.addProperty("selectionMeaning", "用户已明确选择上述选项；answer是用户原文，不是未回答。");
+        return result.toString();
+    }
+
+    /** 历史输入仍显示用户原文，不把新增的模型回传包装当成用户输入。 */
+    public static String answerForDisplay(String output) {
+        if (output == null) return null;
+        try {
+            JsonObject value = JsonParser.parseString(output).getAsJsonObject();
+            if (value.has("type") && ANSWER_TYPE.equals(value.get("type").getAsString())
+                    && value.has("selectedOptions") && value.get("selectedOptions").isJsonArray()
+                    && value.has("answer") && value.get("answer").isJsonPrimitive()
+                    && value.get("answer").getAsJsonPrimitive().isString()) return value.get("answer").getAsString();
+        } catch (RuntimeException ignored) { }
+        return output;
     }
 
     // ==================== 参数规范化（单一真源：工具挂起文案、消息区渲染、输入框占位共用） ====================
@@ -264,6 +325,7 @@ public class AskUserQuestionTool implements Tool {
             if (first != null) {
                 if (question == null) question = str(first, "question");
                 if (header == null) header = str(first, "header");
+                if (!args.has("multiSelect")) multi = bool(first, "multiSelect");
                 if (options.isEmpty()) options = readOptions(first.get("options"));
             }
         }

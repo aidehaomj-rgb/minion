@@ -15,6 +15,14 @@ public class ChatViewStreamBufferTest {
 
     private ChatView.StreamBuffer buf() { return new ChatView.StreamBuffer(); }
 
+    @Test public void veryLongThinkingAlsoKeepsItsMiddle() {
+        ChatView.StreamBuffer b=buf();
+        char[] chars=new char[60000];java.util.Arrays.fill(chars,'思');
+        String text=new String(chars)+"中间证据"+new String(chars);
+        b.onThinking(text);b.onThinking("结尾");
+        assertEquals(text+"结尾",b.thinking());
+    }
+
     @Test
     public void content_accumulatesDeltas() {
         ChatView.StreamBuffer b = buf();
@@ -56,6 +64,7 @@ public class ChatViewStreamBufferTest {
         assertTrue(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.USER_MESSAGE));
         assertTrue(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.USER_SUPPLEMENT));
         assertTrue(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.TOOL_CALL));
+        assertTrue(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.RESPONSE_END));
     }
 
     @Test
@@ -67,5 +76,30 @@ public class ChatViewStreamBufferTest {
         assertFalse(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.SYSTEM));
         assertFalse(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.ERROR));
         assertFalse(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.WARNING));
+    }
+
+    @Test
+    public void longHistoryDisplayPreservesFullOriginal() {
+        StringBuilder source = new StringBuilder("BEGIN-");
+        for (int i = 0; i < 30000; i++) source.append('x');
+        source.append("-END");
+        String original = source.toString();
+        String shown = ChatView.clipForDisplay(original);
+        assertTrue(shown.startsWith("BEGIN-"));
+        assertTrue(shown.endsWith("-END"));
+        assertEquals(original, shown);
+        assertEquals(30010, original.length());
+    }
+
+    @Test
+    public void streamBufferPreservesVeryLongOutput() {
+        ChatView.StreamBuffer b = buf();
+        StringBuilder chunk = new StringBuilder("BEGIN-");
+        for (int i = 0; i < 30000; i++) chunk.append('x');
+        b.onContent(chunk.toString());
+        b.onContent("-END");
+        assertTrue(b.content().startsWith("BEGIN-"));
+        assertTrue(b.content().endsWith("-END"));
+        assertEquals(chunk.toString() + "-END", b.content());
     }
 }

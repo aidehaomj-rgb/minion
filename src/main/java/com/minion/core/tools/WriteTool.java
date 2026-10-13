@@ -9,7 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /** 写文件。覆盖已存在文件为高危操作（需确认）。 */
 public class WriteTool implements Tool {
@@ -77,15 +78,30 @@ public class WriteTool implements Tool {
         if (p.getParent() != null) Files.createDirectories(p.getParent());
         String content = args.get("content").getAsString();
         boolean append = args.has("mode") && "append".equalsIgnoreCase(args.get("mode").getAsString());
-        if (checkpoints != null) {
-            try { checkpoints.create(p, "Write"); }
-            catch (IOException e) { return ToolResult.error("创建写入前检查点失败，未修改文件: " + e.getMessage()); }
+        ReentrantLock lock = PathLocks.forPath(p);
+        try {
+            if (!lock.tryLock(PathLocks.WAIT_SECONDS, TimeUnit.SECONDS))
+                return ToolResult.error("文件正被其他操作占用，稍后重试: " + p);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ToolResult.error("写入被取消（等待文件锁时线程中断）: " + p);
         }
-        if (append) {
-            Files.write(p, content.getBytes(StandardCharsets.UTF_8),
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } else {
-            Files.write(p, content.getBytes(StandardCharsets.UTF_8));
+        try {
+            if (checkpoints != null) {
+                try { checkpoints.create(p, "Write"); }
+                catch (IOException e) { return ToolResult.error("创建写入前检查点失败，未修改文件: " + e.getMessage()); }
+            }
+            byte[] data = content.getBytes(StandardCharsets.UTF_8);
+            if (append && Files.exists(p)) {
+                byte[] previous = Files.readAllBytes(p);
+                byte[] joined = new byte[Math.addExact(previous.length, data.length)];
+                System.arraycopy(previous, 0, joined, 0, previous.length);
+                System.arraycopy(data, 0, joined, previous.length, data.length);
+                data = joined;
+            }
+            AtomicFiles.writeBytes(p, data);
+        } finally {
+            lock.unlock();
         }
         return ToolResult.success((append ? "已追加 " : "已写入 ") + p
                 + " (" + content.length() + " 字符)");

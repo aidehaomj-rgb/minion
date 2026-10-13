@@ -15,6 +15,22 @@ import java.util.Map;
 import static org.junit.Assert.*;
 
 public class ModelManagerTest {
+    @Test public void defaultSelectionPersistsIndependentlyFromCurrent() throws Exception {
+        Path dir=jarDir();ModelManager m=ModelManager.load(dir);String original=m.currentName();
+        assertTrue(m.setDefault("qwen3-max"));assertEquals(original,m.currentName());
+        ModelManager restored=ModelManager.load(dir);assertEquals("qwen3-max",restored.defaultName());assertEquals(original,restored.currentName());
+        assertFalse(restored.setDefault("missing"));assertEquals("qwen3-max",restored.defaultName());
+    }
+    @Test public void legacyDefaultMigratesFromCurrentModel() throws Exception {
+        Path dir=jarDir();ModelManager m=ModelManager.load(dir);m.setCurrent("qwen3-max");
+        Path file=dir.resolve("model.json");com.google.gson.JsonObject data=com.google.gson.JsonParser.parseString(new String(Files.readAllBytes(file),StandardCharsets.UTF_8)).getAsJsonObject();
+        data.remove("defaultModelName");Files.write(file,data.toString().getBytes(StandardCharsets.UTF_8));
+        assertEquals("qwen3-max",ModelManager.load(dir).defaultName());
+    }
+    @Test public void deletedDefaultFallsBackAndSurvivesReload() throws Exception {
+        Path dir=jarDir();ModelManager m=ModelManager.load(dir);m.setDefault("qwen3-max");assertTrue(m.remove("qwen3-max"));
+        assertEquals("deepseek-v4-flash",m.defaultName());assertEquals(m.defaultName(),ModelManager.load(dir).defaultName());
+    }
 
     @Rule
     public TemporaryFolder tmp = new TemporaryFolder();

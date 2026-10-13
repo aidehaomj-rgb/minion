@@ -7,6 +7,8 @@ import com.minion.core.tools.confirm.ConfirmGate;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /** 精确字符串替换。始终为高危操作（修改现有文件）。 */
 public class EditTool implements Tool {
@@ -75,8 +77,19 @@ public class EditTool implements Tool {
         String oldString = args.get("oldString").getAsString();
         if (oldString.isEmpty()) return ToolResult.error("oldString 不能为空");
         String newString = args.get("newString").getAsString();
+        ReentrantLock lock = PathLocks.forPath(p);
+        try {
+            if (!lock.tryLock(PathLocks.WAIT_SECONDS, TimeUnit.SECONDS))
+                return ToolResult.error("文件正被其他操作占用，稍后重试: " + p);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ToolResult.error("编辑被取消（等待文件锁时线程中断）: " + p);
+        }
+        try {
         // 编码探测：UTF-8 严格优先，GBK 文件（记事本 ANSI 保存）降级，写回须保持原编码
-        TextFiles.Decoded d = TextFiles.decode(Files.readAllBytes(p));
+        TextFiles.Decoded d;
+        try { d = TextFiles.decode(Files.readAllBytes(p)); }
+        catch (RuntimeException e) { return ToolResult.error("文件编码已损坏（UTF-8 与 GBK 均无法解码），无法安全编辑；请先用 Read 或 Bash 确认文件状态: " + p); }
         String content = d.text;
 
         // 行尾归一化匹配：Read 工具按行读取并剥离行尾显示，agent 提供的 oldString 通常为 LF；
@@ -104,8 +117,11 @@ public class EditTool implements Tool {
             try { checkpoints.create(p, "Edit"); }
             catch (IOException e) { return ToolResult.error("创建编辑前检查点失败，未修改文件: " + e.getMessage()); }
         }
-        Files.write(p, updated.getBytes(d.charset)); // 按原编码写回，不破坏文件其余内容
+        AtomicFiles.writeBytes(p, updated.getBytes(d.charset)); // 按原编码写回，不破坏文件其余内容
         return ToolResult.success("已替换 " + (replaceAll ? count : 1) + " 处: " + p);
+        } finally {
+            lock.unlock();
+        }
     }
 
     private static int countOccurrences(String s, String sub) {

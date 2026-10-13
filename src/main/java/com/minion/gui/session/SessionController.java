@@ -63,14 +63,16 @@ public class SessionController implements AgentUi {
                         ? EventList.Kind.USER_SUPPLEMENT : EventList.Kind.USER_MESSAGE,
                         ImagePart.displayText(m.images, m.content), null));
             } else if (m.role == Message.Role.ASSISTANT) {
+                if (m.reasoningContent != null && !m.reasoningContent.isEmpty()) {
+                    events.add(new EventList.Ev(EventList.Kind.THINKING, m.reasoningContent, null));
+                }
                 if (m.content != null && !m.content.trim().isEmpty()) {
                     // 思考内容先于正文重演：ChatView 的【思考】段只由 THINKING 事件驱动，
                     // 不重演则重启恢复后思考丢失（上下文完好，纯显示缺失）
-                    if (m.reasoningContent != null && !m.reasoningContent.isEmpty()) {
-                        events.add(new EventList.Ev(EventList.Kind.THINKING, m.reasoningContent, null));
-                    }
                     events.add(new EventList.Ev(EventList.Kind.CONTENT, m.content, null));
                 }
+                if ((m.content != null && !m.content.trim().isEmpty())
+                        || (m.reasoningContent != null && !m.reasoningContent.isEmpty())) onResponseEnd();
                 // 工具调用逐个重演（含纯工具调用无正文消息），参数同运行时 onToolCall 格式
                 if (m.toolCalls != null) {
                     for (ToolCall tc : m.toolCalls) {
@@ -86,7 +88,8 @@ public class SessionController implements AgentUi {
                 // 不能当成用户回答重演，只在 ✅ 行显示原因
                 if ("AskUserQuestion".equals(m.name) && m.content != null && !m.content.trim().isEmpty()
                         && !m.content.startsWith(AskUserQuestionTool.INVALID_PREFIX)) {
-                    events.add(new EventList.Ev(EventList.Kind.USER_SUPPLEMENT, m.content, null));
+                    events.add(new EventList.Ev(EventList.Kind.USER_SUPPLEMENT,
+                            AskUserQuestionTool.answerForDisplay(m.content), null));
                 }
                 // 历史 TOOL 消息无成败标记（只存 output），统一按成功态重演，携带完整输出
                 String out = (m.content == null || m.content.trim().isEmpty()) ? "ok" : "ok\n" + m.content;
@@ -103,6 +106,9 @@ public class SessionController implements AgentUi {
     }
     @Override public void onContent(String delta) {
         events.add(new EventList.Ev(EventList.Kind.CONTENT, delta, null));
+    }
+    @Override public void onResponseEnd() {
+        events.add(new EventList.Ev(EventList.Kind.RESPONSE_END, null, null));
     }
     @Override public void onToolCall(String name, JsonObject args) {
         events.add(new EventList.Ev(EventList.Kind.TOOL_CALL, name,
@@ -122,6 +128,13 @@ public class SessionController implements AgentUi {
     }
     @Override public void onSubAgentStart(String description) {
         events.add(new EventList.Ev(EventList.Kind.SUB_AGENT_START, description, null));
+    }
+    @Override public void onChildEvent(String id,String kind,String text,Object data) {
+        EventList.Kind type;
+        if ("START".equals(kind)) type=EventList.Kind.SUB_AGENT_START;
+        else if ("DONE".equals(kind)) type=EventList.Kind.SUB_AGENT_DONE;
+        else type=EventList.Kind.valueOf(kind);
+        events.add(new EventList.Ev(type,text,data,id));
     }
     @Override public void onSubAgentDelta(String delta) {
         events.add(new EventList.Ev(EventList.Kind.SUB_AGENT_DELTA, delta, null));

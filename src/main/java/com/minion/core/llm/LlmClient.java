@@ -15,8 +15,24 @@ public interface LlmClient {
         streamChat(messages, tools, handler);
     }
 
+    /** 连续只说计划时的动作恢复；仅模型选择工具，不绕过工具确认与权限检查。 */
+    default void streamChatForAction(List<Message> messages, List<JsonObject> tools,
+                                     StreamHandler handler) throws LlmException {
+        streamChatWithoutThinking(messages, tools, handler);
+    }
+
     /** 非流式对话（压缩等内部请求），返回 content */
     String completeChat(List<Message> messages, String systemPrompt) throws LlmException;
+
+    /** 无工具、独立的拟结束核验；实际网络实现须限定该请求的时间与输出。 */
+    default StopReviewResponse reviewStop(String input, String systemPrompt) throws LlmException {
+        java.util.List<Message> request=java.util.Collections.singletonList(Message.user(input));
+        String text=completeChat(request,systemPrompt);
+        return new StopReviewResponse(text,Usage.estimate(request,text));
+    }
+
+    /** 只取消指定线程发起的结束检查，不影响共享客户端上的其他请求。 */
+    default void cancelStopReview(Thread owner) { }
 
     /** 中断进行中的请求（Ctrl+C / 用户打断） */
     default void cancel() { }

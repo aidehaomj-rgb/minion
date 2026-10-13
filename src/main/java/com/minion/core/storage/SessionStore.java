@@ -38,7 +38,12 @@ public class SessionStore {
 
     public Path save(Session session) throws IOException {
         Files.createDirectories(dir);
-        String json = gson.toJson(session);
+        String json;
+        synchronized(session.queuedTasks) {
+            synchronized(session.taskState) {
+                synchronized(session.todos) { json = gson.toJson(session); }
+            }
+        }
         Path tmp = dir.resolve(session.id + ".json.tmp");
         Path target = dir.resolve(session.id + ".json");
         Files.write(tmp, json.getBytes(StandardCharsets.UTF_8));
@@ -50,7 +55,26 @@ public class SessionStore {
         Path f = dir.resolve(id + ".json");
         if (!Files.exists(f)) throw new IOException("会话不存在: " + id);
         String json = new String(Files.readAllBytes(f), StandardCharsets.UTF_8);
-        return gson.fromJson(json, Session.class);
+        Session session = gson.fromJson(json, Session.class);
+        if (session.taskState == null) session.taskState = new com.minion.core.agent.TaskState();
+        if (session.queuedTasks == null) session.queuedTasks = new ArrayList<Session.QueuedTask>();
+        Path queueFile = dir.resolve(id + ".queue.json");
+        if (Files.exists(queueFile)) {
+            Session.QueuedTask[] queued = gson.fromJson(new String(Files.readAllBytes(queueFile), StandardCharsets.UTF_8), Session.QueuedTask[].class);
+            session.queuedTasks = new ArrayList<Session.QueuedTask>();
+            if(queued!=null) java.util.Collections.addAll(session.queuedTasks,queued);
+        }
+        return session;
+    }
+
+    /** Small independent journal: GUI can persist queued work without touching live message arrays. */
+    public void saveQueue(Session session) throws IOException {
+        synchronized(session.queuedTasks) {
+            Files.createDirectories(dir);
+            Path target=dir.resolve(session.id + ".queue.json"), temp=dir.resolve(session.id + ".queue.json.tmp");
+            Files.write(temp,gson.toJson(session.queuedTasks).getBytes(StandardCharsets.UTF_8));
+            Files.move(temp,target,StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE);
+        }
     }
 
     public List<SessionMeta> list() throws IOException {
@@ -82,6 +106,7 @@ public class SessionStore {
     /** 删除会话文件（不存在也静默成功） */
     public void delete(String id) throws IOException {
         Files.deleteIfExists(dir.resolve(id + ".json"));
+        Files.deleteIfExists(dir.resolve(id + ".queue.json"));
     }
 
     public static class SessionMeta {

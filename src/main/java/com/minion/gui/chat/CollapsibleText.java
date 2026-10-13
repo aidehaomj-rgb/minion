@@ -17,6 +17,7 @@ public class CollapsibleText extends VBox {
     public static final int COLLAPSE_THRESHOLD = 500;
 
     private final MessageTextArea content;
+    private final MessageTextPane textPane;
     private final HBox toggle;          // 摘要行（可点击）
     private final SVGPath chevron;      // 折叠态指示（expand_more/chevron_right）
     private final Label state;          // 「收起」/「展开（N 字符）」
@@ -47,10 +48,13 @@ public class CollapsibleText extends VBox {
             if (text != null && !text.trim().isEmpty()) setExpanded(!expanded);
         });
 
-        content = new MessageTextArea(this.text);
+        // 折叠的长工具输出/思考虽然不可见，旧版仍把全文交给 TextArea 测量，
+        // 恢复长会话时会在 FX 线程产生大量无用布局。仅展开时装入正文。
+        textPane = new MessageTextPane(expanded ? this.text : "");
+        content = textPane.contentArea();
         content.getStyleClass().add("log-body");
 
-        getChildren().addAll(toggle, content);
+        getChildren().addAll(toggle, textPane);
         update();
     }
 
@@ -60,22 +64,29 @@ public class CollapsibleText extends VBox {
     public boolean isExpanded() { return expanded; }
 
     public void setExpanded(boolean v) {
-        expanded = v;
+        if (expanded != v) {
+            expanded = v;
+            textPane.setText(v ? text : "", false);
+        }
         update();
     }
 
     /** 流式内容更新（思考段）：更新正文并强制展开——流式过程内容持续增长，
-     *  折叠会遮挡实时输出；定稿折叠由 finalizeLength 按最终长度决定 */
+     *  折叠会遮挡实时输出；思考结束由 finalizeThinking 收起，工具仍按长度定稿 */
     public void setStreamText(String t) {
         this.text = t == null ? "" : t;
-        content.setStreamText(this.text);
-        setExpanded(true);
+        expanded = true;
+        textPane.setText(this.text, true);
+        update();
     }
 
     /** 内容定稿：按最终长度决定折叠态（≥阈值折叠、短内容展开），流式结束后调用一次 */
     public void finalizeLength() {
         setExpanded(!shouldCollapse(text));
     }
+
+    /** 思考结束即收起，短思考也不占正文空间；仍可手动展开完整分页。 */
+    public void finalizeThinking() { setExpanded(false); }
 
     private void update() {
         boolean hasText = text != null && !text.trim().isEmpty();
@@ -84,8 +95,8 @@ public class CollapsibleText extends VBox {
         chevron.setManaged(hasText);
         state.setVisible(hasText);
         state.setManaged(hasText);
-        content.setVisible(hasText && expanded);
-        content.setManaged(hasText && expanded);
+        textPane.setVisible(hasText && expanded);
+        textPane.setManaged(hasText && expanded);
         if (hasText) {
             chevron.setContent(expanded ? IconFactory.CHEVRON_DOWN_PATH : IconFactory.CHEVRON_RIGHT_PATH);
             state.setText(expanded ? "收起" : "展开（" + text.length() + " 字符）");

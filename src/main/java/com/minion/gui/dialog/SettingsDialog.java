@@ -1,6 +1,8 @@
 package com.minion.gui.dialog;
 
 import com.minion.core.config.Config;
+import com.minion.core.config.ContextSettings;
+import com.minion.core.context.ContextManager;
 import com.minion.core.config.ModelConfig;
 import com.minion.core.config.ModelManager;
 import com.minion.core.mcp.McpManager;
@@ -103,6 +105,15 @@ public class SettingsDialog {
     // ===== 模型页（迁移自 ModelDialog + propagate） =====
 
     private static VBox modelPane(final ModelManager models, final SessionManager manager) {
+        final ComboBox<String> defaultModel = new ComboBox<String>();
+        defaultModel.setId("new-session-default-model");
+        defaultModel.setMaxWidth(Double.MAX_VALUE);
+        refreshDefaultModel(defaultModel, models);
+        defaultModel.valueProperty().addListener((obs, old, selected) -> {
+            if (selected != null && !selected.equals(models.defaultName())) models.setDefault(selected);
+        });
+        Label defaultHelp = new Label("选择后立即保存；仅影响新会话，旧会话保留原模型。");
+        defaultHelp.setWrapText(true);
         final ListView<String> list = new ListView<String>();
         list.setCellFactory(lv -> new ListCell<String>() {
             @Override protected void updateItem(String item, boolean empty) {
@@ -114,7 +125,7 @@ public class SettingsDialog {
                 }
                 setText(item);
                 // 当前激活模型：名称右侧主色圆点（SVG，替代原 "  ●" 文本）
-                if (item.equals(models.currentName())) {
+                if (item.equals(models.defaultName())) {
                     SVGPath dot = IconFactory.dot();
                     IconFactory.size(dot, 8);
                     setGraphic(dot);
@@ -129,7 +140,7 @@ public class SettingsDialog {
         list.setPrefSize(360, 240);
 
         HBox actions = new HBox(8);
-        Button activate = new Button("激活");
+        Button activate = new Button("设为新会话默认");
         Button add = new Button("新建");
         Button edit = new Button("修改");
         Button del = new Button("删除");
@@ -142,14 +153,18 @@ public class SettingsDialog {
             int idx = list.getSelectionModel().getSelectedIndex();
             if (idx < 0) return;
             String name = list.getItems().get(idx);
-            if (!canActivate(name, models.currentName())) return; // 双保险：已激活不可重复激活
-            models.setCurrent(name);
-            manager.applyModelChanged(); // 需求 13：切换模型全量生效
+            if (!canActivate(name, models.defaultName())) return;
+            models.setDefault(name);
+            refreshDefaultModel(defaultModel, models);
             refresh(list, models);
         });
         // 选中项变化（鼠标点击/键盘导航/refresh 重选）联动按钮状态
         list.getSelectionModel().selectedItemProperty().addListener(
-                (obs, o, n) -> activate.setDisable(!canActivate(n, models.currentName())));
+                (obs, o, n) -> activate.setDisable(!canActivate(n, models.defaultName())));
+        defaultModel.valueProperty().addListener((obs, o, n) -> {
+            list.refresh();
+            activate.setDisable(!canActivate(list.getSelectionModel().getSelectedItem(), models.defaultName()));
+        });
         add.setOnAction(e -> {
             ModelConfig mc = form(null);
             if (mc != null) {
@@ -157,6 +172,7 @@ public class SettingsDialog {
                 if (models.currentName().equals(mc.displayName)) manager.applyModelChanged();
             }
             refresh(list, models);
+            refreshDefaultModel(defaultModel, models);
         });
         edit.setOnAction(e -> {
             int idx = list.getSelectionModel().getSelectedIndex();
@@ -167,6 +183,7 @@ public class SettingsDialog {
                 manager.applyModelChanged(); // 参数修改实时生效（含运行中会话，下一轮生效）
             }
             refresh(list, models);
+            refreshDefaultModel(defaultModel, models);
         });
         del.setOnAction(e -> {
             int idx = list.getSelectionModel().getSelectedIndex();
@@ -182,13 +199,21 @@ public class SettingsDialog {
                 manager.applyModelChanged(); // 删除后 current 可能回落，统一 propagate
             }
             refresh(list, models);
+            refreshDefaultModel(defaultModel, models);
         });
         actions.getChildren().addAll(activate, add, edit, del);
 
         VBox box = new VBox(10);
         box.setPadding(new Insets(10));
-        box.getChildren().addAll(list, actions);
+        box.getChildren().addAll(new Label("新会话默认模型"), defaultModel, defaultHelp, list, actions);
         return box;
+    }
+
+    private static void refreshDefaultModel(ComboBox<String> choice, ModelManager models) {
+        List<String> names = new ArrayList<String>();
+        for (ModelConfig model : models.list()) names.add(model.displayName);
+        choice.getItems().setAll(names);
+        choice.setValue(models.defaultName());
     }
 
     private static void refresh(ListView<String> list, ModelManager models) {
@@ -196,7 +221,7 @@ public class SettingsDialog {
         for (ModelConfig m : models.list()) {
             list.getItems().add(m.displayName);
         }
-        int idx = list.getItems().indexOf(models.currentName());
+        int idx = list.getItems().indexOf(models.defaultName());
         // 重选当前模型：「激活」按钮的置灰联动依赖此次选中变化触发监听，勿改为不重选/增量刷新
         list.getSelectionModel().select(idx < 0 ? 0 : idx);
     }
@@ -208,6 +233,13 @@ public class SettingsDialog {
 
     /** 新建（mc==null 带默认值）/ 修改（mc!=null 预填）表单；OK 返回配置，取消返回 null（迁移自 ModelDialog） */
     private static ModelConfig form(ModelConfig mc) {
+        Dialog<ModelConfig> d = modelForm(mc);
+        Optional<ModelConfig> r = d.showAndWait();
+        return r.isPresent() ? r.get() : null;
+    }
+
+    /** 单独构建可验证的设置表单，不启动请求、不显示窗口。 */
+    private static Dialog<ModelConfig> modelForm(ModelConfig mc) {
         Dialog<ModelConfig> d = new Dialog<ModelConfig>();
         d.setTitle(mc == null ? "新建模型" : "修改模型");
         d.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -222,10 +254,10 @@ public class SettingsDialog {
         displayName.setPromptText("页签显示标识");
         if (mc != null) displayName.setDisable(true); // ModelManager.update 不复制 displayName
         TextField url = new TextField(mc == null ? "https://api.deepseek.com/v1/chat/completions" : mc.url);
-        TextField apiKey = new TextField(mc == null ? "" : mc.apiKey);
+        TextField apiKey = new TextField(mc == null || mc.apiKey == null ? "" : mc.apiKey);
         apiKey.setPromptText("sk-...");
-        TextField modelName = new TextField(mc == null ? "" : mc.modelName);
-        TextField sessionId = new TextField(mc == null ? "" : mc.sessionId);
+        TextField modelName = new TextField(mc == null || mc.modelName == null ? "" : mc.modelName);
+        TextField sessionId = new TextField(mc == null || mc.sessionId == null ? "" : mc.sessionId);
         sessionId.setPromptText("SFM Agent 必填；其他模型留空");
         ComboBox<String> provider = new ComboBox<String>();
         provider.getItems().addAll("qwen", "deepseek", "sfm-agent");
@@ -247,8 +279,11 @@ public class SettingsDialog {
         effort.setValue(mc == null ? "max" : mc.reasoningEffort);
         TextField maxCtx = new TextField(mc == null ? "900000" : String.valueOf(mc.maxContextTokens));
         TextField maxOut = new TextField(mc == null ? "8192" : String.valueOf(mc.maxOutputTokens <= 0 ? 8192 : mc.maxOutputTokens));
-        TextField thr = new TextField(mc == null ? "0.8" : String.valueOf(mc.compressThreshold));
+        TextField thr = new TextField(mc == null ? "80" : String.valueOf(ContextManager.normalizedThreshold(mc.compressThreshold)*100));
+        thr.setPromptText("百分比，例如90；不是0.9");
         TextField keep = new TextField(mc == null ? "50" : String.valueOf(mc.keepRecentMessages));
+        maxCtx.setId("model-context-window"); thr.setId("model-compression-percent");
+        maxOut.setId("model-output-budget"); keep.setId("model-keep-recent");
 
         grid.addRow(0, new Label("标识名:"), displayName);
         grid.addRow(1, new Label("URL:"), url);
@@ -259,9 +294,21 @@ public class SettingsDialog {
         grid.addRow(6, new Label("思考:"), thinking);
         grid.addRow(7, new Label("effort:"), effort);
         grid.addRow(8, new Label("maxOutputTokens:"), maxOut);
-        grid.addRow(9, new Label("maxContextTokens:"), maxCtx);
-        grid.addRow(10, new Label("compressThreshold:"), thr);
+        grid.addRow(9, new Label("上下文窗口 (token):"), maxCtx);
+        grid.addRow(10, new Label("自动压缩阈值 (%):"), thr);
         grid.addRow(11, new Label("keepRecentMessages:"), keep);
+        Label preview = new Label(); preview.setWrapText(true); preview.setMaxWidth(430);
+        preview.setId("model-compression-preview");
+        Runnable refreshPreview = () -> {
+            try {
+                ContextSettings s=ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText());
+                preview.setText("按配置窗口预计在 "+s.triggerTokens()+" token 自动压缩，保留单次输出余量。\n按模型保存；服务端超限/空响应恢复及本会话安全窗口仍可能提前压缩。\n1M填写1000000或服务端公布的准确值；本地配置不会改变服务端容量。");
+            } catch(IllegalArgumentException e) { preview.setText(e.getMessage()); }
+        };
+        for(TextField field:new TextField[]{maxCtx,thr,maxOut,keep})
+            field.textProperty().addListener((obs,old,value) -> refreshPreview.run());
+        refreshPreview.run();
+        grid.add(preview,0,12,2,1);
         provider.valueProperty().addListener((obs, old, value) -> {
             boolean sfm = "sfm-agent".equalsIgnoreCase(value);
             modelName.setDisable(sfm);
@@ -272,6 +319,10 @@ public class SettingsDialog {
         modelName.setDisable(sfm);
         thinking.setDisable(sfm);
         d.getDialogPane().setContent(grid);
+        d.getDialogPane().lookupButton(ButtonType.OK).addEventFilter(ActionEvent.ACTION, event -> {
+            try { ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText()); }
+            catch(IllegalArgumentException ex) { event.consume(); preview.setText(ex.getMessage()); }
+        });
 
         d.setResultConverter(bt -> {
             if (bt != ButtonType.OK) return null;
@@ -284,14 +335,14 @@ public class SettingsDialog {
             out.sessionId = sessionId.getText().trim();
             out.thinking = thinking.isSelected();
             out.reasoningEffort = effort.getValue() == null ? "max" : effort.getValue();
-            out.maxOutputTokens = Math.max(256, Math.min(parseInt(maxOut.getText(), 8192), 65536));
-            out.maxContextTokens = parseInt(maxCtx.getText(), 900000);
-            out.compressThreshold = parseDouble(thr.getText(), 0.8);
-            out.keepRecentMessages = parseInt(keep.getText(), 50);
+            ContextSettings settings=ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText());
+            out.maxOutputTokens = settings.output;
+            out.maxContextTokens = settings.window;
+            out.compressThreshold = settings.ratio;
+            out.keepRecentMessages = settings.keep;
             return out;
         });
-        Optional<ModelConfig> r = d.showAndWait();
-        return r.isPresent() ? r.get() : null;
+        return d;
     }
 
     // ===== MCP 页（列表 + 状态点 + 启用开关 + 新建/编辑/删除/重连） =====
@@ -630,6 +681,7 @@ public class SettingsDialog {
         final Node root;
         private final Config config;
         private final TextField skillsDir;
+        private final TextField sharedKnowledgeDir;
         private final TextField pythonPath;
         private final TextArea toolWhitelist;
         private final TextArea cmdWhitelist;
@@ -656,6 +708,20 @@ public class SettingsDialog {
                 if (dir != null) skillsDir.setText(dir.getAbsolutePath());
             });
             skillsBox.getChildren().addAll(skillsDir, browse);
+            sharedKnowledgeDir = new TextField(config.sharedKnowledgeDir());
+            HBox knowledgeBox = new HBox(6);
+            HBox.setHgrow(sharedKnowledgeDir, Priority.ALWAYS);
+            Button browseKnowledge = new Button("浏览…");
+            browseKnowledge.getStyleClass().add("btn-ghost");
+            browseKnowledge.setOnAction(e -> {
+                DirectoryChooser dc = new DirectoryChooser();
+                dc.setTitle("选择跨项目共享知识库目录");
+                java.io.File current = new java.io.File(sharedKnowledgeDir.getText().trim());
+                if (current.isDirectory()) dc.setInitialDirectory(current);
+                java.io.File dir = dc.showDialog(owner);
+                if (dir != null) sharedKnowledgeDir.setText(dir.getAbsolutePath());
+            });
+            knowledgeBox.getChildren().addAll(sharedKnowledgeDir, browseKnowledge);
             pythonPath = new TextField(config.pythonPath());
             HBox pythonBox = new HBox(6);
             HBox.setHgrow(pythonPath, Priority.ALWAYS);
@@ -691,6 +757,7 @@ public class SettingsDialog {
             VBox rows = new VBox(10);
             rows.getChildren().addAll(
                     row("技能目录 skills.dir:", skillsBox),
+                    row("共享知识库（只读）:", knowledgeBox),
                     row("Python/Anaconda:", pythonBox),
                     row("确认白名单\n(工具, 逗号分隔):", toolWhitelist),
                     row("确认白名单\n(命令, 逗号分隔):", cmdWhitelist),
@@ -710,6 +777,7 @@ public class SettingsDialog {
         /** 「应用」按钮：全部配置项写入，窗口不关闭；port/timeoutMs 非法弹错且该项不写 */
         void apply() {
             config.set("skills.dir", skillsDir.getText().trim());
+            config.set("knowledge.shared.dir", sharedKnowledgeDir.getText().trim());
             config.set("python.path", pythonPath.getText().trim());
             // 白名单是逗号分隔的单行配置：多行粘贴的换行替换为空格，否则落盘后重载会静默丢内容
             config.set("confirm.whitelist.tools",

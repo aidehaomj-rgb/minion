@@ -7,6 +7,16 @@ import static org.junit.Assert.*;
 
 /** 发送键判定与文案：纯静态逻辑，可脱离 JavaFX 单测（KeyCode 为枚举，无需 Toolkit） */
 public class InputViewKeyTest {
+    @Test public void repeatedEnterAfterSendMustNeverBecomeStop() {
+        assertEquals(InputView.BtnMode.SEND, InputView.keyboardMode(false,false,true));
+        assertEquals(InputView.BtnMode.SEND_DIM, InputView.keyboardMode(true,false,false));
+        assertEquals(InputView.BtnMode.STOP, InputView.buttonMode(true,false,false));
+    }
+    @Test public void keyboardStillSupportsGuidanceAndAnswers() {
+        assertEquals(InputView.BtnMode.SUPPLEMENT, InputView.keyboardMode(true,false,true));
+        assertEquals(InputView.BtnMode.ANSWER, InputView.keyboardMode(true,true,true));
+        assertEquals(InputView.BtnMode.ANSWER_DIM, InputView.keyboardMode(true,true,false));
+    }
 
     // ===== isSendKey：默认模式（Ctrl+Enter 发送） =====
 

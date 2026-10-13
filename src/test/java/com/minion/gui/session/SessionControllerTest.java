@@ -16,6 +16,41 @@ import static org.junit.Assert.*;
 /** 历史消息重演：USER→USER_MESSAGE、ASSISTANT content→CONTENT，工具过程跳过 */
 public class SessionControllerTest {
 
+    @Test public void mappedChoiceHistoryShowsOriginalAnswerOnly() {
+        SessionController controller=new SessionController();
+        String output="{\"type\":\"minion.ask.answer.v1\",\"answer\":\"3\",\"selectedOptions\":[{\"index\":3,\"label\":\"两者都做\"}]}";
+        controller.replayHistory(Collections.singletonList(Message.toolResult("ask1","AskUserQuestion",output)));
+        List<Ev> events=controller.eventList().snapshot();
+        assertEquals(2,events.size());
+        assertEquals(EventList.Kind.USER_SUPPLEMENT,events.get(0).kind);
+        assertEquals("3",events.get(0).text);
+        assertEquals("ok\n"+output,events.get(1).data);
+    }
+
+    @Test public void responseEndHasAnExplicitUiBoundary() {
+        SessionController controller = new SessionController();
+        controller.onThinking("思考");
+        controller.onResponseEnd();
+        List<Ev> events = controller.eventList().snapshot();
+        assertEquals(2, events.size());
+        assertEquals(EventList.Kind.RESPONSE_END, events.get(1).kind);
+    }
+
+    @Test public void toolOnlyHistoryPreservesReasoningAndEndsIt() {
+        SessionController controller = new SessionController();
+        Message message = Message.assistant(null);
+        message.reasoningContent = "调用工具前的完整思考";
+        ToolCall call = new ToolCall(); call.name="Read"; call.arguments="{}";
+        message.toolCalls=Collections.singletonList(call);
+        controller.replayHistory(Collections.singletonList(message));
+        List<Ev> events=controller.eventList().snapshot();
+        assertEquals(3,events.size());
+        assertEquals(EventList.Kind.THINKING,events.get(0).kind);
+        assertEquals(message.reasoningContent,events.get(0).text);
+        assertEquals(EventList.Kind.RESPONSE_END,events.get(1).kind);
+        assertEquals(EventList.Kind.TOOL_CALL,events.get(2).kind);
+    }
+
     /** 恢复历史：带图 user 消息事件文本拼图片占位（聊天区不渲染图片本体） */
     @Test
     public void replayHistory_userWithImages_emitsPlaceholder() {
@@ -38,11 +73,12 @@ public class SessionControllerTest {
         msgs.add(Message.assistant("你好，我是助手"));
         c.replayHistory(msgs);
         List<Ev> evs = c.eventList().snapshot();
-        assertEquals(2, evs.size());
+        assertEquals(3, evs.size());
         assertEquals(EventList.Kind.USER_MESSAGE, evs.get(0).kind);
         assertEquals("你好", evs.get(0).text);
         assertEquals(EventList.Kind.CONTENT, evs.get(1).kind);
         assertEquals("你好，我是助手", evs.get(1).text);
+        assertEquals(EventList.Kind.RESPONSE_END, evs.get(2).kind);
     }
 
     /** 历史回放：assistant 带 reasoningContent → 先 THINKING 事件（完整文本）再 CONTENT。
@@ -56,11 +92,12 @@ public class SessionControllerTest {
         msgs.add(m);
         c.replayHistory(msgs);
         List<Ev> evs = c.eventList().snapshot();
-        assertEquals(2, evs.size());
+        assertEquals(3, evs.size());
         assertEquals(EventList.Kind.THINKING, evs.get(0).kind);
         assertEquals("思考过程", evs.get(0).text);
         assertEquals(EventList.Kind.CONTENT, evs.get(1).kind);
         assertEquals("正文回复", evs.get(1).text);
+        assertEquals(EventList.Kind.RESPONSE_END, evs.get(2).kind);
     }
 
     /** 历史回放：TOOL 结果消息 → TOOL_RESULT 事件；系统消息/空 content 跳过 */

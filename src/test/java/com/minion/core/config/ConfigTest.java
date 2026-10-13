@@ -46,6 +46,16 @@ public class ConfigTest {
         assertTrue(c2.confirmSkip());
     }
 
+    /** 共享知识库目录写入后，所有新旧会话使用同一配置，重启后仍保留。 */
+    @Test
+    public void sharedKnowledgeDir_persists() throws IOException {
+        Path root = tmp.newFolder("shared-config").toPath();
+        Config config = Config.load(root, TEST_DEFAULTS);
+        config.set("knowledge.shared.dir", "D:\\zmj\\海关知识库");
+        assertEquals("D:\\zmj\\海关知识库", config.sharedKnowledgeDir());
+        assertEquals("D:\\zmj\\海关知识库", Config.load(root, TEST_DEFAULTS).sharedKnowledgeDir());
+    }
+
     /** 白名单追加：去重、写入外部文件 */
     @Test
     public void appendWhitelist_deduplicatesAndPersists() throws IOException {

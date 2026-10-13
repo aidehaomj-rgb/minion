@@ -17,6 +17,7 @@ public class ModelManager {
     private final Path file;
     private final List<ModelConfig> models = new ArrayList<ModelConfig>();
     private String currentName;
+    private String defaultName;
 
     private ModelManager(Path file) { this.file = file; }
 
@@ -43,6 +44,7 @@ public class ModelManager {
                         }
                     }
                     if (h.currentModelName != null) m.currentName = h.currentModelName;
+                    m.defaultName = h.defaultModelName;
                     loaded = true;
                 }
                 if (m.models.isEmpty()) loaded = false; // 无有效条目视为未加载成功
@@ -59,6 +61,7 @@ public class ModelManager {
         }
         // 回退检查：current 指向不存在的模型时取第一个（列表已保证非空且无 null）
         if (m.get(m.currentName) == null) m.currentName = m.models.get(0).displayName;
+        if (m.get(m.defaultName) == null) m.defaultName = m.currentName;
         return m;
     }
 
@@ -111,6 +114,15 @@ public class ModelManager {
     public ModelConfig current() { return get(currentName); }
 
     public String currentName() { return currentName; }
+    /** 新会话默认值；不改变任何已保存会话的模型选择。 */
+    public String defaultName() { return get(defaultName) == null ? currentName : defaultName; }
+    public ModelConfig defaultModel() { return get(defaultName()); }
+    public boolean setDefault(String displayName) {
+        if (get(displayName) == null) return false;
+        defaultName = displayName;
+        save();
+        return true;
+    }
 
     public boolean add(ModelConfig c) {
         if (c == null || c.displayName == null || c.displayName.trim().isEmpty()) return false;
@@ -144,6 +156,7 @@ public class ModelManager {
         if (c == null || models.size() <= 1) return false;
         models.remove(c);
         if (currentName.equals(displayName)) currentName = models.get(0).displayName;
+        if (displayName.equals(defaultName)) defaultName = currentName;
         save();
         return true;
     }
@@ -151,6 +164,7 @@ public class ModelManager {
     public void setCurrent(String displayName) {
         if (get(displayName) == null) return;
         currentName = displayName;
+        defaultName = displayName; // 保留旧“激活”API设置新会话默认值的兼容行为。
         save();
     }
 
@@ -161,6 +175,7 @@ public class ModelManager {
             Holder h = new Holder();
             h.models = models;
             h.currentModelName = currentName;
+            h.defaultModelName = defaultName();
             Files.createDirectories(file.getParent());
             Files.write(tmp, new Gson().toJson(h).getBytes(StandardCharsets.UTF_8));
             Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
@@ -185,5 +200,6 @@ public class ModelManager {
     private static class Holder {
         List<ModelConfig> models;
         String currentModelName;
+        String defaultModelName;
     }
 }

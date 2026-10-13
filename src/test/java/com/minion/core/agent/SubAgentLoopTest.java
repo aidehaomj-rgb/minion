@@ -24,9 +24,75 @@ import java.util.List;
 import static org.junit.Assert.*;
 
 public class SubAgentLoopTest {
+    @Test public void streamingLoopRecoversWithoutPollutingChildHistory() throws Exception {
+        FakeLlmClient llm=new FakeLlmClient();llm.addTurn(com.minion.core.llm.RepetitionGuardTest.loopText());llm.addTurn("子任务核验完成");
+        SubAgentLoop sub=new SubAgentLoop("系统","校验result_1",tmp.getRoot().toString(),llm,new ToolRegistry(),
+                new ConfirmGate(Config.load(tmp.getRoot().toPath()),new FakeConfirmUi(ConfirmUi.Decision.APPROVE)),new RecordingUi());
+        assertEquals("子任务核验完成",sub.run());assertTrue(sub.succeeded());assertEquals(1,llm.actionRecoveryCalls);
+        assertFalse(llm.requests.get(1).messages.stream().anyMatch(m->m.content!=null&&m.content.contains("good")));
+    }
+    @Test public void childStreamingLoopBudgetCannotBecomeSuccess() throws Exception {
+        FakeLlmClient llm=new FakeLlmClient();llm.addTurn(com.minion.core.llm.RepetitionGuardTest.loopText());
+        SubAgentLoop sub=new SubAgentLoop("系统","校验result_1",tmp.getRoot().toString(),llm,new ToolRegistry(),
+                new ConfirmGate(Config.load(tmp.getRoot().toPath()),new FakeConfirmUi(ConfirmUi.Decision.APPROVE)),new RecordingUi());
+        assertTrue(sub.run().contains("未完成"));assertFalse(sub.succeeded());assertEquals(4,llm.requests.size());
+    }
+    @Test public void v25ChildUsesConfiguredThresholdAndOutputReserve() throws Exception {
+        Config config=Config.load(tmp.getRoot().toPath());
+        SubAgentLoop sub=new SubAgentLoop("系统","仅子任务",tmp.getRoot().toString(),new FakeLlmClient(),new ToolRegistry(),
+                new ConfirmGate(config,new FakeConfirmUi(ConfirmUi.Decision.APPROVE)),new RecordingUi());
+        sub.setContextWindow(1000000,0.95,65536);
+        java.lang.reflect.Field field=SubAgentLoop.class.getDeclaredField("context"); field.setAccessible(true);
+        com.minion.core.context.ContextManager cm=(com.minion.core.context.ContextManager)field.get(sub);
+        assertEquals(934464,cm.autoCompressAtTokens());
+        sub.setContextWindow(1000000,0.9,8192);
+        cm=(com.minion.core.context.ContextManager)field.get(sub);
+        assertEquals(900000,cm.autoCompressAtTokens());
+    }
 
     @Rule
     public TemporaryFolder tmp = new TemporaryFolder();
+
+    @Test public void childTodoAndContextCannotMutateParent() throws Exception {
+        Config config=Config.load(tmp.getRoot().toPath());
+        TodoList parent=new TodoList(); parent.items.add(new TodoList.TodoItem("主任务",false));
+        ToolRegistry registry=new ToolRegistry(); registry.register(new com.minion.core.tools.TodoWriteTool(parent));
+        Session session=Session.create(tmp.getRoot().toString(),"fake");
+        registry.register(new com.minion.core.tools.context.ContextTool(session,131072,config));
+        FakeLlmClient llm=new FakeLlmClient();
+        ToolCall todo=new ToolCall(); todo.id="todo"; todo.name="TodoWrite";
+        todo.arguments="{\"items\":[{\"text\":\"子任务\",\"done\":false}]}";
+        ToolCall context=new ToolCall(); context.id="ctx"; context.name="Context";
+        context.arguments="{\"action\":\"policy\",\"outputMode\":\"verbose\"}";
+        llm.addTurnWithTools(Arrays.asList(todo,context),null);
+        ToolCall mark=new ToolCall();mark.id="child-mark";mark.name="TodoWrite";mark.arguments="{\"action\":\"mark\",\"index\":0}";
+        llm.addTurnWithTools(Collections.singletonList(mark),null);llm.addTurn("子任务已完成");
+        SubAgentLoop sub=new SubAgentLoop("系统","仅子任务",tmp.getRoot().toString(),llm,registry,
+                new ConfirmGate(config,new FakeConfirmUi(ConfirmUi.Decision.APPROVE)),new RecordingUi());
+        java.nio.file.Path record=tmp.getRoot().toPath().resolve("child.json"); sub.setRecordPath(record);
+        sub.run();
+        assertTrue(sub.succeeded()); assertEquals("主任务",parent.items.get(0).text);
+        assertTrue(llm.requests.get(1).messages.get(3).content.contains("子任务"));
+        for(JsonObject schema:llm.lastRequestTools) assertNotEquals("Context",schema.getAsJsonObject("function").get("name").getAsString());
+        String saved=new String(java.nio.file.Files.readAllBytes(record),java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(saved.contains("仅子任务")); assertTrue(saved.contains("returned_needs_review"));
+        assertTrue(saved.contains("子任务"));
+    }
+
+    @Test public void childHasIndependentCompactionAndAssignmentAnchor() throws Exception {
+        Config config=Config.load(tmp.getRoot().toPath());
+        FakeLlmClient llm=new FakeLlmClient(); ToolRegistry registry=new ToolRegistry();
+        registry.register(new com.minion.core.tools.example.ExampleTool());
+        ToolCall call=new ToolCall(); call.id="one"; call.name="example";
+        call.arguments="{\"text\":\""+String.join("",java.util.Collections.nCopies(500,"证据"))+"\"}";
+        llm.addTurnWithTools(Collections.singletonList(call),"读取中"); llm.addTurn("完成子范围");
+        SubAgentLoop sub=new SubAgentLoop("系统","只查20-30行",tmp.getRoot().toString(),llm,registry,
+                new ConfirmGate(config,new FakeConfirmUi(ConfirmUi.Decision.APPROVE)),new RecordingUi());
+        sub.setContextWindow(100,0.8); sub.run();
+        assertFalse(llm.completeChatRequests.isEmpty());
+        assertTrue(llm.lastRequestMessages.toString(),llm.lastRequestMessages.stream()
+                .anyMatch(m -> m.summary && m.content.contains("只查20-30行")));
+    }
 
     @Test
     public void subAgent_runsOwnLoop_returnsFinalText() throws Exception {
@@ -146,15 +212,19 @@ public class SubAgentLoopTest {
         llm.addTurn("总结");
         loop.runUserTurn("派发");
 
-        // 0:user 1:assistant(tool_calls) 2:tool(子agent结果) 3:assistant(最终)
+        // V26: 子Agent返回不是主任务完成。脚本化模型拒绝实际核对，
+        // 统一状态检查最多续接12次，之后明确暂停，不能静默结束或报成功。
         List<Message> msgs = loop.messages();
-        assertEquals(4, msgs.size());
+        assertEquals(16, msgs.size());
         assertEquals(Message.Role.TOOL, msgs.get(2).role);
         assertTrue(msgs.get(2).content.contains("子任务甲完成"));
         assertEquals("总结", msgs.get(3).content);
 
         // 请求序列：0=主agent第1轮（含 task schema），1=子agent（不含 task），2=主agent第2轮
-        assertEquals(3, llm.requests.size());
+        assertEquals(15, llm.requests.size());
+        assertFalse(loop.lastTurnSucceeded());
+        assertEquals("paused", loop.session().taskState.status);
+        assertTrue(loop.session().taskState.hasPendingChildReviews());
         assertTrue(llm.requests.get(0).tools.stream()
                 .anyMatch(t -> "task".equals(t.getAsJsonObject("function").get("name").getAsString())));
         assertTrue(llm.requests.get(1).tools.stream()
@@ -382,7 +452,7 @@ public class SubAgentLoopTest {
         String result = sub.run();
         assertEquals("子任务结果：完成", result);
         assertEquals(2, llm.requests.size()); // 原始请求 + 1 次重试
-        assertTrue(ui.warnings.isEmpty());    // 成功后静默恢复；重试提示在指示器不进消息区
+        assertTrue(ui.warnings.stream().allMatch(s -> s.contains("正在核验"))); // 重试成功仍静默；只允许独立结束核验提示
         assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
         assertTrue(ui.errors.isEmpty());
     }
@@ -562,7 +632,7 @@ public class SubAgentLoopTest {
         String result = sub.run();
         assertEquals("子任务结果：完成", result);
         assertEquals(2, llm.requests.size());
-        assertTrue(ui.warnings.isEmpty());
+        assertTrue(ui.warnings.stream().allMatch(s -> s.contains("正在核验")));
         assertTrue(ui.errors.isEmpty());
         assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
     }

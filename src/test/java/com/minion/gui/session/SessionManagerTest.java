@@ -34,6 +34,66 @@ import static org.junit.Assert.*;
 
 /** SessionManager 纯逻辑测试：会话 CRUD、工作空间切换、标题回调（无 JavaFX/网络） */
 public class SessionManagerTest {
+    @Test public void newDefaultAffectsOnlyNewSessionsAndSurvivesRestart() throws Exception {
+        Path jar=tmp.newFolder("default-select").toPath();Config cfg=Config.load(jar);WorkspaceManager ws=WorkspaceManager.load(jar);ModelManager models=ModelManager.load(jar);
+        SessionManager m=new SessionManager(FAKE_UI,cfg,jar,ws,models,new ArrayList<Skill>(),null,null);
+        SessionHandle old=m.createSession("旧会话");LlmClient original=old.llm;String oldModel=old.session.modelDisplayName;
+        old.running=true;
+        assertTrue(models.setDefault("qwen3-max"));assertSame(original,old.llm);assertTrue(old.running);assertEquals(oldModel,m.modelForSession(old).displayName);
+        old.running=false;SessionHandle fresh=m.createSession("新会话");assertEquals("qwen3-max",fresh.session.modelDisplayName);
+        assertTrue(m.selectModelForSession(fresh,oldModel));assertEquals("qwen3-max",models.defaultName());m.shutdown();
+        SessionManager restored=new SessionManager(FAKE_UI,Config.load(jar),jar,WorkspaceManager.load(jar),ModelManager.load(jar),new ArrayList<Skill>(),null,null);
+        try {assertEquals(oldModel,restored.modelForSession(restored.findSession(old.id)).displayName);
+            assertEquals(oldModel,restored.modelForSession(restored.findSession(fresh.id)).displayName);
+            assertEquals("qwen3-max",restored.createSession("重启后新会话").session.modelDisplayName);
+        } finally {restored.shutdown();}
+    }
+    @Test public void legacySessionWithoutAliasKeepsUniqueOriginalModel() throws Exception {
+        Path jar=tmp.newFolder("legacy-model").toPath();WorkspaceManager ws=WorkspaceManager.load(jar);ModelManager models=ModelManager.load(jar);models.setDefault("deepseek-v4-flash");
+        Session legacy=Session.create(tmp.getRoot().getPath(),"qwen3-max");legacy.title="旧千问会话";
+        new SessionStore(WorkspaceManager.sessionDirFor(jar,ws.currentName())).save(legacy);
+        SessionManager restored=new SessionManager(FAKE_UI,Config.load(jar),jar,ws,models,new ArrayList<Skill>(),null,null);
+        try {assertEquals("qwen3-max",restored.findSession(legacy.id).session.modelDisplayName);}finally{restored.shutdown();}
+    }
+    @Test public void v25SwitchToDeepseekClearsOldManualAndLearnedWindowWithoutChangingOtherSessions() throws Exception {
+        Path jar=tmp.newFolder("v25-switch").toPath();
+        SessionManager m=new SessionManager(FAKE_UI,Config.load(jar),jar,WorkspaceManager.load(jar),ModelManager.load(jar),new ArrayList<Skill>(),null,null);
+        try {
+            ModelConfig q=ModelManager.createQwen(); q.displayName="旧千问3.8"; q.modelName="Qwen3.8-27B";
+            ModelConfig d=ModelManager.createDeepseek(); d.displayName="千问3.8标识但实际DeepSeek";
+            d.modelName="deepseek-v4-flash-0731"; d.maxContextTokens=1000000; d.compressThreshold=0.9;
+            m.models().add(q); m.models().add(d);
+            SessionHandle a=m.createSession("A"),b=m.createSession("B");
+            assertTrue(m.selectModelForSession(a,q.displayName));
+            assertEquals(60000,a.loop.contextManager().maxTokens());
+            m.configureContext(a,"compact",60000); a.session.observedContextLimit=45000;
+            assertTrue(m.selectModelForSession(a,d.displayName));
+            assertEquals(0,a.session.preferredContextLimit); assertEquals(0,a.session.observedContextLimit);
+            assertEquals(1000000,a.loop.contextManager().maxTokens());
+            assertEquals(900000,a.loop.contextManager().autoCompressAtTokens());
+            assertEquals("compact",a.session.contextProfile);
+            assertNotEquals(d.displayName,b.session.modelDisplayName);
+            SessionStore store=new SessionStore(WorkspaceManager.sessionDirFor(jar,a.workspaceName));
+            assertEquals(0,store.load(a.id).preferredContextLimit);
+        } finally {m.shutdown();}
+    }
+    @Test public void v25ThresholdHotUpdateKeepsManualWindowAndSurvivesModelReload() throws Exception {
+        Path jar=tmp.newFolder("v25-settings").toPath();
+        ModelManager models=ModelManager.load(jar);
+        ModelConfig d=models.current().copy(); d.modelName="deepseek-v4-flash-0731"; d.maxContextTokens=1000000; d.compressThreshold=0.9;
+        models.update(d);
+        SessionManager m=new SessionManager(FAKE_UI,Config.load(jar),jar,WorkspaceManager.load(jar),models,new ArrayList<Skill>(),null,null);
+        try {
+            SessionHandle a=m.createSession("A"),b=m.createSession("B");
+            m.configureContext(a,"balanced",800000);
+            d.compressThreshold=0.95; d.maxOutputTokens=65536; models.update(d); m.applyModelChanged();
+            assertEquals(800000,a.session.preferredContextLimit);
+            assertEquals(734464,a.loop.contextManager().autoCompressAtTokens());
+            assertEquals(934464,b.loop.contextManager().autoCompressAtTokens());
+            ModelConfig reloaded=ModelManager.load(jar).get(d.displayName);
+            assertEquals(0.95,reloaded.compressThreshold,0); assertEquals(1000000,reloaded.maxContextTokens);
+        } finally {m.shutdown();}
+    }
 
     @Rule
     public TemporaryFolder tmp = new TemporaryFolder();
@@ -41,6 +101,61 @@ public class SessionManagerTest {
     private static final ConfirmUi FAKE_UI = new ConfirmUi() {
         @Override public Decision ask(String message) { return Decision.APPROVE; }
     };
+
+    @Test public void stagedGuidanceRunsAsNextTaskWithImages() throws Exception {
+        Path jar=tmp.newFolder("queue-jar").toPath();
+        SpyManager m=new SpyManager(FAKE_UI,Config.load(jar),jar,WorkspaceManager.load(jar),ModelManager.load(jar));
+        SessionHandle h=m.createSession("测试"); FakeLlmClient llm=m.created.get(0);
+        llm.addTurn("第一项完成"); llm.addTurn("第二项完成");
+        ImagePart image=new ImagePart(); image.mime="image/png"; image.base64="QUJD";
+        h.running=true; m.stageGuidance(h,"继续生成另一张表",java.util.Collections.singletonList(image));
+        assertEquals(1,h.queuedSnapshot().size());
+        m.send(h,"先处理A表"); h.pool.submit(() -> {}).get(5,TimeUnit.SECONDS);
+        assertFalse(h.running); assertTrue(h.queuedSnapshot().isEmpty());
+        assertEquals(2,llm.requests.size());
+        assertEquals("继续生成另一张表",h.session.taskState.objective);
+        Message user=llm.requests.get(1).messages.stream().filter(x -> x.role==Message.Role.USER
+                && "继续生成另一张表".equals(x.content)).findFirst().get();
+        assertEquals(1,user.images.size()); assertFalse(user.supplement);
+        m.shutdown();
+    }
+
+    @Test public void immediateGuideIsNotAlsoRunAsNextTask() throws Exception {
+        Path jar=tmp.newFolder("steer-jar").toPath();
+        SpyManager m=new SpyManager(FAKE_UI,Config.load(jar),jar,WorkspaceManager.load(jar),ModelManager.load(jar));
+        SessionHandle h=m.createSession("测试"); FakeLlmClient llm=m.created.get(0); llm.addTurn("完成");
+        h.running=true; m.stageGuidance(h,"仅新增列宽要求",null); m.promoteGuidance(h);
+        assertTrue(h.queuedSnapshot().isEmpty()); assertEquals(1,h.session.pendingSupplements.size());
+        m.send(h,"生成A表"); h.pool.submit(() -> {}).get(5,TimeUnit.SECONDS);
+        assertEquals(1,llm.requests.size()); assertEquals("生成A表",h.session.taskState.objective);
+        assertTrue(h.session.taskState.guidance.contains("仅新增列宽要求"));
+        m.shutdown();
+    }
+
+    @Test public void failedTaskKeepsQueueAcrossRestart() throws Exception {
+        Path jar=tmp.newFolder("failed-jar").toPath();
+        SpyManager m=new SpyManager(FAKE_UI,Config.load(jar),jar,WorkspaceManager.load(jar),ModelManager.load(jar));
+        SessionHandle h=m.createSession("测试"); FakeLlmClient llm=m.created.get(0);
+        llm.addTurnThrow(com.minion.core.llm.LlmException.of(400,"错误的请求"));
+        h.running=true; m.stageGuidance(h,"下一项",null);
+        m.send(h,"原任务"); h.pool.submit(() -> {}).get(5,TimeUnit.SECONDS);
+        assertEquals(1,h.queuedSnapshot().size()); assertFalse(h.loop.lastTurnSucceeded());
+        SessionStore store=new SessionStore(WorkspaceManager.sessionDirFor(jar,h.workspaceName));
+        Session loaded=store.load(h.id); assertEquals("下一项",loaded.queuedTasks.get(0).text);
+        assertEquals("paused",loaded.taskState.status);
+        m.shutdown();
+    }
+    @Test public void unconfirmedStopNeverStartsQueuedTask() throws Exception {
+        Path jar=tmp.newFolder("stop-review-jar").toPath();
+        SpyManager m=new SpyManager(FAKE_UI,Config.load(jar),jar,WorkspaceManager.load(jar),ModelManager.load(jar));
+        try{SessionHandle h=m.createSession("测试");FakeLlmClient llm=m.created.get(0);llm.stopStatuses.add("unknown");llm.addTurn("交付情况不能确认。");
+            h.running=true;m.stageGuidance(h,"后续任务",null);m.send(h,"当前任务");h.pool.submit(()->{}).get(5,TimeUnit.SECONDS);
+            assertFalse(h.loop.lastTurnSucceeded());assertEquals(1,h.queuedSnapshot().size());assertEquals(1,llm.requests.size());
+            assertEquals("unknown",h.session.taskState.stopDecision.status);
+            Session loaded=new SessionStore(WorkspaceManager.sessionDirFor(jar,h.workspaceName)).load(h.id);
+            assertEquals("后续任务",loaded.queuedTasks.get(0).text);
+        }finally{m.shutdown();}
+    }
 
     private SessionManager newManager() throws Exception {
         Path jar = tmp.newFolder("jar").toPath();
@@ -260,11 +375,12 @@ public class SessionManagerTest {
         assertEquals(1, m.sessions().size());
         SessionHandle h = m.sessions().get(0);
         List<EventList.Ev> evs = h.controller.eventList().snapshot();
-        assertEquals(3, evs.size());
+        assertEquals(4, evs.size());
         assertEquals(EventList.Kind.USER_MESSAGE, evs.get(0).kind);
         assertEquals(EventList.Kind.CONTENT, evs.get(1).kind);
-        assertEquals(EventList.Kind.TOOL_RESULT, evs.get(2).kind);
-        assertEquals("ReadTool", evs.get(2).text);
+        assertEquals(EventList.Kind.RESPONSE_END, evs.get(2).kind);
+        assertEquals(EventList.Kind.TOOL_RESULT, evs.get(3).kind);
+        assertEquals("ReadTool", evs.get(3).text);
     }
 
     /** 删除会话：会话文件同步删除（防重启后 restore 复活） */
@@ -1104,6 +1220,33 @@ public class SessionManagerTest {
             created.add(f);
             return f;
         }
+    }
+
+    @Test public void v24SettingsArePerSessionAndSurviveRestart() throws Exception {
+        Path jar=tmp.newFolder("v24-settings").toPath();
+        SessionManager m=new SessionManager(FAKE_UI,Config.load(jar),jar,WorkspaceManager.load(jar),ModelManager.load(jar),new ArrayList<Skill>(),null,null);
+        SessionHandle a=m.createSession("A"),b=m.createSession("B"); String model=m.models().list().get(1).displayName;
+        m.configureAgentDefaults(a,model,"explore","Read,Glob"); m.configureContext(a,"compact",32768);
+        assertEquals(32768,a.loop.contextManager().maxTokens()); assertEquals(0,b.session.preferredContextLimit); assertNull(b.session.subAgentModelName);
+        SessionStore store=new SessionStore(WorkspaceManager.sessionDirFor(jar,a.workspaceName)); Session saved=store.load(a.id);
+        assertEquals("compact",saved.contextProfile); assertEquals(32768,saved.preferredContextLimit); assertEquals(model,saved.subAgentModelName); assertEquals("explore",saved.subAgentMode);
+        assertEquals("Read,Glob",saved.subAgentTools); m.shutdown();
+    }
+    @Test public void v24SideQuestionDoesNotChangeRootTaskAndHasHistory() throws Exception {
+        Path jar=tmp.newFolder("v24-side").toPath();
+        SpyManager m=new SpyManager(FAKE_UI,Config.load(jar),jar,WorkspaceManager.load(jar),ModelManager.load(jar)); SessionHandle h=m.createSession("A");
+        h.session.taskState.begin("原目标",false); h.session.messages.add(Message.user("原目标"));
+        String before=new com.google.gson.Gson().toJson(h.session); CountDownLatch done=new CountDownLatch(1);
+        m.askSideQuestion(h,"解释术语",null,q -> { assertNotNull(q.answer); done.countDown(); });
+        assertTrue(done.await(5,TimeUnit.SECONDS)); assertEquals(before,new com.google.gson.Gson().toJson(h.session));
+        assertEquals(1,m.sideQuestionHistory(h).size()); assertEquals("解释术语",m.sideQuestionHistory(h).get(0).question);
+        assertEquals(2,m.created.size()); assertTrue(m.created.get(0).requests.isEmpty()); m.shutdown();
+    }
+    @Test public void v24QueueCancellationUsesSnapshotIdentity() throws Exception {
+        SessionManager m=newManager(); SessionHandle h=m.createSession("A"); h.enqueue("第一项"); h.enqueue("第二项");
+        SessionHandle.QueuedMessage snapshot=h.queuedSnapshot().get(0); h.pollQueued();
+        try {m.cancelQueuedTask(h,snapshot); fail("Must not cancel a different queued task");} catch(IllegalArgumentException expected) { }
+        assertEquals("第二项",h.queuedSnapshot().get(0).text); m.cancelQueuedTask(h,h.queuedSnapshot().get(0)); assertTrue(h.queuedSnapshot().isEmpty()); m.shutdown();
     }
 
     /** 带可插拔工具管理器的会话管理器（tools.json 落在临时 jar 目录） */

@@ -21,22 +21,22 @@ public class TodoList {
     public final List<TodoItem> items = new ArrayList<TodoItem>();
 
     /** 清空全部任务（原地清理：/new 复用实例，工具持有的引用保持有效） */
-    public void clear() {
+    public synchronized void clear() {
         items.clear();
     }
 
-    public void replace(List<TodoItem> newItems) {
+    public synchronized void replace(List<TodoItem> newItems) {
         items.clear();
         items.addAll(newItems);
     }
 
-    public boolean markDone(int index) {
+    public synchronized boolean markDone(int index) {
         if (index < 0 || index >= items.size()) return false;
         items.get(index).done = true;
         return true;
     }
 
-    public String render() {
+    public synchronized String render() {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < items.size(); i++) {
             TodoItem item = items.get(i);
