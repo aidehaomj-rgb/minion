@@ -54,7 +54,7 @@ public class ReadTool implements Tool {
 
     @Override
     public String description() {
-        return "读取文件内容，支持行号、偏移与行数限制；单次输出上限 " + MAX_OUTPUT_CHARS
+        return "读取文本；PNG/JPEG/GIF/BMP/WebP图片会将真实像素附入模型上下文（WebP需本地解码器），大图附局部视图；旋转、指定裁剪或只读原图请用ViewImage。支持行号、偏移与行数限制；单次输出上限 " + MAX_OUTPUT_CHARS
                 + " 字符（full=true 时 " + FULL_MAX_OUTPUT_CHARS + " 字符，用于读取大字段原文：单行上限由 "
                 + MAX_LINE_CHARS + " 放宽到约 " + FULL_MAX_OUTPUT_CHARS + " 字符，超过约 "
                 + FULL_MAX_OUTPUT_CHARS + " 字符的单行仍会截断并提示改用 Bash；代价是单次上下文占用变大；"
@@ -114,6 +114,10 @@ public class ReadTool implements Tool {
         if (guard != null) {
             if (confirm == null || !confirm.checkReadOutside(this, args, p.toString())) return guard;
         }
+
+        if (ViewImageTool.isImage(p)) return ViewImageTool.load(p, args);
+        if (p.toString().toLowerCase(java.util.Locale.ROOT).endsWith(".pdf"))
+            return ToolResult.error("PDF不是文本文件。请用Document action=pdf_read按页读文字，或action=pdf_view将页面图像送入上下文；页码从1开始，扫描页请用pdf_view。");
 
         int offset = 0;
         int limit = DEFAULT_LIMIT;

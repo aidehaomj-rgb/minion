@@ -34,7 +34,8 @@ public final class TaskDashboard {
         this.manager=manager; this.handle=handle;
         stage.initOwner(owner); stage.setTitle("任务面板 — "+(handle.title==null?handle.id:handle.title));
         TabPane tabs=new TabPane(tab("主任务与断点",taskPane()),tab("子 Agent",agentsPane()),
-                tab("上下文预算",contextPane()),tab("待执行队列",queuePane()),tab("旁支提问",sidePane()));
+                tab("上下文预算",contextPane()),tab("待执行队列",queuePane()),tab("旁支提问",sidePane()),
+                tab("可靠执行工作台",new ReliabilityPanel(stage,manager,handle)));
         VBox root=new VBox(10,tabs,feedback); root.setPadding(new Insets(12)); VBox.setVgrow(tabs,Priority.ALWAYS);
         Scene scene=new Scene(root,1000,700); scene.getStylesheets().add(Theme.STYLESHEET); stage.setScene(scene);
         timer=new Timeline(new KeyFrame(Duration.seconds(1),e -> refresh())); timer.setCycleCount(Timeline.INDEFINITE);
@@ -71,17 +72,18 @@ public final class TaskDashboard {
     }
     private TaskState.Child selected() { TaskState.Child c=agents.getSelectionModel().getSelectedItem(); if(c==null) throw new IllegalArgumentException("请先选择子Agent"); return c; }
     private VBox agentsPane() {
+        final com.minion.core.agent.OutputMerge.Plan[] mergePlan=new com.minion.core.agent.OutputMerge.Plan[1];
+        final String[] mergeChild=new String[1];
         column("ID",c -> c.id.substring(0,Math.min(8,c.id.length())),75);
         column("分工",c -> c.assignment,200); column("状态",c -> c.status,160);
         column("模式 / 模型",c -> c.mode+" / "+c.model,155);
         column("上下文",c -> c.contextTokens+" / "+c.maxContextTokens,115);
         column("累计 in / out",c -> c.inputTokens+" / "+c.outputTokens+(c.usageEstimated?" (估算)":""),150);
-        ComboBox<String> model=models(true); model.setValue(handle.session.subAgentModelName==null?"跟随主模型":handle.session.subAgentModelName);
         ComboBox<String> mode=new ComboBox<String>(FXCollections.observableArrayList("worker","explore")); mode.setValue(handle.session.subAgentMode);
         TextField tools=new TextField(handle.session.subAgentTools); tools.setPromptText("白名单，逗号分隔；留空=模式默认工具"); HBox.setHgrow(tools,Priority.ALWAYS);
         Button save=button("保存默认分工设置",() -> {
-            manager.configureAgentDefaults(handle,"跟随主模型".equals(model.getValue())?null:model.getValue(),mode.getValue(),tools.getText());
-            feedback.setText("只影响本会话之后创建的子Agent；已有子Agent保留原模型和权限");
+            manager.configureAgentDefaults(handle,null,mode.getValue(),tools.getText());
+            feedback.setText("子Agent模型强制跟随主会话；模式和权限仅影响之后创建的子Agent");
         });
         Button review=button("登记已核对",() -> {
             if(handle.running) throw new IllegalArgumentException("请等待主任务结束后手动登记核对");
@@ -98,14 +100,27 @@ public final class TaskDashboard {
             TextArea text=area(); text.setText("ID: "+c.id+"\n完整JSON记录: "+c.transcript+"\n\n"+c.result); text.setPrefSize(650,350);
             dialog.getDialogPane().setContent(text); dialog.show();
         });
-        VBox body=new VBox(10,new Label("explore=只读探索；worker=允许获批工具。恢复只补缺项；重试开启新一轮并归档旧记录。"),
-                new HBox(8,model,mode,tools,save),agents,new HBox(8,
+        VBox body=new VBox(10,new Label("子Agent只使用主会话模型，不可单独指定。explore=只读探索；worker=允许获批工具。恢复只补缺项；重试开启新一轮并归档旧记录。"),
+                new HBox(8,mode,tools,save),agents,new HBox(8,
                 button("停止",() -> feedback.setText(manager.controlSubAgent(handle,selected().id,"stop"))),
                 button("恢复",() -> feedback.setText(manager.controlSubAgent(handle,selected().id,"resume"))),
                 button("重试",() -> {
                     TaskState.Child c=selected(); Alert a=new Alert(Alert.AlertType.CONFIRMATION,"重试会从分工重新开始，可能重复操作。确认已核对现有文件？",ButtonType.OK,ButtonType.CANCEL);
                     a.initOwner(stage); Theme.style(a); if(a.showAndWait().orElse(ButtonType.CANCEL)==ButtonType.OK) feedback.setText(manager.controlSubAgent(handle,c.id,"retry"));
-                }),review,record)); VBox.setVgrow(agents,Priority.ALWAYS); return body;
+                }),review,record,
+                button("预览子Agent产物",()->{
+                    if(handle.running)throw new IllegalArgumentException("先等主任务暂停/结束，避免预览期间继续改文件");TaskState.Child c=selected();
+                    TextInputDialog source=new TextInputDialog();source.initOwner(stage);Theme.style(source);source.setHeaderText("填写独立输出目录内的相对文件名");String file=source.showAndWait().orElse("").trim();if(file.isEmpty())return;
+                    TextInputDialog target=new TextInputDialog(file);target.initOwner(stage);Theme.style(target);target.setHeaderText("填写项目内目标相对路径");String dest=target.showAndWait().orElse("").trim();if(dest.isEmpty())return;
+                    com.minion.core.agent.OutputMerge merger=new com.minion.core.agent.OutputMerge(handle.loop.workspace(),new com.minion.core.checkpoint.CheckpointStore(java.nio.file.Paths.get(handle.loop.workspace().workDir()),java.nio.file.Paths.get(handle.loop.workspace().workDir(),".minion","checkpoints",handle.id)));
+                    try{mergePlan[0]=merger.inspect(c,file,dest);mergeChild[0]=c.id;}catch(Exception ex){throw new IllegalStateException(ex.getMessage(),ex);}
+                    Alert view=new Alert(Alert.AlertType.INFORMATION);view.initOwner(stage);Theme.style(view);view.setHeaderText("合并预览（哈希与有限文字预览）");TextArea output=area();output.setText(mergePlan[0].preview);output.setPrefSize(700,450);view.getDialogPane().setContent(output);view.show();
+                }),button("合并已预览产物",()->{
+                    if(handle.running)throw new IllegalArgumentException("先暂停主任务");TaskState.Child c=selected();if(mergePlan[0]==null||!c.id.equals(mergeChild[0]))throw new IllegalArgumentException("先预览该子Agent的产物");
+                    Alert approve=new Alert(Alert.AlertType.CONFIRMATION,"确认合并："+mergePlan[0].source+" → "+mergePlan[0].target+"？系统会重新检查版本并建立检查点。",ButtonType.OK,ButtonType.CANCEL);approve.initOwner(stage);Theme.style(approve);
+                    if(approve.showAndWait().orElse(ButtonType.CANCEL)!=ButtonType.OK)return;
+                    com.minion.core.agent.OutputMerge.Plan plan=mergePlan[0];mergePlan[0]=null;manager.background(()->{try{String result=new com.minion.core.agent.OutputMerge(handle.loop.workspace(),new com.minion.core.checkpoint.CheckpointStore(java.nio.file.Paths.get(handle.loop.workspace().workDir()),java.nio.file.Paths.get(handle.loop.workspace().workDir(),".minion","checkpoints",handle.id))).apply(plan,handle.session.taskState);Platform.runLater(()->feedback.setText(result));}catch(Exception ex){Platform.runLater(()->feedback.setText("合并失败："+ex.getMessage()));}});
+                }))); VBox.setVgrow(agents,Priority.ALWAYS); return body;
     }
     private ComboBox<String> models(boolean inherit) {
         ComboBox<String> result=new ComboBox<String>(); if(inherit) result.getItems().add("跟随主模型");
@@ -117,9 +132,10 @@ public final class TaskDashboard {
         TextField window=new TextField(String.valueOf(handle.session.preferredContextLimit)); window.setPrefWidth(140);
         Button save=button("保存",() -> {
             manager.configureContext(handle,profile.getValue(),Integer.parseInt(window.getText().trim()));
-            feedback.setText("设置已保存；预算在下一次模型请求时刷新，服务端实际限制仍需实测");
+            feedback.setText("设置已保存；当前自动压缩线 " + handle.loop.contextManager().autoCompressAtTokens()
+                    + " token。手动安全窗口是上限，不是压缩线；服务端实际限制仍需实测");
         });
-        Label modelCompression=new Label("自动压缩比例按模型配置：设置 → 模型 → 修改 → 自动压缩阈值 (%)。\n这里的安全窗口0=自动；旧会话受实测窗口限制时，确认服务端已调整再重置。/compact仍可手动使用。");
+        Label modelCompression=new Label("自动压缩比例按模型配置：设置 → 模型 → 修改 → 自动压缩阈值 (%)。\n要在150K左右自动压缩，这里的安全窗口应设为0（自动），不能填150000：80%比例下填150000会在120K前触发。旧会话若学到更低窗口，请先核对服务端能力，再重置。/compact仍可手动使用。");
         modelCompression.setWrapText(true);
         VBox body=new VBox(10,new Label("balanced=均衡，compact=节省工具输出/旧思考。安全窗口0=自动；不能超过模型配置窗口。"),modelCompression,
                 new HBox(8,new Label("请求策略"),profile,new Label("本会话安全窗口"),window,save,button("重置学到的窗口",() -> {
@@ -130,6 +146,10 @@ public final class TaskDashboard {
     }
     private VBox queuePane() {
         VBox body=new VBox(10,new Label("等待主任务成功完成后顺序作为新任务发送；失败/暂停时保留，不自动串到旧任务。"),queue,
+                button("编辑所选",() -> {
+                    int index=queue.getSelectionModel().getSelectedIndex();if(index<0)throw new IllegalArgumentException("请选择条目");
+                    com.minion.gui.dialog.QueueEditor.show(stage,manager,handle,queued.get(index));refresh();
+                }),
                 button("取消所选",() -> {
                     int index=queue.getSelectionModel().getSelectedIndex(); if(index<0) throw new IllegalArgumentException("请选择任务");
                     manager.cancelQueuedTask(handle,queued.get(index));
@@ -153,7 +173,13 @@ public final class TaskDashboard {
     private void refresh() {
         if(handle.deleted) { stage.close(); return; }
         setIfChanged(task,"执行状态: "+(handle.running?"运行中":"空闲/暂停")+handle.session.taskState.render(null));
-        setIfChanged(budget,handle.loop.contextBudget());
+        com.minion.core.context.ContextManager cm=handle.loop.contextManager();
+        String live="当前实时设置：配置窗口 " + cm.configuredMaxTokens() + "；安全窗口 " + cm.maxTokens()
+                + "；自动压缩线 " + cm.autoCompressAtTokens() + "\n手动安全上限："
+                + (handle.session.preferredContextLimit==0?"自动":handle.session.preferredContextLimit)
+                + "；已学到的安全上限：" + (handle.session.observedContextLimit==0?"无":handle.session.observedContextLimit)
+                + "\n\n最近一次模型请求快照（可能早于上方实时设置）：\n";
+        setIfChanged(budget,live+handle.loop.contextBudget());
         String selected=agents.getSelectionModel().getSelectedItem()==null?null:agents.getSelectionModel().getSelectedItem().id;
         agents.setItems(FXCollections.observableArrayList(handle.session.taskState.childSnapshot()));
         if(selected!=null) for(TaskState.Child c:agents.getItems()) if(selected.equals(c.id)) agents.getSelectionModel().select(c);
@@ -161,6 +187,6 @@ public final class TaskDashboard {
         if(!sameQueue(latest,queued)) { queued=latest; List<String> lines=new ArrayList<String>(); for(SessionHandle.QueuedMessage q:queued) lines.add((q.guidance?"[待引导/新任务] ":"")+q.text); queue.setItems(FXCollections.observableArrayList(lines)); }
     }
     private static boolean sameQueue(List<SessionHandle.QueuedMessage> a,List<SessionHandle.QueuedMessage> b) {
-        if(a.size()!=b.size()) return false; for(int i=0;i<a.size();i++) if(a.get(i).createdAt!=b.get(i).createdAt||!a.get(i).text.equals(b.get(i).text)) return false; return true;
+        if(a.size()!=b.size()) return false; for(int i=0;i<a.size();i++) if(!a.get(i).id.equals(b.get(i).id)||a.get(i).revision!=b.get(i).revision) return false; return true;
     }
 }

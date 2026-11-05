@@ -45,7 +45,7 @@ public final class PythonRuntime {
 
     public RunResult status(Path cwd) throws IOException {
         Path python = require();
-        String code = "import sys\nmods=['pandas','numpy','openpyxl','xlrd','matplotlib','sqlite3','PyPDF2','pdfminer','flask','requests','PyInstaller']\n"
+        String code = "import sys\nmods=['pandas','numpy','openpyxl','xlrd','matplotlib','sqlite3','PyPDF2','pdfminer','docx','pptx','PIL','flask','requests','PyInstaller']\n"
                 + "print('executable='+sys.executable)\nprint('version='+sys.version.replace('\\n',' '))\n"
                 + "results=[]\n"
                 + "for m in mods:\n"
@@ -118,27 +118,7 @@ public final class PythonRuntime {
     }
 
     private static void killTree(Process process) {
-        try {
-            long pid = pidOf(process);
-            if (pid > 0 && System.getProperty("os.name", "").toLowerCase().contains("win")) {
-                new ProcessBuilder("taskkill", "/PID", String.valueOf(pid), "/T", "/F").start().waitFor(5, TimeUnit.SECONDS);
-            }
-        } catch (Exception ignored) { }
-        process.destroy();
-        try { process.destroyForcibly(); } catch (Throwable ignored) { }
-    }
-
-    /** Java 8 无 Process.pid()；Windows JDK8 ProcessImpl 保存 long handle，取不到时仍可 destroy。 */
-    private static long pidOf(Process p) {
-        try {
-            java.lang.reflect.Field f = p.getClass().getDeclaredField("handle");
-            f.setAccessible(true);
-            long handle = f.getLong(p);
-            Class<?> kernel = Class.forName("java.lang.ProcessImpl");
-            java.lang.reflect.Method m = kernel.getDeclaredMethod("getProcessId", long.class);
-            m.setAccessible(true);
-            return ((Number) m.invoke(null, handle)).longValue();
-        } catch (Exception ignored) { return -1; }
+        com.minion.core.tools.ProcessCleanup.terminate(process);
     }
 
     private static Path findOnPath() {

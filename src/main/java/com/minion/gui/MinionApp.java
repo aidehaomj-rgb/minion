@@ -32,7 +32,10 @@ public class MinionApp extends Application {
 
     @Override
     public void start(Stage stage) {
+        long started = System.nanoTime();
         new MainWindow(stage, MinionApp.sessionManager()).show();
+        com.minion.core.diagnostics.DiagnosticLog.info("startup", "主窗口已显示；uiMs="
+                + (System.nanoTime() - started) / 1000000);
         if ("1".equals(System.getProperty(Boot.WARN_PROPERTY))) showJdk8Warn();
     }
 

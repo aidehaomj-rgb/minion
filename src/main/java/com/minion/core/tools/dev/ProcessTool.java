@@ -54,7 +54,7 @@ public final class ProcessTool implements Tool {
         if (guard != null) return guard;
         if (!Files.isDirectory(cwd)) return ToolResult.error("工作目录不存在: " + cwd);
         List<String> invocation = new ArrayList<String>();
-        if (isWindows()) { invocation.add("cmd.exe"); invocation.add("/d"); invocation.add("/s"); invocation.add("/c"); invocation.add(command); }
+        if (isWindows()) { invocation.add("cmd.exe"); invocation.add("/d"); invocation.add("/s"); invocation.add("/c"); invocation.add(com.minion.core.tools.WindowsShell.frame(command)); }
         else { invocation.add("sh"); invocation.add("-lc"); invocation.add(command); }
         ProcessBuilder pb = new ProcessBuilder(invocation).directory(cwd.toFile()).redirectErrorStream(true);
         pb.environment().put("PYTHONIOENCODING", "utf-8");
@@ -102,22 +102,9 @@ public final class ProcessTool implements Tool {
     public synchronized void shutdown() { for (Managed m : processes.values()) if (m.running()) kill(m.process); processes.clear(); }
 
     private static void kill(Process p) {
-        try {
-            long pid = pidOf(p);
-            if (pid > 0 && isWindows()) new ProcessBuilder("taskkill", "/PID", String.valueOf(pid), "/T", "/F").start().waitFor(5, TimeUnit.SECONDS);
-        } catch (Exception ignored) { }
-        p.destroy();
-        try { p.destroyForcibly(); } catch (Throwable ignored) { }
+        com.minion.core.tools.ProcessCleanup.terminate(p);
     }
 
-    private static long pidOf(Process p) {
-        try {
-            java.lang.reflect.Field field = p.getClass().getDeclaredField("handle"); field.setAccessible(true);
-            long handle = field.getLong(p);
-            java.lang.reflect.Method method = Class.forName("java.lang.ProcessImpl").getDeclaredMethod("getProcessId", long.class); method.setAccessible(true);
-            return ((Number) method.invoke(null, handle)).longValue();
-        } catch (Exception ignored) { return -1; }
-    }
     private static boolean isWindows() { return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"); }
     private static String text(JsonObject o, String k) { return o.has(k) && !o.get(k).isJsonNull() ? o.get(k).getAsString() : ""; }
     private static int integer(JsonObject o, String k, int d) { try { return o.has(k) ? o.get(k).getAsInt() : d; } catch (Exception e) { return d; } }

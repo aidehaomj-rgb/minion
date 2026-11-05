@@ -17,6 +17,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * CDP 客户端:okhttp WebSocket 直连 Chrome 调试端点。
@@ -31,6 +32,7 @@ public class CdpClient extends WebSocketListener {
     private final List<JsonObject> events = new CopyOnWriteArrayList<JsonObject>();
     private final Map<Integer, Pending> pending = new ConcurrentHashMap<Integer, Pending>();
     private final AtomicInteger nextId = new AtomicInteger(1);
+    private final AtomicLong eventSequence = new AtomicLong();
     private volatile WebSocket socket;
     private volatile String error;
     private volatile boolean connected;
@@ -53,11 +55,14 @@ public class CdpClient extends WebSocketListener {
             synchronized (p) { p.err = "连接已切换"; p.notifyAll(); }
         }
         pending.clear();
+        events.clear(); // 不能把上一个标签页的诊断当成本页证据
     }
 
     /** 连接(阻塞至握手完成或超时);失败抛 IOException */
     public void connect(String wsUrl) throws IOException {
         if (connected) return;
+        WebSocket old = socket; socket = null;
+        if (old != null) old.cancel();
         error = null; // 重连前清理上次断线遗留的 error,避免新握手被旧错误误判为失败
         OkHttpClient client = new OkHttpClient.Builder()
                 .connectTimeout(connectTimeoutMs, TimeUnit.MILLISECONDS)
@@ -67,10 +72,14 @@ public class CdpClient extends WebSocketListener {
         socket = client.newWebSocket(new Request.Builder().url(wsUrl).build(), this);
         try {
             if (!openLatch.await(connectTimeoutMs, TimeUnit.MILLISECONDS)) {
+                WebSocket timedOut = socket; socket = null;
+                if (timedOut != null) timedOut.cancel();
                 throw new IOException("连接 Chrome 超时: " + wsUrl);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            WebSocket canceled = socket; socket = null;
+            if (canceled != null) canceled.cancel();
             throw new IOException("连接被中断");
         }
         if (error != null) throw new IOException("连接失败: " + error);
@@ -130,8 +139,24 @@ public class CdpClient extends WebSocketListener {
         return out;
     }
 
+    public long eventCursor() { return eventSequence.get(); }
+
+    public List<JsonObject> eventsSince(String prefix, long cursor) {
+        List<JsonObject> out = new ArrayList<JsonObject>();
+        for (JsonObject e : events(prefix))
+            if (e.has("__minionSequence") && e.get("__minionSequence").getAsLong() > cursor) out.add(e.deepCopy());
+        return out;
+    }
+
+    public boolean hasEventGap(long cursor) {
+        List<JsonObject> snapshot = new ArrayList<JsonObject>(events);
+        return eventSequence.get() > cursor && (snapshot.isEmpty()
+                || snapshot.get(0).get("__minionSequence").getAsLong() > cursor + 1);
+    }
+
     @Override
     public void onOpen(WebSocket ws, Response response) {
+        if (socket != null && socket != ws) return;
         socket = ws;
         error = null; // 握手成功即视为恢复:清除上次断线错误,否则重连后 connect 永远抛旧错误
         if (openLatch != null) openLatch.countDown();
@@ -139,6 +164,7 @@ public class CdpClient extends WebSocketListener {
 
     @Override
     public void onMessage(WebSocket ws, String text) {
+        if (ws != null && ws != socket) return; // 旧标签页/旧连接的迟到消息不能污染新页面
         try {
             JsonObject msg = JsonParser.parseString(text).getAsJsonObject();
             if (msg.has("id") && !msg.get("id").isJsonNull()) {
@@ -147,6 +173,8 @@ public class CdpClient extends WebSocketListener {
                     synchronized (p) { p.result = msg; p.notifyAll(); }
                 }
             } else if (msg.has("method")) {
+                msg.addProperty("__minionSequence", eventSequence.incrementAndGet());
+                msg.addProperty("__minionReceivedAt", System.currentTimeMillis());
                 events.add(msg);
                 if (events.size() > MAX_EVENTS) events.remove(0);
             }
@@ -162,6 +190,7 @@ public class CdpClient extends WebSocketListener {
     /** 对端正常关闭:标记断线并唤醒所有等待中的命令立即失败 */
     @Override
     public void onClosed(WebSocket ws, int code, String reason) {
+        if (ws != socket) return;
         connected = false;
         error = "连接已关闭";
         if (openLatch != null) openLatch.countDown();
@@ -173,6 +202,7 @@ public class CdpClient extends WebSocketListener {
 
     @Override
     public void onFailure(WebSocket ws, Throwable t, Response response) {
+        if (ws != socket) return;
         connected = false;
         error = t == null ? "连接断开" : t.getMessage();
         if (openLatch != null) openLatch.countDown();

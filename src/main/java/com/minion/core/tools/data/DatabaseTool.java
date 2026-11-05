@@ -8,6 +8,7 @@ import com.minion.core.tools.SchemaGenerator;
 import com.minion.core.tools.Tool;
 import com.minion.core.tools.ToolResult;
 import com.minion.core.tools.Workspace;
+import com.minion.core.tools.db.SqlGuard;
 import com.minion.core.tools.python.PythonRuntime;
 
 import java.nio.charset.StandardCharsets;
@@ -23,15 +24,22 @@ public final class DatabaseTool implements Tool {
     public DatabaseTool(Workspace workspace,PythonRuntime python,CheckpointStore checkpoints){this(workspace,python,checkpoints,null);}
     public DatabaseTool(Workspace workspace,PythonRuntime python,CheckpointStore checkpoints,SecretStore secrets){this.workspace=workspace;this.python=python;this.checkpoints=checkpoints;this.secrets=secrets;}
     @Override public String name(){return "Database";}
-    @Override public String description(){return "内网数据库：drivers/status/schema/query/execute/export；支持 sqlite、odbc/sqlserver、mysql、postgresql。默认 query 只读，execute 需确认";}
+    @Override public String description(){return "内网数据库：drivers/status/schema/query/execute/export；支持 sqlite、odbc/sqlserver、mysql、postgresql。query/export 只接受单条只读 SQL，execute 需确认；建议数据库账号本身也设为只读";}
     @Override public JsonObject schema(){return SchemaGenerator.objectSchema("数据库连接与查询",
             new String[]{"action","type","connection","connectionRef","sql","limit","outputPath"},new String[]{"action","type"});}
-    @Override public boolean isHighRisk(JsonObject args){return "execute".equalsIgnoreCase(text(args,"action"));}
+    @Override public boolean isHighRisk(JsonObject args){
+        String action=text(args,"action").toLowerCase(Locale.ROOT);
+        if("execute".equals(action))return true;
+        return "export".equals(action)&&!text(args,"outputPath").isEmpty()
+                &&Files.exists(workspace.cwd().resolve(text(args,"outputPath")).normalize());
+    }
     @Override public ToolResult execute(JsonObject args)throws Exception{
         String action=text(args,"action").toLowerCase(Locale.ROOT),type=text(args,"type").toLowerCase(Locale.ROOT);
         if("drivers".equals(action)||"status".equals(action))return drivers();
+        if(!Arrays.asList("schema","query","execute","export").contains(action))return ToolResult.error("action 支持 drivers/status/schema/query/execute/export");
         if(!Arrays.asList("sqlite","odbc","sqlserver","mysql","postgresql","postgres").contains(type))return ToolResult.error("type 支持 sqlite/odbc/sqlserver/mysql/postgresql");
-        String sql=text(args,"sql");if("query".equals(action)&&!readOnly(sql))return ToolResult.error("query 仅允许 SELECT/WITH/PRAGMA/SHOW/DESCRIBE/EXPLAIN；修改请用 execute");
+        String sql=text(args,"sql");String rejection=readSqlError(action,sql);
+        if(rejection!=null)return ToolResult.error(rejection);
         int limit=Math.max(1,Math.min(integer(args,"limit",200),5000));
         String connection=text(args,"connection"),connectionRef=text(args,"connectionRef");
         if(connection.isEmpty()&&!connectionRef.isEmpty()){
@@ -47,13 +55,18 @@ public final class DatabaseTool implements Tool {
             String raw=text(args,"outputPath");if(raw.isEmpty())return ToolResult.error("export 缺少 outputPath");
             output=workspace.cwd().resolve(raw).normalize().toAbsolutePath();
             ToolResult outputGuard=PathsGuard.errorIfOutside(workspace.workDir(),output);if(outputGuard!=null)return outputGuard;
+            String lower=output.getFileName().toString().toLowerCase(Locale.ROOT);
+            if(!lower.endsWith(".csv")&&!lower.endsWith(".xlsx"))return ToolResult.error("export 输出仅支持 .csv/.xlsx");
             if(output.getParent()!=null)Files.createDirectories(output.getParent());if(checkpoints!=null)checkpoints.create(output,"Database.export");
         }
-        Path helper=helper();
+        Path helper=helper(), connectionFile=null;
         try{
-            PythonRuntime.RunResult r=python.runFile(helper,Arrays.asList(action,type,connection,arg(sql),String.valueOf(limit),output==null?EMPTY:output.toString()),workspace.cwd(),180);
+            // 不把密码放在 Python 命令行参数中；Windows 进程列表可读取命令行。
+            connectionFile=Files.createTempFile(helper.getParent(),"connection-",".json");
+            Files.write(connectionFile,connection.getBytes(StandardCharsets.UTF_8));
+            PythonRuntime.RunResult r=python.runFile(helper,Arrays.asList(action,type,"@"+connectionFile,arg(sql),String.valueOf(limit),output==null?EMPTY:output.toString()),workspace.cwd(),180);
             String out=r.output==null?"":r.output.trim();return r.ok()?ToolResult.success(out.isEmpty()?"完成":out):ToolResult.error("数据库操作失败；请检查对应离线驱动\n"+sanitize(out));
-        }finally{Files.deleteIfExists(helper);}
+        }finally{if(connectionFile!=null)Files.deleteIfExists(connectionFile);Files.deleteIfExists(helper);}
     }
     private ToolResult drivers()throws Exception{
         String code="import importlib.util\nmods=['sqlite3','pyodbc','pymysql','psycopg2','pandas','openpyxl']\nprint('\\n'.join(m+'='+('ok' if importlib.util.find_spec(m) else 'missing') for m in mods))";
@@ -66,15 +79,19 @@ public final class DatabaseTool implements Tool {
         JsonObject o=new JsonObject();o.addProperty("database",p.toString());return o.toString();
     }
     private Path helper()throws Exception{Path d=workspace.cwd().resolve(".minion/tmp");Files.createDirectories(d);Path p=Files.createTempFile(d,"database-",".py");Files.write(p,SCRIPT.getBytes(StandardCharsets.UTF_8));return p;}
-    private static boolean readOnly(String sql){String s=sql==null?"":sql.trim().toLowerCase(Locale.ROOT);return s.startsWith("select")||s.startsWith("with")||s.startsWith("pragma")||s.startsWith("show")||s.startsWith("describe")||s.startsWith("desc")||s.startsWith("explain");}
+    static String readSqlError(String action,String sql){
+        if(!"query".equals(action)&&!"export".equals(action))return null;
+        // PRAGMA 可修改 SQLite 持久化设置；结构探查请用 schema。
+        return SqlGuard.check(sql);
+    }
     private static String sanitize(String s){return com.minion.core.diagnostics.SecretRedactor.redact(s);}
     private static String text(JsonObject o,String k){return o.has(k)&&!o.get(k).isJsonNull()?o.get(k).getAsString():"";}
     private static int integer(JsonObject o,String k,int d){try{return o.has(k)?o.get(k).getAsInt():d;}catch(Exception e){return d;}}
     private static String arg(String v){return v==null||v.isEmpty()?EMPTY:v;}private static final String EMPTY="__MINION_EMPTY__";
     private static final String SCRIPT=
-            "from __future__ import print_function\nimport sys,json,os\naction,kind,raw,sql,limit,out=sys.argv[1:7]\nsql='' if sql=='__MINION_EMPTY__' else sql\nout='' if out=='__MINION_EMPTY__' else out\nlimit=int(limit)\ncfg=json.loads(raw)\n"
+            "from __future__ import print_function\nimport sys,json,os\naction,kind,raw,sql,limit,out=sys.argv[1:7]\nif raw.startswith('@'):\n with open(raw[1:],encoding='utf-8') as f: raw=f.read()\nsql='' if sql=='__MINION_EMPTY__' else sql\nout='' if out=='__MINION_EMPTY__' else out\nlimit=int(limit)\ncfg=json.loads(raw)\n"
           + "def connect():\n"
-          + " if kind=='sqlite':\n  import sqlite3; c=sqlite3.connect(cfg['database']); c.row_factory=sqlite3.Row; return c\n"
+          + " if kind=='sqlite':\n  import sqlite3,pathlib; path=cfg['database']; uri=pathlib.Path(path).resolve().as_uri()+'?mode=ro' if action!='execute' else path; c=sqlite3.connect(uri,uri=action!='execute'); c.row_factory=sqlite3.Row; c.execute('PRAGMA query_only=ON') if action!='execute' else None; return c\n"
           + " if kind in ('odbc','sqlserver'):\n  import pyodbc\n  if 'connection_string' in cfg: return pyodbc.connect(cfg['connection_string'])\n  parts=[]\n  for k,v in cfg.items(): parts.append(str(k)+'='+str(v))\n  return pyodbc.connect(';'.join(parts))\n"
           + " if kind=='mysql':\n  import pymysql; return pymysql.connect(host=cfg.get('host','localhost'),port=int(cfg.get('port',3306)),user=cfg.get('user'),password=cfg.get('password',''),database=cfg.get('database'),charset='utf8mb4')\n"
           + " if kind in ('postgres','postgresql'):\n  import psycopg2; return psycopg2.connect(host=cfg.get('host','localhost'),port=int(cfg.get('port',5432)),user=cfg.get('user'),password=cfg.get('password',''),dbname=cfg.get('database'))\n"

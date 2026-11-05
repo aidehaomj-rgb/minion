@@ -94,6 +94,40 @@ public class ModelManagerTest {
         assertEquals(c.sessionId, m.current().sessionId);
         assertEquals(c.sessionId, ModelManager.load(dir).current().sessionId);
     }
+    @Test public void stableWorksetSurvivesCopyUpdateAndReloadWithoutChangingLegacyDefaults() throws IOException {
+        Path dir=jarDir(); ModelManager m=ModelManager.load(dir);
+        assertEquals(0,m.current().stableContextTokens);
+        ModelConfig edited=m.current().copy(); edited.stableContextTokens=180000;
+        assertEquals(0,m.current().stableContextTokens);
+        m.update(edited);
+        assertEquals(180000,ModelManager.load(dir).current().stableContextTokens);
+    }
+    @Test public void legacyFlashAndDeepseekWorksetsMoveTo150kOnlyOnce() throws IOException {
+        Path dir=jarDir(); ModelManager m=ModelManager.load(dir);
+        ModelConfig deepseek=m.current().copy(); deepseek.stableContextTokens=120000; deepseek.apiKey="keep-existing-key";
+        m.update(deepseek);
+        ModelConfig flash=ModelManager.createQwen(); flash.displayName="内网 Qwen3.8 Flash";
+        flash.modelName="qwen3.8-flash"; flash.stableContextTokens=80000; m.add(flash);
+        ModelConfig custom=ModelManager.createDeepseek(); custom.displayName="自定义 DeepSeek";
+        custom.stableContextTokens=180000; m.add(custom);
+        ModelConfig unrelated=m.get("qwen3-max").copy(); unrelated.stableContextTokens=80000; m.update(unrelated);
+
+        Path file=dir.resolve("model.json");
+        com.google.gson.JsonObject legacy=com.google.gson.JsonParser.parseString(
+                new String(Files.readAllBytes(file),StandardCharsets.UTF_8)).getAsJsonObject();
+        legacy.remove("contextTriggerMigrationVersion");
+        Files.write(file,legacy.toString().getBytes(StandardCharsets.UTF_8));
+        ModelManager migrated=ModelManager.load(dir);
+        assertEquals(150000,migrated.get(deepseek.displayName).stableContextTokens);
+        assertEquals(150000,migrated.get(flash.displayName).stableContextTokens);
+        assertEquals("keep-existing-key",migrated.get(deepseek.displayName).apiKey);
+        assertEquals(180000,migrated.get(custom.displayName).stableContextTokens);
+        assertEquals(80000,migrated.get(unrelated.displayName).stableContextTokens);
+
+        ModelConfig laterEdit=migrated.get(flash.displayName).copy(); laterEdit.stableContextTokens=80000;
+        migrated.update(laterEdit);
+        assertEquals(80000,ModelManager.load(dir).get(flash.displayName).stableContextTokens);
+    }
 
     /** 拒绝删除最后一个模型 */
     @Test

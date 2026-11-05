@@ -24,14 +24,36 @@ public class Message {
     /** true = 运行中用户补充消息（仅 user 角色使用）。标识只在本地历史与 UI 层，
      *  toApiJson 不输出——API content 原样发送，模型输入零污染 */
     public boolean supplement;
+    /** True only for actual UI user input/supplements; synthetic USER messages cannot authorize memory sharing. */
+    public boolean userAuthored;
+    /** 工具产生的图像资料，不是用户新任务。 */
+    public boolean toolImage;
+    /** 用户回答图片关联的提问调用；null 兼容旧事件，不输出到 API，也不作为新任务。 */
+    public String replyToToolCallId;
     /** 消息创建时间戳（毫秒；0 = 旧数据未打点） */
     public long ts;
+    /** 本地不可变历史事件 ID；仅随会话持久化，不发送给模型 API。旧会话在首次归档时补齐。 */
+    public String eventId;
+    /** Durable local task scope for history retrieval; never sent to the model API. */
+    public String taskId;
+    /** 本地指令修订号；摘要仅对生成时的任务/修订有效，不输出到 API。 */
+    public Long taskRevision; // null 时 Gson 不增加字段，旧不可变事件的哈希仍保持一致。
+    public long revision() { return taskRevision == null ? 0 : taskRevision; }
+
+    /** 兼容旧会话没有 userAuthored 的记录，但排除系统续接/修复/检索及技能资料。 */
+    public boolean isUserInstruction() {
+        return role == Role.USER && !summary && !pinned && !toolImage
+                && content != null && !content.trim().isEmpty()
+                && (userAuthored || !(content.startsWith("[系统") || content.startsWith("【系统")
+                || content.startsWith("<minion_")));
+    }
 
     public static Message system(String content) {
         Message m = new Message();
         m.role = Role.SYSTEM;
         m.content = content;
         m.ts = System.currentTimeMillis();
+        m.eventId = java.util.UUID.randomUUID().toString();
         return m;
     }
 
@@ -40,6 +62,7 @@ public class Message {
         m.role = Role.USER;
         m.content = content;
         m.ts = System.currentTimeMillis();
+        m.eventId = java.util.UUID.randomUUID().toString();
         return m;
     }
 
@@ -76,6 +99,7 @@ public class Message {
         m.role = Role.ASSISTANT;
         m.content = content;
         m.ts = System.currentTimeMillis();
+        m.eventId = java.util.UUID.randomUUID().toString();
         return m;
     }
 
@@ -86,6 +110,7 @@ public class Message {
         m.name = name;
         m.content = content;
         m.ts = System.currentTimeMillis();
+        m.eventId = java.util.UUID.randomUUID().toString();
         return m;
     }
 

@@ -17,6 +17,8 @@ public class ModelConfig {
     public int maxOutputTokens;
     public int maxContextTokens;
     public double compressThreshold;
+    /** 估算输入达到此值即提前压缩；0 表示保守默认值，独立于标称窗口。 */
+    public int stableContextTokens;
     public int keepRecentMessages;
 
     public ModelConfig() { }
@@ -35,6 +37,7 @@ public class ModelConfig {
         c.maxOutputTokens = maxOutputTokens;
         c.maxContextTokens = maxContextTokens;
         c.compressThreshold = compressThreshold;
+        c.stableContextTokens = stableContextTokens;
         c.keepRecentMessages = keepRecentMessages;
         return c;
     }

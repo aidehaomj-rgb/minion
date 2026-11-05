@@ -21,24 +21,32 @@ public class Session {
     public String modelName;
     /** 本会话选择的模型配置标识；旧会话缺失时使用当前默认模型。 */
     public String modelDisplayName;
+    /** Exact live model configuration used by the parent client; never serialized or exposed to the model. */
+    public transient volatile com.minion.core.config.ModelConfig runtimeModelConfig;
     /** Child defaults are per conversation, not global model settings. */
     public volatile String subAgentModelName;
     public volatile String subAgentMode="worker";
     public volatile String subAgentTools="";
     public volatile String contextProfile="balanced";
     public volatile int preferredContextLimit;
-    /** 服务端超限/空响应后学习到的当前会话安全窗口；0 表示尚未学习。 */
-    public int observedContextLimit;
+    /** Explicit HTTP context-overflow failures learned for this session; 0 means no verified limit. */
+    public volatile int observedContextLimit;
+    /** V40: one-time release of legacy learned caps for high-window 150K sessions. */
+    public int context150kMigrationVersion;
     /** 会话管理元数据：置顶优先展示；归档后从默认侧栏隐藏但仍保留落盘。 */
     public boolean pinned;
     public boolean archived;
     /** 会话级工作目录(相对路径基准);null/空 = 跟随工作区根 */
     public String cwd;
     public List<Message> messages = new ArrayList<Message>();
+    /** Highest immutable event included in the atomic JSON checkpoint. */
+    public long journalSequence;
     public TodoList todos = new TodoList();
     public TaskState taskState = new TaskState();
     public List<QueuedTask> queuedTasks = new ArrayList<QueuedTask>();
     public static class QueuedTask {
+        public String id=java.util.UUID.randomUUID().toString();
+        public long revision=1;
         public String text;
         public long createdAt;
         public boolean guidance;
@@ -71,6 +79,7 @@ public class Session {
         s.createdAt = s.id;
         s.workDir = workDir;
         s.modelName = modelName;
+        s.context150kMigrationVersion = 1;
         return s;
     }
 
@@ -99,7 +108,7 @@ public class Session {
         for (int i = messages.size() - 1; i >= 0; i--) {
             Message m = messages.get(i);
             // M-9：技能消息（pinned）不作为会话预览——轮内注入点在用户输入之后，否则污染预览
-            if (m.pinned) continue;
+            if (m.pinned || m.toolImage) continue;
             if (m.role == Message.Role.USER) {
                 String text = m.content == null ? "" : m.content.replace('\n', ' ');
                 return text.length() > 50 ? text.substring(0, 50) + "..." : text;

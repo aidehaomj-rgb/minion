@@ -44,8 +44,10 @@ public final class CheckpointTool implements Tool {
         if ("restore".equals(action)) {
             String id = str(args, "id");
             if (id.isEmpty()) return ToolResult.error("restore 缺少 id");
-            return ToolResult.success("已恢复: " + store.restore(id));
+            return ToolResult.success(store.restoreGroup(id));
         }
+        if("diff".equals(action))return ToolResult.success(store.diff(str(args,"id")));
+        if("preflight".equals(action))return ToolResult.success(store.preflight(str(args,"id")));
         if ("clear".equals(action)) return ToolResult.success("已清理检查点文件 " + store.clear() + " 个");
         if ("status".equals(action)) return ToolResult.success("检查点目录: " + store.root());
         return ToolResult.error("未知 action: " + action + "（支持 status/list/restore/clear）");

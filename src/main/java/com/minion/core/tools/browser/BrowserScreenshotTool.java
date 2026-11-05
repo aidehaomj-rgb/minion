@@ -55,8 +55,6 @@ public class BrowserScreenshotTool implements Tool {
     @Override
     public ToolResult execute(JsonObject args) {
         if (!args.has("path")) return ToolResult.error("缺少 path 参数");
-        BrowserSession session = browser.session();
-        if (session == null) return ToolResult.error(BrowserManager.NOT_READY);
         boolean fullPage = !args.has("fullPage") || args.get("fullPage").getAsBoolean();
         Path p = PathsGuard.resolve(workspace.cwd().toString(), args.get("path").getAsString());
         ToolResult guard = PathsGuard.errorIfOutside(workspace, skillsDir, tmpDir, p);
@@ -64,6 +62,8 @@ public class BrowserScreenshotTool implements Tool {
             // 同 Read 工具：越界不静默拒绝，弹确认框让用户选（Y 放行本次 / N 拒绝 / W 会话放行）
             if (confirm == null || !confirm.checkWriteOutside(this, args, p.toString())) return guard;
         }
+        BrowserSession session = browser.session();
+        if (session == null) return ToolResult.error(BrowserManager.NOT_READY);
         try {
             return ToolResult.success(session.screenshot(p.toString(), fullPage));
         } catch (IOException e) {

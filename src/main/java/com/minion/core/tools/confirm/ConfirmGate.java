@@ -21,6 +21,14 @@ public class ConfirmGate {
 
     /** 返回 true = 放行执行 */
     public synchronized boolean check(Tool tool, JsonObject args) {
+        if ("read-only".equals(config.permissionMode())) {
+            String action=args.has("action")&&!args.get("action").isJsonNull()?args.get("action").getAsString().toLowerCase(java.util.Locale.ROOT):"";
+            if ((tool instanceof com.minion.core.tools.data.ExcelTool && !com.minion.core.tools.data.ExcelTool.readOnlyAction(action))
+                    ||(tool instanceof com.minion.core.tools.data.DocumentTool && !com.minion.core.tools.data.DocumentTool.readOnlyAction(action))
+                    ||(tool instanceof com.minion.core.tools.data.ExcelTool && args.has("filter")&&!args.get("filter").isJsonNull()&&!args.get("filter").getAsString().trim().isEmpty())) {
+                DiagnosticLog.info("permission","DENY read-only data workflow "+tool.name()+"."+action);return false;
+            }
+        }
         if (!tool.isHighRisk(args)) return true;
         String mode = config.permissionMode();
         if ("read-only".equals(mode)) { DiagnosticLog.info("permission", "DENY read-only " + highRiskDetail(tool,args)); return false; }

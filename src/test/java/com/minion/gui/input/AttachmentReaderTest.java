@@ -11,6 +11,17 @@ import java.util.zip.ZipOutputStream;
 import static org.junit.Assert.*;
 
 public class AttachmentReaderTest {
+    @Test public void scannedPdfAttachmentIsAcceptedWithToolRouteAndPath() throws Exception {
+        Path p=Files.createTempFile("scan", ".pdf");
+        try {
+            try(org.apache.pdfbox.pdmodel.PDDocument d=new org.apache.pdfbox.pdmodel.PDDocument()){
+                for(int i=0;i<5;i++)d.addPage(new org.apache.pdfbox.pdmodel.PDPage());d.save(p.toFile());
+            }
+            String text=AttachmentReader.read(p).promptText;
+            assertTrue(text.contains("总页数: 5"));assertTrue(text.contains("pdf_view"));
+            assertTrue(text.contains("path=\""));assertFalse(text.contains("[第4页]"));
+        } finally {Files.deleteIfExists(p);}
+    }
     @Test public void readsUtf8TextAndWrapsAsUntrustedAttachment() throws Exception {
         Path p = Files.createTempFile("附件&测试", ".txt");
         try {

@@ -8,10 +8,18 @@ public final class BuiltinSkills {
     private BuiltinSkills() { }
     public static List<Skill> all() {
         List<Skill> out=new ArrayList<Skill>();
+        out.add(skill("visual-design","本地制作清晰的封面、海报、流程图、信息图、数据图表与SVG/PNG；无独立生图模型时使用",
+                "先区分代码绘图与扩散生图：当前聊天模型不是专用图像生成模型，不假称生成写实照片。\n"
+              + "1. 明确用途、尺寸比例、精确文案和真实数据；风格未指定时选克制清晰的排版，不反复要求用户确认常规细节。\n"
+              + "2. 先用Artwork help了解格式，Artwork fonts确认中文字体。封面/流程/信息图可用template生成JSON起点，Read/Edit定制；不要把占位指标或柱形当真实统计。统计图优先Python+Matplotlib，以真实数据生成并保留.py和.svg。\n"
+              + "3. 排版使用统一网格、足够留白、2-3级字号及少量主色；不默认用Pillow堆砌小字和粗糙几何形状。图层用有意义的text/x/y/width/height；复杂图可使用本地HTML/SVG，但不要引入公网字体/CDN。\n"
+              + "4. Artwork inspect核对缺字/溢出/越界，再render生成2倍像素PNG与SVG。默认1600×900可导出3200×1800；需要4K时用1920×1080且scale=2。增加像素不等于增加图片本身细节。\n"
+              + "5. 检查实际PNG：当前模型已实测支持视觉时用ViewImage检查文字、层级、遮挡、留白；纯文本部署不传图片、不自动切换主/子模型，明确标注未视觉核验，让用户预览。inspect只证明机械布局，不能声称已经看图。\n"
+              + "6. 迭代保留JSON/SVG源稿与上一版图片，只改需要调整的图层，以-v2等新文件名导出；交付PNG、可编辑源稿和数据来源。需要照片级人物/风景/复杂绘画时说明缺少专用图像模型，不用简单矢量图冒充。"));
         out.add(skill("data-analysis","Excel/CSV 数据清洗、统计、可视化与结果复核（使用本机 Anaconda pandas）",
                 "处理 Excel/CSV 数据分析时：\n1. 先用 Python status 确认 pandas/openpyxl；用 Excel inspect 了解工作表和字段。\n"
               + "2. 先说明分析口径、缺失值、重复值和异常值处理；不要覆盖原文件。\n"
-              + "3. 用 Python+pandas 完成清洗、聚合、透视、关联和图表，结果写入工作区新的 .xlsx/.csv/.png。\n"
+              + "3. 用 Python+pandas 完成清洗、聚合、透视、关联和图表，结果写入工作区新的 .xlsx/.csv/.png。Matplotlib先设置Agg后导入pyplot，检测实际中文字体，统一颜色/字号/单位/图例并合理留白，tight_layout后保存高清PNG及可编辑SVG，保留绘图.py与数据口径；不要用假数据或3D装饰扭曲数值。\n"
               + "4. 复核行数、关键合计和输出文件是否存在，并简要报告口径与结论。Python 3.7 环境不得使用 3.8+ 语法。"));
         out.add(skill("skill-creator","把已经验证成功的分析或操作流程封装为可重复调用的本地 Skill",
                 "当用户要求把本次过程保存、固化、封装成 Skill 时使用。\n"

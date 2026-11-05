@@ -6,6 +6,7 @@ import com.minion.core.tools.SchemaGenerator;
 import com.minion.core.tools.Tool;
 import com.minion.core.tools.ToolResult;
 import com.minion.core.tools.Workspace;
+import com.minion.core.tools.db.SqlGuard;
 import com.minion.core.tools.python.PythonRuntime;
 
 import java.nio.file.Files;
@@ -18,7 +19,7 @@ public class SqliteTool implements Tool {
     private final Workspace workspace; private final PythonRuntime python;
     public SqliteTool(Workspace workspace, PythonRuntime python) { this.workspace=workspace; this.python=python; }
     @Override public String name() { return "SQLite"; }
-    @Override public String description() { return "操作工作区 SQLite 数据库：schema 查看结构，query 只读查询，execute 执行建表/增删改（需确认）"; }
+    @Override public String description() { return "操作工作区 SQLite 数据库：schema 查看结构，query 单条只读 SQL 查询，execute 执行建表/增删改（需确认）；PRAGMA 请勿用于 query"; }
     @Override public JsonObject schema() {
         return SchemaGenerator.objectSchema("SQLite 数据库工具",
                 new String[]{"action","database","sql","limit"}, new String[]{"action","database"});
@@ -26,11 +27,15 @@ public class SqliteTool implements Tool {
     @Override public boolean isHighRisk(JsonObject args) { return "execute".equalsIgnoreCase(text(args,"action")); }
     @Override public ToolResult execute(JsonObject args) throws Exception {
         String action=text(args,"action").toLowerCase(Locale.ROOT), raw=text(args,"database");
+        if(!"schema".equals(action)&&!"query".equals(action)&&!"execute".equals(action))return ToolResult.error("action 仅支持 schema/query/execute");
+        String sql=text(args,"sql");
+        if("query".equals(action)){
+            String reason=SqlGuard.check(sql);
+            if(reason!=null)return ToolResult.error(reason);
+        }
         Path db=PathsGuard.resolve(workspace.cwd().toString(),raw).toAbsolutePath().normalize();
         ToolResult guard=PathsGuard.errorIfOutside(workspace.workDir(),db); if(guard!=null)return guard;
         if (!"execute".equals(action) && !Files.isRegularFile(db)) return ToolResult.error("数据库不存在: "+db);
-        String sql=text(args,"sql");
-        if ("query".equals(action) && !isReadOnly(sql)) return ToolResult.error("query 仅允许 SELECT/WITH/PRAGMA/EXPLAIN；修改请用 execute");
         int limit=Math.max(1,Math.min(integer(args,"limit",200),1000));
         Path helper=writeHelper();
         try {
@@ -43,14 +48,11 @@ public class SqliteTool implements Tool {
         Path dir=workspace.cwd().resolve(".minion").resolve("tmp"); Files.createDirectories(dir);
         Path p=Files.createTempFile(dir,"sqlite-",".py"); Files.write(p,SCRIPT.getBytes(java.nio.charset.StandardCharsets.UTF_8)); return p;
     }
-    private static boolean isReadOnly(String sql) {
-        String s=sql==null?"":sql.trim().toLowerCase(Locale.ROOT);
-        return s.startsWith("select")||s.startsWith("with")||s.startsWith("pragma")||s.startsWith("explain");
-    }
     private static final String SCRIPT=
-            "import sys,sqlite3,json\naction,path,sql,limit=sys.argv[1],sys.argv[2],sys.argv[3],int(sys.argv[4])\n"
+            "import sys,sqlite3,json,pathlib\naction,path,sql,limit=sys.argv[1],sys.argv[2],sys.argv[3],int(sys.argv[4])\n"
           + "sql='' if sql=='__MINION_EMPTY__' else sql\n"
-          + "con=sqlite3.connect(path)\ncon.row_factory=sqlite3.Row\n"
+          + "read_only=action in ('schema','query')\n"
+          + "con=sqlite3.connect(pathlib.Path(path).resolve().as_uri()+'?mode=ro' if read_only else path,uri=read_only)\ncon.row_factory=sqlite3.Row\n"
           + "try:\n"
           + " if action=='schema':\n"
           + "  rows=con.execute(\"select type,name,tbl_name,sql from sqlite_master where type in ('table','view','index') order by type,name\").fetchall()\n"

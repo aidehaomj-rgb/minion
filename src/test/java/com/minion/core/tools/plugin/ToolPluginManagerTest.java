@@ -106,13 +106,14 @@ public class ToolPluginManagerTest {
         assertNull(reg.get("DbMysql"));
 
         m.setEnabled("browser", true);
-        assertEquals(4, reg.schemas().size());
+        assertEquals(5, reg.schemas().size());
         assertNotNull(reg.get("Browser"));
         assertNotNull(reg.get("BrowserScreenshot"));
+        assertNotNull(reg.get("BrowserAction"));
         assertNull("数据库插件仍未启用", reg.get("DbMysql"));
 
         m.setEnabled("mysql", true);
-        assertEquals(5, reg.schemas().size());
+        assertEquals(6, reg.schemas().size());
         assertNotNull(reg.get("DbMysql"));
 
         m.setEnabled("browser", false);

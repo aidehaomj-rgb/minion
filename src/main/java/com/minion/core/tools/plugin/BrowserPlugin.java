@@ -64,6 +64,7 @@ public class BrowserPlugin implements ToolPlugin {
                 ctx == null ? null : ctx.tmpDir,
                 ctx == null ? null : ctx.confirmGate));
         list.add(new BrowserDebugTool(manager));
+        list.add(new com.minion.core.tools.browser.BrowserActionTool(manager,ctx==null?null:ctx.workspace));
         return list;
     }
 

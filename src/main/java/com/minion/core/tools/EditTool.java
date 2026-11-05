@@ -113,11 +113,13 @@ public class EditTool implements Tool {
                 : matchContent.replaceFirst(java.util.regex.Pattern.quote(matchOld),
                         java.util.regex.Matcher.quoteReplacement(matchNew));
         if (crlf) updated = updated.replace("\n", "\r\n");
+        CheckpointStore.Entry checkpoint=null;
         if (checkpoints != null) {
-            try { checkpoints.create(p, "Edit"); }
+            try { checkpoint=checkpoints.create(p, "Edit"); }
             catch (IOException e) { return ToolResult.error("创建编辑前检查点失败，未修改文件: " + e.getMessage()); }
         }
         AtomicFiles.writeBytes(p, updated.getBytes(d.charset)); // 按原编码写回，不破坏文件其余内容
+        if(checkpoint!=null)checkpoints.seal(checkpoint);
         return ToolResult.success("已替换 " + (replaceAll ? count : 1) + " 处: " + p);
         } finally {
             lock.unlock();

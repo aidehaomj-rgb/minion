@@ -22,6 +22,8 @@ public class AgentContinuationV26Test {
         Workspace ws = new Workspace(tmp.getRoot().getPath());
         ToolRegistry registry = new ToolRegistry();
         registry.register(new com.minion.core.tools.example.ExampleTool());
+        registry.register(new ReadTool(ws));
+        registry.register(new WriteTool(ws));
         loop = new AgentLoop(llm, registry, new SystemPromptBuilder(null),
                 new ConfirmGate(Config.load(tmp.getRoot().toPath()), new FakeConfirmUi(ConfirmUi.Decision.APPROVE)),
                 new AgentUi() {
@@ -152,10 +154,11 @@ public class AgentContinuationV26Test {
         loop.session().taskState.checkpoint("最后验证","1-38",Collections.singletonList(FileEvidence.capture(file)));
         java.nio.file.Files.write(file,"changed".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         finish();
+        llm.addTurnWithTools(Collections.singletonList(call("read-latest","Read","{\"path\":\"evidence.json\"}")),null);
         llm.addTurnWithTools(Collections.singletonList(call("checkpoint","AgentControl",
                 "{\"action\":\"checkpoint\",\"files\":\"evidence.json\",\"nextStep\":\"\",\"processedRange\":\"1-38\"}")),null);
         finish(); loop.runUserTurn("继续执行");
-        assertEquals(3,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
+        assertEquals(4,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
         assertTrue(lastHint(1).contains("断点证据文件"));
     }
     @Test public void longMissingHandshakeRecoveryIsBoundedEvenWithoutInterimPhrase() {
@@ -176,10 +179,12 @@ public class AgentContinuationV26Test {
     }
     @Test public void completedOutputRefreshesOldCheckpointAndStops() throws Exception {
         changedCheckpoint(); finish();
+        llm.addTurnWithTools(Collections.singletonList(call("write-final","Write",
+                "{\"path\":\"final.xlsx\",\"content\":\"verified final\"}")),null);
         llm.addTurnWithTools(Collections.singletonList(call("refresh","AgentControl",
                 "{\"action\":\"refresh_checkpoint\",\"note\":\"已核对267行、完整描述及分工；最终表按新要求重生成\"}")),null);
         finish(); loop.runUserTurn("继续执行");
-        assertEquals(3,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
+        assertEquals(4,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
         assertEquals("completed",loop.session().taskState.status);
         assertTrue(loop.session().taskState.checkpointFilesValid());
         assertEquals("",loop.session().taskState.nextStep);
@@ -241,6 +246,8 @@ public class AgentContinuationV26Test {
         assertEquals("完成时间：2026-10-12 09:02:03（北京时间）",AgentLoop.completionTimeLine(fixed));
     }
     @Test public void completedReplyContainsOneTimeLineInUiAndHistory() {
+        llm.addTurnWithTools(Collections.singletonList(call("write-delivery","Write",
+                "{\"path\":\"final.txt\",\"content\":\"实际交付\"}")),null);
         finish(); loop.runUserTurn("生成最终交付");
         assertTrue(loop.lastTurnSucceeded());
         String reply=loop.messages().get(loop.messages().size()-1).content;

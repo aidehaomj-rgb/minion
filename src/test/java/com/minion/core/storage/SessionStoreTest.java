@@ -18,6 +18,24 @@ import static org.junit.Assert.*;
 
 public class SessionStoreTest {
 
+    @Test public void metadataIndexRebuildsAndInvalidatesChangedSnapshot() throws Exception {
+        Path dir=tmp.getRoot().toPath().resolve("indexed"); SessionStore store=new SessionStore(dir);
+        Session s=makeSession(); store.save(s);
+        assertTrue(Files.isRegularFile(dir.resolve(".session-index")));
+        SessionStore.SessionMeta meta=new SessionStore(dir).list().get(0);
+        assertEquals("你好",meta.preview); assertEquals("你好",meta.lastSummary);
+        assertEquals(s.modelName,meta.modelName);
+        Files.delete(dir.resolve(".session-index"));
+        meta=new SessionStore(dir).list().get(0); assertEquals("你好",meta.preview);
+        Path file=dir.resolve(s.id+".json");
+        String json=new String(Files.readAllBytes(file),StandardCharsets.UTF_8);
+        Files.write(file,json.replace("你好","外部修改后的用户要求").getBytes(StandardCharsets.UTF_8));
+        meta=new SessionStore(dir).list().get(0);
+        assertEquals("外部修改后的用户要求",meta.preview);
+        Files.write(dir.resolve(".session-index"),"broken".getBytes(StandardCharsets.UTF_8));
+        assertEquals("外部修改后的用户要求",new SessionStore(dir).list().get(0).lastSummary);
+    }
+
     @Rule
     public TemporaryFolder tmp = new TemporaryFolder();
 
@@ -118,6 +136,19 @@ public class SessionStoreTest {
         store.save(s);
         Session loaded = store.load(s.id);
         assertEquals("/tmp/some/dir", loaded.cwd);
+    }
+
+    @Test
+    public void pausedTaskReasonSurvivesRestart() throws Exception {
+        SessionStore store = new SessionStore(tmp.getRoot().toPath().resolve("sessions-paused"));
+        Session s = Session.create(tmp.getRoot().getPath(), "test-model");
+        s.taskState.begin("生成报告", true);
+        s.taskState.finish(false, "输出文件已缺失，待复核");
+        store.save(s);
+        Session restored = store.load(s.id);
+        assertEquals("paused", restored.taskState.status);
+        assertEquals("输出文件已缺失，待复核", restored.taskState.pauseReason);
+        assertTrue(restored.taskState.render(restored.todos).contains("暂停原因"));
     }
 
     /** Task 6：/delete 删除会话文件后 load 抛 IOException */

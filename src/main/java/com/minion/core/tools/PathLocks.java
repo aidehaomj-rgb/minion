@@ -44,4 +44,9 @@ public final class PathLocks {
             key = key.toLowerCase(java.util.Locale.ROOT);
         return LOCKS[(key.hashCode() & 0x7fffffff) % STRIPES];
     }
+    /** Stripe order, not path order: prevents deadlock even for colliding path hashes. */
+    public static java.util.List<ReentrantLock> forPaths(java.util.List<Path> paths){
+        java.util.Set<ReentrantLock> chosen=new java.util.HashSet<ReentrantLock>();for(Path p:paths)chosen.add(forPath(p));
+        java.util.List<ReentrantLock> result=new java.util.ArrayList<ReentrantLock>();for(ReentrantLock lock:LOCKS)if(chosen.contains(lock))result.add(lock);return result;
+    }
 }

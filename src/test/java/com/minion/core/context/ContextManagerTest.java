@@ -14,27 +14,79 @@ import java.util.List;
 import static org.junit.Assert.*;
 
 public class ContextManagerTest {
-    @Test public void millionTokenWindowHonorsHighThresholdWithoutHiddenEightyPercentCap() {
+    @Test public void millionTokenWindowCompressesAtPracticalSoftLimit() {
         ContextManager cm=new ContextManager(1000000,0.9,50,new FakeLlmClient(),0);
-        assertEquals(900000,cm.autoCompressAtTokens());
+        assertEquals(150000,cm.autoCompressAtTokens());
         List<Message> messages=Collections.singletonList(Message.user("当前任务"));
         cm.observeInputTokens(messages,60000); assertFalse(cm.shouldCompress(messages));
-        cm.observeInputTokens(messages,899999); assertFalse(cm.shouldCompress(messages));
-        cm.observeInputTokens(messages,900000); assertTrue(cm.shouldCompress(messages));
-        cm.update(1000000,0.95,50); assertEquals(950000,cm.autoCompressAtTokens());
-        cm.update(1048576,0.9,50); assertEquals(943718,cm.autoCompressAtTokens());
+        cm.observeInputTokens(messages,119999); assertFalse(cm.shouldCompress(messages));
+        cm.observeInputTokens(messages,120000); assertFalse(cm.shouldCompress(messages));
+        cm.observeInputTokens(messages,149999); assertFalse(cm.shouldCompress(messages));
+        cm.observeInputTokens(messages,150000); assertTrue(cm.shouldCompress(messages));
+        cm.update(1000000,0.95,50); assertEquals(150000,cm.autoCompressAtTokens());
+        cm.update(1048576,0.9,50); assertEquals(150000,cm.autoCompressAtTokens());
+    }
+    @Test public void selectedModelStableWorksetIsIndependentAndFailureStillShrinksIt() {
+        ContextManager cm=new ContextManager(1000000,0.9,50,new FakeLlmClient(),0);
+        cm.setStableContextTokens(180000);
+        assertEquals(180000,cm.autoCompressAtTokens());
+        cm.learnFromContextFailure(170000);
+        assertEquals(137700,cm.autoCompressAtTokens());
+        cm.update(1000000,0.9,50);
+        cm.setStableContextTokens(80000);
+        assertEquals(80000,cm.autoCompressAtTokens());
+        cm.setStableContextTokens(0);
+        assertEquals(150000,cm.autoCompressAtTokens());
+    }
+    @Test public void twoHundredKHistoryIsSplitBeforeSummarizerRequests() {
+        FakeLlmClient llm=new FakeLlmClient();
+        ContextManager cm=new ContextManager(1000000,0.9,2,llm,0);
+        List<Message> history=new ArrayList<Message>();
+        char[] payload=new char[16000];Arrays.fill(payload,'历');
+        for(int i=0;i<16;i++) {history.add(Message.user("阶段"+i+new String(payload)));history.add(Message.assistant("已记录"));}
+        assertTrue(cm.estimate(history)>120000);
+        List<Message> compacted=cm.compressForRecovery(history,"清单","当前目标不变");
+        assertNotSame(history,compacted);
+        assertTrue(llm.completeChatRequests.size()>1);
+        for(String request:llm.completeChatRequests)
+            assertTrue("summary batch too large: "+TokenCounter.estimate(request),TokenCounter.estimate(request)<40000);
+    }
+    @Test public void hugeOriginalTaskRemainsDurableButIsBoundedInSummaryRequests() {
+        FakeLlmClient llm=new FakeLlmClient();
+        ContextManager cm=new ContextManager(1000000,0.9,2,llm,0);
+        char[] chars=new char[240000];Arrays.fill(chars,'甲');
+        String original="最初要求"+new String(chars)+"最终约束：保留所有编号";
+        List<Message> history=new ArrayList<Message>();
+        for(int i=0;i<8;i++){history.add(Message.user("历史阶段"+i));history.add(Message.assistant("结果"+i));}
+        List<Message> after=cm.compressForRecovery(history,"任务清单",original);
+        assertNotSame(history,after);
+        assertTrue(after.get(0).content.length()<40000);
+        assertTrue(after.get(0).content.contains("最终约束：保留所有编号"));
+        for(String request:llm.completeChatRequests)
+            assertTrue("oversized compaction control",request.length()<60000);
+        assertEquals(240000+"最初要求".length()+"最终约束：保留所有编号".length(),original.length());
+    }
+    @Test public void longToolOutputDedupUsesCompactKeysWithoutHashCollisionDataLoss() {
+        ContextManager cm=new ContextManager(1000000,0.9,12,new FakeLlmClient(),0);
+        String a=String.join("",Collections.nCopies(600,"Aa"));
+        String b=String.join("",Collections.nCopies(600,"BB"));
+        assertEquals(a.hashCode(),b.hashCode());
+        List<Message> distinct=Arrays.asList(Message.toolResult("a","Read",a),Message.toolResult("b","Read",b));
+        assertEquals(a,cm.prepareForRequest(distinct).get(0).content);
+        List<Message> repeated=Arrays.asList(Message.toolResult("a","Read",a),Message.toolResult("b","Read",a));
+        assertTrue(cm.prepareForRequest(repeated).get(0).content.contains("重复工具输出已去重"));
     }
     @Test public void configuredOutputBudgetCapsTriggerOnlyNearWindowEnd() {
         ContextManager cm=new ContextManager(1000000,1,50,new FakeLlmClient(),0);
-        cm.setOutputReserveTokens(65536); assertEquals(934464,cm.autoCompressAtTokens());
-        cm.update(1000000,0.9,50); assertEquals(900000,cm.autoCompressAtTokens());
-        cm.setOutputReserveTokens(8192); cm.update(1000000,1,50); assertEquals(991808,cm.autoCompressAtTokens());
+        cm.setOutputReserveTokens(65536); assertEquals(150000,cm.autoCompressAtTokens());
+        cm.update(1000000,0.9,50); assertEquals(150000,cm.autoCompressAtTokens());
+        cm.setOutputReserveTokens(8192); cm.update(1000000,1,50); assertEquals(150000,cm.autoCompressAtTokens());
         cm.setInitialSafeMax(60000); assertEquals(51808,cm.autoCompressAtTokens());
     }
     @Test public void legacyEightyPercentAndInvalidRatioFallbackRemainSafe() {
         assertEquals(48000,new ContextManager(60000,0.8,50,new FakeLlmClient(),0).autoCompressAtTokens());
         for(double invalid:new double[]{0,-1,2,Double.NaN,Double.POSITIVE_INFINITY}) {
-            assertEquals(800000,new ContextManager(1000000,invalid,50,new FakeLlmClient(),0).autoCompressAtTokens());
+            assertEquals(150000,new ContextManager(1000000,invalid,50,new FakeLlmClient(),0).autoCompressAtTokens());
         }
     }
 

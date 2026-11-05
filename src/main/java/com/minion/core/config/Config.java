@@ -96,6 +96,9 @@ public class Config {
     public String sharedKnowledgeDir() { return get("knowledge.shared.dir", ""); }
     /** Python/Anaconda 解释器；留空时自动探测 MINION_PYTHON、Conda 和常见安装目录。 */
     public String pythonPath()   { return get("python.path", ""); }
+    public String ocrPath() { return get("ocr.path", "tesseract"); }
+    public String ocrLanguage() { return get("ocr.language", "chi_sim+eng"); }
+    public String officePath() { return get("office.path", "soffice"); }
 
     /** 空间外读：true 时 Read/Grep/Glob 可读取工作区外文件（写入类工具不受影响，仍受限） */
     public boolean readAllowOutside() { return Boolean.parseBoolean(get("paths.read.allowOutside", "false")); }

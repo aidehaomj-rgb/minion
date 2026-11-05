@@ -9,6 +9,8 @@ import java.util.List;
 public class FakeLlmClient implements LlmClient {
 
     public String compressResult = "【摘要】历史对话要点";
+    /** When true, return the raw fixture to test fail-closed checkpoint validation. */
+    public boolean rawCompressResult;
     /** 置 true 时 completeChat 抛 LlmException，模拟压缩请求异常（T16 Round1） */
     public boolean throwOnCompleteChat = false;
     /** 置入序号（1 起）的调用返回空串模拟压缩失败；其余返回 compressResult */
@@ -190,7 +192,17 @@ public class FakeLlmClient implements LlmClient {
                 : (messages.get(messages.size() - 1).content == null ? "" : messages.get(messages.size() - 1).content);
         completeChatRequests.add(batch);
         if (failAtCompleteChat.contains(completeChatCalls)) return "";
-        return compressResult;
+        if (rawCompressResult || compressResult == null || compressResult.trim().isEmpty()
+                || !systemPrompt.contains("上下文压缩器") || compressResult.contains("【最新用户要求】"))
+            return compressResult;
+        return compressResult + "\n【最新用户要求】按本轮最新要求执行"
+                + "\n【已完成及证据】待核验"
+                + "\n【未完成】待核验"
+                + "\n【关键决定及原因】无"
+                + "\n【证据位置】无"
+                + "\n【失败尝试】无"
+                + "\n【下一步】继续核对"
+                + "\n【不确定事项】无";
     }
 
     /** close() 被调用次数（会话删除/退出时资源释放断言） */

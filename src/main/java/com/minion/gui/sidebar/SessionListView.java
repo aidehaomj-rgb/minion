@@ -29,7 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-/** 左侧会话列表：标题 + 最后消息摘要 + 运行状态点 + 悬停操作按钮（重命名/删除）/ 最近消息时间；单击切换 */
+/** 左侧会话列表：标题 + 最后消息摘要 + 运行状态点 + 悬停操作按钮（置顶/重命名/删除）/ 最近消息时间；单击切换 */
 public class SessionListView extends ListView<SessionHandle> {
 
     private final SessionManager manager;
@@ -46,7 +46,7 @@ public class SessionListView extends ListView<SessionHandle> {
         clock.setCycleCount(javafx.animation.Animation.INDEFINITE);
         clock.play();
         setOnMouseClicked(e -> {
-            // 悬停按钮（✎/✕）的点击会冒泡到此 handler：跳过切换，避免误激活会话（按钮事件已由按钮自身处理）
+            // 悬停按钮的点击会冒泡到此 handler：跳过切换，避免误激活会话。
             if (isHoverButton(e.getTarget())) return;
             SessionHandle h = getSelectionModel().getSelectedItem();
             if (h != null && e.getClickCount() == 1) {
@@ -110,6 +110,13 @@ public class SessionListView extends ListView<SessionHandle> {
             renameBtn.getStyleClass().add("btn-cell");
             renameBtn.setTooltip(new Tooltip("重命名"));
             renameBtn.setOnAction(e -> doRename(h));
+            SVGPath pinIcon = IconFactory.pin();
+            IconFactory.size(pinIcon, 13);
+            Button pinBtn = new Button();
+            pinBtn.setGraphic(pinIcon);
+            pinBtn.getStyleClass().add("btn-cell");
+            pinBtn.setTooltip(new Tooltip(h.session.pinned ? "取消置顶" : "置顶"));
+            pinBtn.setOnAction(e -> { manager.setPinned(h, !h.session.pinned); refresh(); });
             SVGPath delIcon = IconFactory.delete();
             IconFactory.size(delIcon, 13);
             Button delBtn = new Button();
@@ -119,6 +126,8 @@ public class SessionListView extends ListView<SessionHandle> {
             delBtn.setOnAction(e -> doDelete(h));
             renameBtn.setVisible(false);
             renameBtn.setManaged(false);
+            pinBtn.setVisible(false);
+            pinBtn.setManaged(false);
             delBtn.setVisible(false);
             delBtn.setManaged(false);
             setOnMouseEntered(e -> {
@@ -126,6 +135,8 @@ public class SessionListView extends ListView<SessionHandle> {
                 timeLabel.setManaged(false);
                 renameBtn.setVisible(true);
                 renameBtn.setManaged(true);
+                pinBtn.setVisible(true);
+                pinBtn.setManaged(true);
                 delBtn.setVisible(true);
                 delBtn.setManaged(true);
             });
@@ -134,12 +145,14 @@ public class SessionListView extends ListView<SessionHandle> {
                 timeLabel.setManaged(true);
                 renameBtn.setVisible(false);
                 renameBtn.setManaged(false);
+                pinBtn.setVisible(false);
+                pinBtn.setManaged(false);
                 delBtn.setVisible(false);
                 delBtn.setManaged(false);
             });
 
             HBox box = new HBox(6);
-            box.getChildren().addAll(dot, name, spacer, timeLabel, renameBtn, delBtn);
+            box.getChildren().addAll(dot, name, spacer, timeLabel, pinBtn, renameBtn, delBtn);
 
             VBox cellBox = new VBox(2);
             cellBox.maxWidthProperty().bind(javafx.beans.binding.Bindings.createDoubleBinding(
@@ -167,7 +180,8 @@ public class SessionListView extends ListView<SessionHandle> {
                 Dragboard board = e.getDragboard();
                 if (!isEmpty() && e.getGestureSource() instanceof SessionCell
                         && board.hasString() && !h.id.equals(board.getString())
-                        && manager.findSession(board.getString()) != null) {
+                        && manager.findSession(board.getString()) != null
+                        && manager.findSession(board.getString()).session.pinned == h.session.pinned) {
                     e.acceptTransferModes(TransferMode.MOVE);
                 }
                 e.consume();
@@ -175,6 +189,8 @@ public class SessionListView extends ListView<SessionHandle> {
             setOnDragEntered(e -> {
                 if (e.getGestureSource() instanceof SessionCell && e.getDragboard().hasString()
                         && !h.id.equals(e.getDragboard().getString())
+                        && manager.findSession(e.getDragboard().getString()) != null
+                        && manager.findSession(e.getDragboard().getString()).session.pinned == h.session.pinned
                         && !getStyleClass().contains("session-drop-target")) {
                     getStyleClass().add("session-drop-target");
                 }
@@ -210,6 +226,7 @@ public class SessionListView extends ListView<SessionHandle> {
 
     /** 最后一条非 TOOL 消息的创建时间戳（毫秒；无消息/全 TOOL/旧数据 → 0） */
     private long lastMessageTs(SessionHandle h) {
+        if (!h.isLoaded()) return h.listMessageTs;
         if (h.session == null || h.session.messages == null) return 0L;
         List<Message> msgs = new ArrayList<Message>(h.session.messages); // 防御性拷贝（同 lastSummary）
         for (int i = msgs.size() - 1; i >= 0; i--) {
@@ -222,6 +239,7 @@ public class SessionListView extends ListView<SessionHandle> {
 
     /** 摘要：最后一条非 TOOL 角色且非空 content 的消息，前 40 字；无消息/全 TOOL/空 content → null（不显示行） */
     private String lastSummary(SessionHandle h) {
+        if (!h.isLoaded()) return h.listSummary;
         if (h.session == null || h.session.messages == null) return null;
         // 防御性拷贝：FX 线程遍历时 agent 工作线程可能正在写 messages（普通 ArrayList 非线程安全）
         List<Message> msgs = new ArrayList<Message>(h.session.messages);

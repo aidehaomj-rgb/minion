@@ -18,6 +18,8 @@ public class ModelManager {
     private final List<ModelConfig> models = new ArrayList<ModelConfig>();
     private String currentName;
     private String defaultName;
+    /** One-time migration of the old 80K/120K worksets; later user edits stay user-owned. */
+    private int contextTriggerMigrationVersion;
 
     private ModelManager(Path file) { this.file = file; }
 
@@ -45,6 +47,7 @@ public class ModelManager {
                     }
                     if (h.currentModelName != null) m.currentName = h.currentModelName;
                     m.defaultName = h.defaultModelName;
+                    m.contextTriggerMigrationVersion = h.contextTriggerMigrationVersion;
                     loaded = true;
                 }
                 if (m.models.isEmpty()) loaded = false; // 无有效条目视为未加载成功
@@ -57,12 +60,29 @@ public class ModelManager {
             m.models.add(createDeepseek());
             m.models.add(createQwen());
             m.currentName = m.models.get(0).displayName;
+            m.contextTriggerMigrationVersion = 1;
             m.save();
         }
         // 回退检查：current 指向不存在的模型时取第一个（列表已保证非空且无 null）
         if (m.get(m.currentName) == null) m.currentName = m.models.get(0).displayName;
         if (m.get(m.defaultName) == null) m.defaultName = m.currentName;
+        if (loaded && m.contextTriggerMigrationVersion < 1) {
+            for (ModelConfig c : m.models) {
+                if (usesRequested150kTrigger(c)
+                        && (c.stableContextTokens == 80000 || c.stableContextTokens == 120000))
+                    c.stableContextTokens = 150000;
+            }
+            m.contextTriggerMigrationVersion = 1;
+            m.save();
+        }
         return m;
+    }
+
+    private static boolean usesRequested150kTrigger(ModelConfig c) {
+        String name = ((c.modelName == null ? "" : c.modelName) + " "
+                + (c.displayName == null ? "" : c.displayName))
+                .toLowerCase(java.util.Locale.ROOT).replace('_', '-').replace(' ', '-');
+        return name.contains("deepseek") || name.contains("qwen3.8-flash");
     }
 
     public static ModelConfig createDeepseek() {
@@ -147,6 +167,7 @@ public class ModelManager {
         old.maxOutputTokens = c.maxOutputTokens <= 0 ? 8192 : c.maxOutputTokens;
         old.maxContextTokens = c.maxContextTokens;
         old.compressThreshold = c.compressThreshold;
+        old.stableContextTokens = c.stableContextTokens;
         old.keepRecentMessages = c.keepRecentMessages;
         save();
     }
@@ -176,6 +197,7 @@ public class ModelManager {
             h.models = models;
             h.currentModelName = currentName;
             h.defaultModelName = defaultName();
+            h.contextTriggerMigrationVersion = contextTriggerMigrationVersion;
             Files.createDirectories(file.getParent());
             Files.write(tmp, new Gson().toJson(h).getBytes(StandardCharsets.UTF_8));
             Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
@@ -201,5 +223,6 @@ public class ModelManager {
         List<ModelConfig> models;
         String currentModelName;
         String defaultModelName;
+        int contextTriggerMigrationVersion;
     }
 }

@@ -41,13 +41,13 @@ public class SubAgentLoopTest {
         Config config=Config.load(tmp.getRoot().toPath());
         SubAgentLoop sub=new SubAgentLoop("系统","仅子任务",tmp.getRoot().toString(),new FakeLlmClient(),new ToolRegistry(),
                 new ConfirmGate(config,new FakeConfirmUi(ConfirmUi.Decision.APPROVE)),new RecordingUi());
-        sub.setContextWindow(1000000,0.95,65536);
+        sub.setContextWindow(1000000,0.95,65536,180000);
         java.lang.reflect.Field field=SubAgentLoop.class.getDeclaredField("context"); field.setAccessible(true);
         com.minion.core.context.ContextManager cm=(com.minion.core.context.ContextManager)field.get(sub);
-        assertEquals(934464,cm.autoCompressAtTokens());
+        assertEquals(180000,cm.autoCompressAtTokens());
         sub.setContextWindow(1000000,0.9,8192);
         cm=(com.minion.core.context.ContextManager)field.get(sub);
-        assertEquals(900000,cm.autoCompressAtTokens());
+        assertEquals(150000,cm.autoCompressAtTokens());
     }
 
     @Rule
@@ -88,10 +88,15 @@ public class SubAgentLoopTest {
         llm.addTurnWithTools(Collections.singletonList(call),"读取中"); llm.addTurn("完成子范围");
         SubAgentLoop sub=new SubAgentLoop("系统","只查20-30行",tmp.getRoot().toString(),llm,registry,
                 new ConfirmGate(config,new FakeConfirmUi(ConfirmUi.Decision.APPROVE)),new RecordingUi());
+        sub.setRecordPath(tmp.getRoot().toPath().resolve("child.json"));
         sub.setContextWindow(100,0.8); sub.run();
         assertFalse(llm.completeChatRequests.isEmpty());
         assertTrue(llm.lastRequestMessages.toString(),llm.lastRequestMessages.stream()
                 .anyMatch(m -> m.summary && m.content.contains("只查20-30行")));
+        assertTrue(llm.requests.stream().anyMatch(r->r.messages.stream().anyMatch(m->m.content!=null
+                &&m.content.startsWith("[系统子任务压缩续接]")&&m.content.contains("只查20-30行"))));
+        assertFalse(new com.minion.core.storage.HistoryArchive(tmp.getRoot().toPath(), "child")
+                .search("只查20-30行", 5).isEmpty());
     }
 
     @Test

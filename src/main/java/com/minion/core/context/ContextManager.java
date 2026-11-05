@@ -9,14 +9,19 @@ import java.util.List;
 
 /** 上下文管理：token 估算、阈值判断、链式压缩（完整回合链为单位，摘要置前） */
 public class ContextManager {
+    /** Practical stability ceiling for local inference; not the model's advertised context size. */
+    public static final int DEFAULT_SOFT_TRIGGER_TOKENS = 150000;
 
     private static final String COMPRESS_SYSTEM =
-            "你是 minion 的上下文压缩器。把用户提供的对话历史压缩成一段中文摘要，保留："
-          + "未完成的任务与目标、已做出的关键决策及原因、使用过的工具与结果要点、"
-          + "相关文件路径、代码约定、用户偏好、当前进度、失败尝试和明确的下一步。"
-          + "已有历史摘要必须与新增历史合并；旧指令只作背景，不能当作当前待执行任务。"
-          + "明确区分已完成和待执行的工作，不要省略仍待执行的用户要求；"
-          + "只输出结构清晰的摘要正文，不要客套，3000 字以内。";
+            "你是 minion 的上下文压缩器。输出结构化中文检查点，严格依次使用【最新用户要求】、"
+          + "【已完成及证据】、【未完成】、【关键决定及原因】、【证据位置】、【失败尝试】、【下一步】、【不确定事项】。"
+          + "每个字段都必须有内容；没有证据或失败尝试时写‘无’或‘待核验’，不要省略字段。"
+          + "保留可核验的文件路径、数据范围、子Agent进度、用户明确的纠正与限制；不得把计划写成已完成。"
+          + "已有历史摘要只作为背景与新增历史合并；旧任务指令不能当作当前任务，最新用户修正优先。"
+          + "只有当前任务和当前修订仍有效的事项才能进入【未完成】和【下一步】；较早任务、旧修订及系统修复提示不是用户待办。"
+          + "摘要批次可能不包含最新用户消息，必须以当前控制记录的最新要求为准，不得用批次末尾的旧要求替换。"
+          + "只有来源明确的事实可写成结论，证据不足标为不确定。不要复述冗长工具输出；"
+          + "原始消息已单独归档，必要时可按来源检索。只输出检查点正文，不要客套，6000 字以内。";
 
     private static final String TASK_START = "【当前任务原文】\n";
     private static final String TASK_END = "\n【历史背景】\n";
@@ -28,6 +33,7 @@ public class ContextManager {
     private static final double KEEP_RATIO = 0.5;    // 保留区占比目标
 
     private static final int SEGMENT_MIN = 30; // 段内消息数下限：以下不再递归
+    private static final int COMPRESS_BATCH_SAFE_TOKENS = 32000;
     private static final int COMPRESS_FIELD_CHARS = 16000; // 单字段送摘要模型的上限，防巨型工具输出拖垮压缩请求
     private static final int OLD_TOOL_CHARS = 8000;
     private static final int CURRENT_TOOL_CHARS = 24000;
@@ -44,6 +50,7 @@ public class ContextManager {
     private volatile int effectiveMaxContextTokens;
     private volatile double threshold;
     private volatile int outputReserveTokens = 8192;
+    private volatile int stableContextTokens = DEFAULT_SOFT_TRIGGER_TOKENS;
     private volatile int keepRecent;
     private volatile LlmClient llm;
     private final int systemTokens;    // system 提示词 token 估算在构造时固定，保持不变
@@ -51,6 +58,9 @@ public class ContextManager {
      *  true = 已尝试但 LLM 调用失败原样返回。供 AgentLoop 区分"暂无可压缩"与"压缩失败"提示 */
     private volatile boolean lastCompressAttempted;
     private volatile double inputTokenScale = 1.0;
+    // Fixed request overhead must be additive: tools must not be learnt as tokens per history character.
+    private volatile int requestSchemaTokens, requestFixedOffset;
+    private volatile String calibration = "usage校准=unknown";
     private volatile String requestProfile="balanced";
     public void setRequestProfile(String profile) { requestProfile="compact".equals(profile)?"compact":"balanced"; }
 
@@ -73,13 +83,20 @@ public class ContextManager {
     }
 
     /** 换 LLM 客户端（模型切换后调用；压缩请求走新客户端） */
-    public void setLlm(LlmClient llm) { this.llm = llm; inputTokenScale = 1.0; }
+    public void setLlm(LlmClient llm) {
+        this.llm = llm; inputTokenScale = 1.0; requestSchemaTokens=0;requestFixedOffset=0;
+        calibration="usage校准=unknown（模型已切换）";
+    }
 
     /** 上下文窗口上限（AgentLoop 压缩百分比计算用） */
     public int maxTokens() { return effectiveMaxContextTokens; }
     public int configuredMaxTokens() { return configuredMaxContextTokens; }
     public void setOutputReserveTokens(int tokens) { outputReserveTokens = tokens > 0 ? tokens : 8192; }
     public int outputReserveTokens() { return outputReserveTokens; }
+    public void setStableContextTokens(int tokens) {
+        stableContextTokens = tokens >= 8192 ? tokens : DEFAULT_SOFT_TRIGGER_TOKENS;
+    }
+    public int stableContextTokens() { return stableContextTokens; }
     public static double normalizedThreshold(double value) {
         return Double.isNaN(value) || Double.isInfinite(value) || value <= 0 || value > 1 ? 0.8 : value;
     }
@@ -110,11 +127,17 @@ public class ContextManager {
     public double threshold() { return threshold; }
     private int taskAnchorTokens;
     private String compressionControl;
+    private String activeTaskId, activeObjective, latestRequirement;
+    private long activeRevision;
+    public void setTaskScope(String taskId, long revision, String objective, String latest) {
+        activeTaskId=taskId; activeRevision=revision; activeObjective=objective; latestRequirement=latest;
+    }
     public void setTaskAnchorTokens(int tokens) { taskAnchorTokens = Math.max(0,tokens); }
 
     public int estimate(List<Message> messages) {
         return (int) Math.min(Integer.MAX_VALUE,
-                Math.ceil((systemTokens + taskAnchorTokens + (double) TokenCounter.estimateMessages(prepareForRequest(messages)))
+                Math.ceil((Math.max(0,systemTokens + taskAnchorTokens + requestFixedOffset)
+                        + requestSchemaTokens + (double) TokenCounter.estimateMessages(prepareForRequest(messages)))
                         * inputTokenScale));
     }
 
@@ -123,6 +146,26 @@ public class ContextManager {
         int local = systemTokens + taskAnchorTokens + TokenCounter.estimateMessages(messages);
         if (local > 0 && actualTokens > 0) inputTokenScale = Math.max(1.0, (double) actualTokens / local);
     }
+
+    /** Snapshot the actual wire projection, not raw history. Schemas can change without changing text scale.
+     * Fixed offset accounts for recall/handoff and the exact system prompt; the task anchor itself stays live. */
+    public void requestOverhead(List<Message> request,List<Message> projectedHistory,int schemaTokens) {
+        requestSchemaTokens=Math.max(0,schemaTokens);
+        requestFixedOffset=TokenCounter.estimateMessages(request)-TokenCounter.estimateMessages(projectedHistory)
+                -systemTokens-taskAnchorTokens;
+    }
+
+    /** Only a server-reported TOTAL can calibrate the same TOTAL estimate. No invented per-part usage. */
+    public void observeRequestTokens(List<Message> request,List<Message> projectedHistory,int schemaTokens,int actualTokens) {
+        requestOverhead(request,projectedHistory,schemaTokens);
+        long local=(long)TokenCounter.estimateMessages(request)+Math.max(0,schemaTokens);
+        if(local<=0||actualTokens<=0)return;
+        inputTokenScale=Math.max(1.0,(double)actualTokens/local);
+        calibration="同请求usage校准：本地总输入="+local+"，服务端总输入="+actualTokens
+                +"，总量比例="+String.format(java.util.Locale.ROOT,"%.3f",inputTokenScale)
+                +"；工具定义以加项计入，分项实际token=unknown；不修改150K/用户压缩线";
+    }
+    public String calibrationStatus(){return calibration;}
 
     public boolean shouldCompress(List<Message> messages) {
         return estimate(messages) >= autoCompressAtTokens();
@@ -134,7 +177,8 @@ public class ContextManager {
      * 工具结果进入历史后，下一次请求前重新估算并判断压缩。
      */
     public int autoCompressAtTokens() {
-        return triggerAtTokens(effectiveMaxContextTokens, threshold, outputReserveTokens);
+        return Math.min(stableContextTokens,
+                triggerAtTokens(effectiveMaxContextTokens, threshold, outputReserveTokens));
     }
 
     /** 设置页预览与运行时使用同一算法。小窗口保持旧版测试/本地模型的行为。 */
@@ -154,7 +198,7 @@ public class ContextManager {
         int protectedFrom = Math.max(0, messages.size() - 12);
         for (int i = messages.size() - 1; i >= 0; i--) {
             Message m = messages.get(i);
-            if (m.role == Message.Role.USER && !m.summary && !m.pinned) {
+            if (m.isUserInstruction()) {
                 protectedFrom = i;
                 break;
             }
@@ -163,17 +207,29 @@ public class ContextManager {
         java.util.Map<String,Integer> lastToolOutput=new java.util.HashMap<String,Integer>();
         for(int i=0;i<messages.size();i++) {
             Message m=messages.get(i);
-            if(m.role==Message.Role.TOOL&&m.content!=null&&m.content.length()>1000) lastToolOutput.put(m.name+"\n"+m.content,i);
+            if(m.role==Message.Role.TOOL&&m.content!=null&&m.content.length()>1000)
+                lastToolOutput.put(toolOutputKey(m),i);
         }
         for (int i = 0; i < messages.size(); i++) {
             Message src = messages.get(i);
             boolean current = i >= protectedFrom;
             Message m = copyMessage(src);
+            if (m.summary && activeTaskId != null)
+                m.content = StructuredCheckpoint.forTask(src, activeTaskId, activeRevision, activeObjective, latestRequirement);
+            else if(activeTaskId!=null && !m.pinned && m.content!=null && m.taskId!=null
+                    && (m.role==Message.Role.USER || m.role==Message.Role.ASSISTANT)) {
+                if(!activeTaskId.equals(m.taskId))
+                    m.content="【较早任务消息引用：task="+m.taskId+"；不是当前指令，不恢复旧任务】\n"+m.content;
+                else if(m.role==Message.Role.USER && m.revision()>0 && m.revision()<activeRevision)
+                    m.content="【本任务较早用户原话：修订="+m.revision()+"；冲突部分已被最新要求覆盖，不冲突部分仍适用】\n"+m.content;
+            }
             if (m.role == Message.Role.TOOL) {
                 m.content = compactForRequest(m.content,
                         "compact".equals(requestProfile)?(current?6000:3000):(current ? CURRENT_TOOL_CHARS : OLD_TOOL_CHARS), "工具输出");
-                Integer last=src.content==null?null:lastToolOutput.get(src.name+"\n"+src.content);
-                if(last!=null&&last>i) m.content="[重复工具输出已去重，内容与后续第"+(last+1)+"条相同；原记录仍保存在本地历史]";
+                Integer last=src.content==null?null:lastToolOutput.get(toolOutputKey(src));
+                if(last!=null&&last>i && java.util.Objects.equals(src.name,messages.get(last).name)
+                        && src.content.equals(messages.get(last).content))
+                    m.content="[重复工具输出已去重，内容与后续第"+(last+1)+"条相同；原记录仍保存在本地历史]";
             } else if (m.role == Message.Role.ASSISTANT) {
                 m.content = compactForRequest(m.content,
                         current ? CURRENT_ASSISTANT_CHARS : OLD_ASSISTANT_CHARS, "助手正文");
@@ -206,6 +262,11 @@ public class ContextManager {
         return out;
     }
 
+    /** Compact map key; verify full equality before dedup so hash collisions never discard output. */
+    private static String toolOutputKey(Message m) {
+        return String.valueOf(m.name)+":"+m.content.length()+":"+m.content.hashCode();
+    }
+
     private static Message copyMessage(Message src) {
         Message m = new Message();
         m.role = src.role;
@@ -218,7 +279,13 @@ public class ContextManager {
         m.pinned = src.pinned;
         m.images = src.images;
         m.supplement = src.supplement;
+        m.userAuthored = src.userAuthored;
+        m.toolImage = src.toolImage;
+        m.replyToToolCallId = src.replyToToolCallId;
         m.ts = src.ts;
+        m.eventId = src.eventId;
+        m.taskId = src.taskId;
+        m.taskRevision = src.taskRevision;
         return m;
     }
 
@@ -351,11 +418,16 @@ public class ContextManager {
         lastCompressAttempted = true; // 已尝试：后续无论成败都不是"无可压缩"
 
         String oldSummary = priorSummaries(messages);
-        String currentTask = objective != null ? objective : currentTask(messages);
-        if (oldSummary != null && currentTask != null)
+        // The exact objective lives in TaskState and the immutable event journal.
+        // Re-inserting a 200K original into every summary would defeat compaction.
+        String currentTask = objective != null ? compactTask(objective) : currentTask(messages);
+        if (oldSummary != null && currentTask != null && objective == null)
             oldSummary = "【当前有效任务，以此为准】\n" + currentTask + "\n" + oldSummary;
         // Control is not a successfully compressed prefix on model failure.
-        compressionControl = objective == null ? null : "【当前控制记录，不得改写】\n" + objective + "\n" + taskState;
+        compressionControl = objective == null ? null : "【当前控制记录，不得改写；完整原文可用 Memory.read_task 分页读取】\n"
+                + compactTask(objective) + "\n" + compactTask(taskState == null ? "" : taskState);
+        if (compressionControl != null && latestRequirement != null && !latestRequirement.equals(objective))
+            compressionControl += "\n【最新有效用户要求：高于冲突的原目标、旧摘要和旧计划】\n" + compactTask(latestRequirement);
         SegResult res;
         try { res = compressChains(chains, 0, take, oldSummary); }
         finally { compressionControl = null; }
@@ -381,12 +453,14 @@ public class ContextManager {
         return result;
     }
 
-    private static String priorSummaries(List<Message> messages) {
+    private String priorSummaries(List<Message> messages) {
         StringBuilder out = new StringBuilder();
         for (Message m : messages) {
             if (!m.summary || m.content == null || m.content.trim().isEmpty()) continue;
             if (out.length() > 0) out.append('\n');
-            out.append("【已有历史摘要，请合并】\n").append(summaryBody(m.content));
+            out.append("【已有历史资料，请按任务及修订区分，不继承过期待办】\n")
+                    .append(activeTaskId == null ? summaryBody(m.content)
+                            : StructuredCheckpoint.forTask(m,activeTaskId,activeRevision,activeObjective,latestRequirement));
         }
         return out.length() == 0 ? null : out.toString();
     }
@@ -412,7 +486,7 @@ public class ContextManager {
                 int end = m.content.indexOf(TASK_END, start + TASK_START.length());
                 if (start >= 0 && end > start) oldTask = m.content.substring(start + TASK_START.length(), end);
             }
-            if (m.role != Message.Role.USER || m.summary || m.pinned || m.content == null) continue;
+            if (!m.isUserInstruction()) continue;
             String text = m.content.trim();
             if (text.isEmpty() || continuation(text)) continue;
             return compactTask(text);
@@ -433,16 +507,19 @@ public class ContextManager {
                 + text.substring(text.length() - half);
     }
 
-    private static Message summaryMsg(String text, String task, String taskState) {
+    private Message summaryMsg(String text, String task, String taskState) {
         StringBuilder out = new StringBuilder();
         if (task != null && !task.trim().isEmpty())
             out.append(TASK_START).append(task).append(TASK_END);
         else out.append("【历史背景】\n");
-        out.append(text == null ? "" : text);
+        out.append(text == null ? "" : StructuredCheckpoint.bindLatest(text, latestRequirement == null ? task : latestRequirement));
         if (taskState != null && !taskState.trim().isEmpty())
             out.append(TASK_STATE_START)
                     .append(compactTask(taskState.trim()));
-        return summaryMsg(out.toString());
+        Message summary = summaryMsg(out.toString());
+        summary.taskId = activeTaskId;
+        summary.taskRevision = activeRevision;
+        return summary;
     }
 
     private static class SegResult {
@@ -458,12 +535,17 @@ public class ContextManager {
      *  整体成功 → 单摘要；失败且段 > SEGMENT_MIN → token 均衡二分递归；
      *  失败且已最小段 → prefix(如有)+原文。返回 null = 本段整体失败。 */
     private SegResult compressChains(List<List<Message>> chains, int from, int to, String prefix) {
-        String s = callLlm(prefix, buildBatch(chains, from, to));
+        String batch=buildBatch(chains, from, to);
+        // A nominal 1M chat window does not mean the local summarizer can digest a
+        // 200K+ batch reliably. Split before sending, rather than waiting for a 400/timeout.
+        boolean oversized=TokenCounter.estimate(batch)+TokenCounter.estimate(prefix)
+                +TokenCounter.estimate(compressionControl)>COMPRESS_BATCH_SAFE_TOKENS;
+        String s = oversized && to-from>1 ? null : callLlm(prefix, batch);
         if (s != null && !s.trim().isEmpty()) {
             String t = s.trim();
             return new SegResult(t, Collections.singletonList(summaryMsg(t)));
         }
-        if (countMessages(chains, from, to) <= SEGMENT_MIN) {
+        if (to-from<=1 || (!oversized && countMessages(chains, from, to) <= SEGMENT_MIN)) {
             if (prefix == null) return null; // 无上游摘要且本段失败 → 整体失败
             List<Message> out = new ArrayList<Message>();
             out.add(summaryMsg(prefix));
@@ -523,12 +605,21 @@ public class ContextManager {
 
     private String buildBatch(List<List<Message>> chains, int from, int to) {
         StringBuilder batch = new StringBuilder();
+        int older = 0;
         for (int i = from; i < to; i++) {
             for (Message m : chains.get(i)) {
+                if (activeTaskId != null && m.taskId != null && !activeTaskId.equals(m.taskId)) {
+                    older++; continue;
+                }
                 batch.append('[').append(m.role).append(']');
+                if (m.eventId != null) batch.append("[event=").append(m.eventId).append("]");
+                if (m.taskId != null) batch.append("[task=").append(m.taskId).append("]");
+                if (activeTaskId != null && m.revision() > 0 && m.revision() < activeRevision)
+                    batch.append("[旧修订：已完成证据仍可核对；冲突要求和旧计划不得生成当前待办]");
+                if (m.role == Message.Role.USER && !m.isUserInstruction()) batch.append("[系统/工具资料，非用户要求]");
                 if (m.content != null) batch.append(' ').append(compactField(m.content));
-                if (m.reasoningContent != null) batch.append(" (思考: ")
-                        .append(compactField(m.reasoningContent)).append(')');
+                // 历史思考包含猜想、废弃分支和旧计划，不是事实来源；原文照常归档，
+                // 不再把大段思考送入摘要模型，更不能由此推导新的待办。
                 if (m.toolCalls != null && !m.toolCalls.isEmpty()) {
                     batch.append(" [工具: ");
                     for (com.minion.core.llm.ToolCall tc : m.toolCalls) {
@@ -540,6 +631,7 @@ public class ContextManager {
                 batch.append('\n');
             }
         }
+        if (older > 0) batch.append("\n[另有 ").append(older).append(" 条较早任务记录将保留在原文归档；不属于当前目标，不能推导为当前未完成或下一步。]\n");
         return batch.toString();
     }
 
@@ -593,7 +685,7 @@ public class ContextManager {
      *  切分点避开 tool_result：子链首条不得为 TOOL，否则切断 tool_call/tool_result 配对，
      *  保留区首条可能成为孤立 TOOL 消息 → 下轮发送 DeepSeek 400。 */
     private static void splitChainByMessages(List<Message> chain, List<List<Message>> out) {
-        if (chain.size() <= SEGMENT_MIN) {
+        if (chain.size() <= SEGMENT_MIN && estimateCompressionChain(chain) <= COMPRESS_BATCH_SAFE_TOKENS) {
             out.add(new ArrayList<Message>(chain));
             return;
         }
@@ -601,9 +693,22 @@ public class ContextManager {
         // 后段严格变小保证递归收敛）
         int mid = chain.size() / 2;
         while (mid > 0 && chain.get(mid).role == Message.Role.TOOL) mid--;
-        if (mid == 0) mid = 1;
+        if (mid == 0) {
+            out.add(new ArrayList<Message>(chain)); // No safe tool-pair boundary.
+            return;
+        }
         splitChainByMessages(chain.subList(0, mid), out);
         splitChainByMessages(chain.subList(mid, chain.size()), out);
+    }
+
+    private static int estimateCompressionChain(List<Message> chain) {
+        int tokens=0;
+        for(Message m:chain) {
+            tokens+=TokenCounter.estimate(compactField(m.content));
+            if(m.toolCalls!=null)for(com.minion.core.llm.ToolCall call:m.toolCalls)
+                tokens+=TokenCounter.estimate(compactField(call.arguments));
+        }
+        return tokens;
     }
 
     private static Message summaryMsg(String text) {

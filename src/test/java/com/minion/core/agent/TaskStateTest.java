@@ -12,6 +12,25 @@ import static org.junit.Assert.*;
 
 public class TaskStateTest {
     @Rule public TemporaryFolder tmp=new TemporaryFolder();
+    @Test public void automaticContinuationIsBoundedAndNeverCreatesNewGoal() throws Exception {
+        TaskState state=new TaskState();state.begin("核查并交付文件",false);String id=state.id;
+        state.finish(false,"工具轮数上限（1）已用尽","round_limit");
+        assertTrue(state.beginAutomaticContinuation());
+        assertEquals(id,state.id);assertEquals("核查并交付文件",state.objective);
+        for(int i=1;i<TaskState.MAX_AUTOMATIC_CONTINUATIONS;i++) {
+            state.finish(false,"工具轮数上限（1）已用尽","round_limit");
+            assertTrue(state.beginAutomaticContinuation());
+        }
+        state.finish(false,"工具轮数上限（1）已用尽","round_limit");
+        assertFalse(state.beginAutomaticContinuation());
+        Session session=Session.create(tmp.getRoot().toString(),"fake");session.taskState=state;
+        SessionStore store=new SessionStore(tmp.newFolder("auto-continuation").toPath());store.save(session);
+        TaskState restored=store.load(session.id).taskState;
+        assertEquals(id,restored.id);assertEquals("round_limit",restored.pauseCode);
+        assertEquals(TaskState.MAX_AUTOMATIC_CONTINUATIONS,restored.automaticContinuations);
+        restored.begin("新的独立任务",true);
+        assertEquals(0,restored.automaticContinuations);assertNull(restored.pauseCode);
+    }
     @Test public void continuationAndGuidanceNeverReplaceOriginalGoal() {
         TaskState state=new TaskState();
         state.begin("核查A表全部行并生成Excel",false);
@@ -41,6 +60,37 @@ public class TaskStateTest {
         for(int i=0;i<20;i++) state.begin("继续执行",false);
         assertEquals(1,state.guidance.size());
         assertTrue(state.render(new TodoList()).contains("保留原始编号"));
+    }
+    @Test public void explicitOriginalRequestReferenceKeepsTaskAndRecallsClippedMiddle() {
+        TaskState state=new TaskState();StringBuilder original=new StringBuilder();
+        for(int i=0;i<9000;i++) original.append('甲');
+        original.append("Excel列宽必须固定为20，不能改动原始编号。");
+        for(int i=0;i<9000;i++) original.append('乙');
+        state.begin(original.toString(),false);String id=state.id;
+        assertFalse(state.render(new TodoList()).contains("Excel列宽必须固定为20"));
+        state.begin("你是不是忘了最开始说的Excel列宽要求？",false);
+        assertEquals(id,state.id);
+        assertEquals(1,state.guidance.size());
+        assertTrue(state.relevantOriginalExcerpt("最开始说的Excel列宽要求").contains("Excel列宽必须固定为20"));
+        assertTrue(state.relevantOriginalExcerpt("最开始说的内容").contains("Excel列宽必须固定为20"));
+    }
+    @Test public void additiveCorrectionToPausedTaskDoesNotEraseOriginalGoal() {
+        TaskState state=new TaskState();state.begin("分析全部Excel并交付结果",false);String id=state.id;
+        state.finish(false,"本轮暂停","round_limit");
+        state.begin("还有就是，保留原始列名",false);
+        assertEquals(id,state.id);
+        assertEquals("分析全部Excel并交付结果",state.objective);
+        assertTrue(state.guidance.contains("还有就是，保留原始列名"));
+        state.finish(true);
+        state.begin("另外分析一个新文件",false);
+        assertNotEquals(id,state.id);
+    }
+    @Test public void earlyUsefulCorrectionCanBeRecalledAfterManyLaterSupplements() {
+        TaskState state=new TaskState();state.begin("生成Excel",false);
+        state.addGuidance("编号列必须保持文本格式，不得转换成数值");
+        for(int i=0;i<16;i++)state.addGuidance("第"+i+"轮仅记录进度");
+        assertFalse(state.render(new TodoList()).contains("编号列必须保持文本格式"));
+        assertTrue(state.relevantGuidanceExcerpts("之前说的编号列格式要求").contains("编号列必须保持文本格式"));
     }
     @Test public void stateAndQueuedImagesSurviveRestart() throws Exception {
         Session s=Session.create(tmp.getRoot().toString(),"fake");

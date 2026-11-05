@@ -95,6 +95,8 @@ public class SessionManager {
         void onSessionTitleChanged(SessionHandle h);
         void onSessionRunningChanged(SessionHandle h, boolean running);
         void onSessionActivated(SessionHandle h);
+        /** 已激活会话再次被点击，清除“完成未查看”状态；无需重绑消息视图。 */
+        default void onSessionViewed(SessionHandle h) { }
         void onWorkspaceChanged();
         void onError(String message);
         /** AskUserQuestion 挂起状态变化（asking=true 且 question 非空=开始挂起；asking=false=复位） */
@@ -125,6 +127,9 @@ public class SessionManager {
     private final McpManager mcp; // 可为 null（测试）；MCP 服务器管理：惰性连接 + 工具补注册
     private final CommandDispatcher dispatcher; // 斜杠命令本地分发（GUI 输入路径）
     private final SecretStore secretStore;
+    private final java.util.Map<SessionHandle,com.minion.core.agent.LocalJobs> localJobs=new java.util.concurrent.ConcurrentHashMap<SessionHandle,com.minion.core.agent.LocalJobs>();
+    private final java.util.Map<String,String> localJobErrors=new java.util.concurrent.ConcurrentHashMap<String,String>();
+    private final java.util.concurrent.ScheduledExecutorService jobClock=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"minion-local-jobs");t.setDaemon(true);return t;});
     private final List<Listener> listeners = new ArrayList<Listener>();
 
     private final Map<String, WorkspaceCtx> ctxByName = new HashMap<String, WorkspaceCtx>();
@@ -165,6 +170,7 @@ public class SessionManager {
         this.jarDir = jarDir;
         this.workspaces = workspaces;
         this.models = models;
+        long startupStarted = System.nanoTime();
         this.skillSet = new SkillSet(allSkills == null ? new ArrayList<Skill>() : allSkills);
         this.plugins = plugins;
         this.mcp = mcp;
@@ -182,6 +188,34 @@ public class SessionManager {
         }
         loadWorkspaceContexts();
         this.currentWorkspaceName = workspaces.currentName();
+        DiagnosticLog.info("startup", "会话列表就绪，未打开历史不创建运行时；elapsedMs="
+                + (System.nanoTime() - startupStarted) / 1000000);
+        // No scheduled work is dispatched until JavaFX is running. Existing enabled jobs
+        // restart from a fresh interval/file baseline; missed runs are never replayed.
+        jobClock.scheduleWithFixedDelay(()->{try{javafx.application.Platform.runLater(this::tickJobs);}catch(IllegalStateException noToolkit){}},10,10,java.util.concurrent.TimeUnit.SECONDS);
+    }
+    public com.minion.core.agent.LocalJobs jobs(SessionHandle h)throws java.io.IOException {
+        if(h==null||h.deleted)throw new java.io.IOException("会话不存在");
+        com.minion.core.agent.LocalJobs existing=localJobs.get(h);if(existing!=null)return existing;
+        WorkspaceCtx ctx=ctxByName.get(h.workspaceName);
+        if(ctx==null)throw new java.io.IOException("工作空间不存在");
+        com.minion.core.agent.LocalJobs fresh=new com.minion.core.agent.LocalJobs(ctx.workspace,
+                Paths.get(ctx.workspace.workDir(),".minion","reliability",h.id));
+        com.minion.core.agent.LocalJobs prior=localJobs.putIfAbsent(h,fresh);localJobErrors.remove(h.id);return prior==null?fresh:prior;
+    }
+    private void reportJobError(SessionHandle h,Exception e){
+        String message=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
+        if(h!=null&&!message.equals(localJobErrors.put(h.id,message)))notifyError("本地计划任务已暂停，请检查配置: "+message);
+    }
+    public void armJobs(SessionHandle h){try{jobs(h);}catch(Exception e){reportJobError(h,e);}}
+    private void tickJobs(){
+        for(WorkspaceCtx ctx:ctxByName.values())for(SessionHandle h:new ArrayList<SessionHandle>(ctx.sessions)){
+            if(h.deleted)continue;
+            if(!localJobs.containsKey(h)&&!Files.isRegularFile(Paths.get(ctx.workspace.workDir(),".minion","reliability",h.id,"jobs.json")))continue;
+            try{com.minion.core.agent.LocalJobs.Job due=jobs(h).tick(System.currentTimeMillis(),h.running,h.isLoaded()&&h.loop.lastTurnSucceeded(),com.minion.core.agent.ModelProbe.fingerprint(modelForSession(h)));
+                if(due!=null)sendScheduled(h,due);
+            }catch(Exception e){reportJobError(h,e);}
+        }
     }
 
     public WorkspaceManager workspaces() { return workspaces; }
@@ -199,8 +233,21 @@ public class SessionManager {
     }
     /** running 回调：会话空闲时顺带回收换模型遗留的旧客户端（防 okhttp 资源滞留） */
     private void notifyRunningChanged(SessionHandle h, boolean running) {
-        h.completionUnread = !running;
-        if (!running) h.closeRetired();
+        if (!running && h.running) return; // A newer dispatch already started; do not swap its live client.
+        h.completionUnread = !running && "completed".equals(h.session.taskState.status);
+        h.pauseUnread = !running && "paused".equals(h.session.taskState.status);
+        if (!running) {
+            synchronized (h) {
+                if (h.running) return; // beginDispatch won the race after the check above.
+                if (h.pendingModelRefresh && !h.deleted) {
+                    try {
+                        replaceSessionModel(h, modelForSession(h));
+                        persist(h);
+                    } catch (Exception e) { notifyError("任务结束后刷新模型失败: " + e.getMessage()); }
+                }
+                h.closeRetired();
+            }
+        }
         for (Listener l : listeners) l.onSessionRunningChanged(h, running);
     }
     private void notifyActivated(SessionHandle h) {
@@ -242,87 +289,126 @@ public class SessionManager {
         }
     }
 
-    /**
-     * 恢复历史会话：store.list() 跳过损坏项（SessionStore 现有行为），逐 id 装载；
-     * 标题取落盘 session.title，titlePending=false（恢复会话已有标题或旧格式无标题→显示占位）。
-     */
+    /** 启动只恢复列表头，不加载消息、事件、模型客户端或工具。 */
     private void restoreSessions(WorkspaceCtx ctx) {
-        List<SessionStore.SessionMeta> restored;
         try {
-            restored = ctx.store.list();
-        } catch (Exception e) {
-            notifyError("恢复会话失败: " + e.getMessage());
-            return;
+            for (SessionStore.SessionMeta meta : ctx.store.list()) {
+                Session s = new Session();
+                s.id = meta.id; s.createdAt = meta.createdAt; s.title = meta.title;
+                s.workDir = meta.workDir == null ? ctx.workspace.workDir() : meta.workDir;
+                s.modelName = meta.modelName; s.modelDisplayName = meta.modelDisplayName;
+                ModelConfig mc = modelForSession(s);
+                s.modelDisplayName = mc.displayName;
+                s.pinned = meta.pinned; s.archived = meta.archived;
+                SessionHandle h = new SessionHandle(s.id, ctx.name, s, null,
+                        new SessionController(), s.title, false, null);
+                h.listPreview = meta.preview; h.listSummary = meta.lastSummary;
+                h.listMessageTs = meta.lastMessageTs;
+                ctx.sessions.add(h);
+            }
+        } catch (Exception e) { notifyError("恢复会话列表失败: " + e.getMessage()); }
+    }
+
+    /** 只在打开/操作该会话时加载；失败时不允许把列表占位数据覆盖到原快照。 */
+    public boolean ensureLoaded(final SessionHandle h) {
+        if (h == null || h.deleted) return false;
+        synchronized (h) {
+            if (h.isLoaded()) return true;
+            WorkspaceCtx ctx = ctxByName.get(h.workspaceName);
+            if (ctx == null) return false;
+            long started = System.nanoTime();
+            try {
+                loadSession(ctx, h);
+                DiagnosticLog.info("session-load", "id=" + h.id + " ms=" + (System.nanoTime() - started) / 1000000);
+                return true;
+            } catch (Exception e) { notifyError("加载会话失败: " + e.getMessage()); return false; }
         }
-        // 快照每空间只算一次（扫描一次盘），全部恢复会话共享同一不可变快照：
-        // 恢复会话保持当前配置下的技能上下文（技能清单不落盘，无逐会话差异可言）
+    }
+
+    private void loadSession(WorkspaceCtx ctx, final SessionHandle h) throws IOException {
         SkillSet.Result sk = skillsOf(ctx.name);
         String mdAbs = projectMdOf(ctx.name);
         String projSkills = projectSkillsDirOf(ctx.name);
-        for (SessionStore.SessionMeta meta : restored) {
-            try {
-                Session s = ctx.store.load(meta.id);
-                ModelConfig mc = modelForSession(s);
-                boolean missingModel = s.modelDisplayName != null && models.get(s.modelDisplayName) == null;
-                String previousModel = s.modelDisplayName;
-                s.modelDisplayName = mc.displayName;
-                s.modelName = mc.modelName;
-                LlmClient llm = newLlm(mc);
-                ContextManager cm = new ContextManager(mc.maxContextTokens, mc.compressThreshold,
-                        mc.keepRecentMessages, llm,
-                        TokenCounter.estimate(new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
-                                tmpDirOf(meta.id).toString(), config.emptyOutputPlaceholder(), projSkills)
-                                .build(sk.skills)));
-                configureSafeContext(cm, mc, s);
-                SessionController controller = new SessionController();
-                controller.replayHistory(s.messages); // 历史消息灌入事件流：点击会话即可重放显示
-                if (missingModel) controller.onWarning("原会话模型「" + previousModel
-                        + "」已不存在，已回退到「" + mc.displayName + "」，可在输入框重新选择。");
-                AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s),
-                        new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
-                                tmpDirOf(meta.id).toString(), config.emptyOutputPlaceholder(), projSkills),
-                        ctx.confirmGate, controller, cm, ctx.workspace, s);
-                loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
-                loop.setAllSkills(sk.skills); // 会话级快照：本会话独享、不可变
-                loop.setSessionStore(ctx.store); // 落盘接线：恢复后随每轮/退出兜底落盘
-                configureAgentRuntime(loop,ctx,s);
-                loop.restoreSession(s); // 原地装载 + 半轮残留清洗 + cwd 恢复
-                SessionHandle h = new SessionHandle(s.id, ctx.name, s, loop, controller,
-                        s.title, false, llm);
-                controller.setAskStateListener(new java.util.function.Consumer<String>() {
-                    @Override public void accept(String question) {
-                        h.askQuestion = question;
-                        h.askPending = question != null;
-                        notifyAskChanged(h, question != null);
-                    }
-                });
-                // 恢复会话也接线压缩状态转发（压缩回调随 AgentLoop 驱动，与新建会话一致）
-                controller.setCompressingStateListener(new java.util.function.Consumer<Boolean>() {
-                    @Override public void accept(Boolean compressing) {
-                        notifyCompressingChanged(h, compressing);
-                    }
-                });
-                // 瞬时错误重试进度转发（AgentLoop 长重试回调 → 指示器）
-                controller.setRetryStateListener(new java.util.function.Consumer<RetryProgress>() {
-                    @Override public void accept(RetryProgress p) {
-                        notifyRetryProgress(h, p);
-                    }
-                });
-                // 上下文统计转发（AgentLoop 关键节点推送 → 环形进度圈）
-                controller.setContextStatsListener(new java.util.function.Consumer<SessionController.ContextStat>() {
-                    @Override public void accept(SessionController.ContextStat s) {
-                        notifyContextStats(h, s.used, s.max);
-                    }
-                });
-                controller.setArtifactListener(new java.util.function.Consumer<String>() {
-                    @Override public void accept(String path) { notifyArtifactCreated(h, path); }
-                });
-                ctx.sessions.add(h);
-                registerConnectedMcpTools(h); // 兜底：恢复会话也带 MCP 工具（连接已完成场景）
-            } catch (Exception e) {
-                notifyError("会话恢复失败（跳过）: " + e.getMessage());
+        Session s = ctx.store.load(h.id);
+        ModelConfig mc = modelForSession(s);
+        boolean missingModel = s.modelDisplayName != null && models.get(s.modelDisplayName) == null;
+        String previousModel = s.modelDisplayName;
+        boolean restored150k = migrateLegacy150kSession(s, mc);
+        s.modelDisplayName = mc.displayName;
+        s.modelName = mc.modelName;
+        s.runtimeModelConfig = mc.copy();
+        s.subAgentModelName = null; // Migrate old per-child overrides to the parent-only rule.
+        LlmClient llm = newLlm(mc);
+        ContextManager cm = new ContextManager(mc.maxContextTokens, mc.compressThreshold,
+                mc.keepRecentMessages, llm,
+                TokenCounter.estimate(new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
+                        tmpDirOf(h.id).toString(), config.emptyOutputPlaceholder(), projSkills)
+                        .build(sk.skills)));
+        configureSafeContext(cm, mc, s);
+        SessionController controller = h.controller;
+        controller.replayHistory(s.messages); // 历史消息灌入事件流：点击会话即可重放显示
+        if (missingModel) controller.onWarning("原会话模型「" + previousModel
+                + "」已不存在，已回退到「" + mc.displayName + "」，可在输入框重新选择。");
+        if (restored150k) controller.onWarning("已清除旧版会话学习到的低安全窗口，并将误填的 150K 手动安全上限改为自动；本会话会按 150K 稳定工作区重新尝试。若服务端明确报上下文超限，仍会自动收紧。");
+        AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s),
+                new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
+                        tmpDirOf(h.id).toString(), config.emptyOutputPlaceholder(), projSkills),
+                ctx.confirmGate, controller, cm, ctx.workspace, s);
+        loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
+        loop.setAllSkills(sk.skills); // 会话级快照：本会话独享、不可变
+        loop.setSessionStore(ctx.store); // 落盘接线：恢复后随每轮/退出兜底落盘
+        loop.setGlobalMemoryRoot(jarDir); // 只读显式核验的跨项目个人偏好，不检索其他工作区对话
+        configureAgentRuntime(loop,ctx,s);
+        loop.restoreSession(s); // 原地装载 + 半轮残留清洗 + cwd 恢复
+        h.session = s; h.llm = llm; h.loop = loop;
+        controller.setAskStateListener(new java.util.function.Consumer<String>() {
+            @Override public void accept(String question) {
+                h.askQuestion = question;
+                h.askPending = question != null;
+                notifyAskChanged(h, question != null);
             }
-        }
+        });
+        // 恢复会话也接线压缩状态转发（压缩回调随 AgentLoop 驱动，与新建会话一致）
+        controller.setCompressingStateListener(new java.util.function.Consumer<Boolean>() {
+            @Override public void accept(Boolean compressing) {
+                notifyCompressingChanged(h, compressing);
+            }
+        });
+        // 瞬时错误重试进度转发（AgentLoop 长重试回调 → 指示器）
+        controller.setRetryStateListener(new java.util.function.Consumer<RetryProgress>() {
+            @Override public void accept(RetryProgress p) {
+                notifyRetryProgress(h, p);
+            }
+        });
+        // 上下文统计转发（AgentLoop 关键节点推送 → 环形进度圈）
+        controller.setContextStatsListener(new java.util.function.Consumer<SessionController.ContextStat>() {
+            @Override public void accept(SessionController.ContextStat s) {
+                notifyContextStats(h, s.used, s.max);
+            }
+        });
+        controller.setArtifactListener(new java.util.function.Consumer<String>() {
+            @Override public void accept(String path) { notifyArtifactCreated(h, path); }
+        });
+
+        registerConnectedMcpTools(h); // 兜底：恢复会话也带 MCP 工具（连接已完成场景）
+        if (restored150k) persist(h);
+    }
+
+    /** V39 could pin 1M models to ~60K after a single timeout/empty response.
+     *  Migrate once on restart; an actual HTTP context overflow can still learn a smaller limit again. */
+    private static boolean migrateLegacy150kSession(Session s, ModelConfig mc) {
+        if (s.context150kMigrationVersion >= 1) return false;
+        s.context150kMigrationVersion = 1;
+        String id = (mc.modelName == null ? "" : mc.modelName).toLowerCase(java.util.Locale.ROOT)
+                .replace('_', '-').replace(' ', '-');
+        if (mc.maxContextTokens < 200000 || (mc.stableContextTokens != 0 && mc.stableContextTokens != 150000)
+                || !(id.contains("deepseek") || id.contains("qwen3.8-flash")))
+            return false;
+        boolean changed = s.observedContextLimit > 0 || s.preferredContextLimit == 150000;
+        // 150K entered in the old "safe window" box meant only 120K at the default 80% ratio.
+        if (s.preferredContextLimit == 150000) s.preferredContextLimit = 0;
+        if (s.observedContextLimit > 0) s.observedContextLimit = 0;
+        return changed;
     }
 
     private WorkspaceCtx buildCtx(WorkspaceConfig w) {
@@ -375,6 +461,8 @@ public class SessionManager {
         CheckpointStore checkpoints = new CheckpointStore(Paths.get(workspace.workDir()),
                 Paths.get(workspace.workDir()).resolve(".minion").resolve("checkpoints").resolve(sessionId));
         registry.register(new ReadTool(workspace, skillsDir, tmpDir, gate));
+        registry.register(new com.minion.core.tools.ViewImageTool(workspace, skillsDir, tmpDir, gate));
+        registry.register(new com.minion.core.tools.artwork.ArtworkTool(workspace,tmpDir));
         registry.register(new WriteTool(workspace, skillsDir, tmpDir, checkpoints, gate));
         registry.register(new EditTool(workspace, skillsDir, tmpDir, checkpoints, gate));
         registry.register(new GlobTool(workspace, skillsDir, tmpDir, gate));
@@ -387,14 +475,17 @@ public class SessionManager {
         registry.register(processTool);
         registry.register(new ProjectTool(workspace));
         registry.register(new BuildTool(workspace, python, processTool));
+        registry.register(new com.minion.core.tools.dev.ArtifactVerificationTool(workspace,()->
+                plugins!=null&&plugins.browserPlugin().enabled()&&plugins.browserPlugin().canEnable()
+                        ?plugins.browserManager().session():null));
         registry.register(new PythonTool(workspace, python));
         registry.register(new ExcelTool(workspace, python, checkpoints));
         registry.register(new SqliteTool(workspace, python));
         registry.register(new DatabaseTool(workspace, python, checkpoints, secretStore));
-        registry.register(new DocumentTool(workspace, python, checkpoints));
+        registry.register(new DocumentTool(workspace, python, checkpoints,config,gate));
         registry.register(new TextProcessTool(workspace, checkpoints));
         registry.register(new KnowledgeTool(workspace, config));
-        registry.register(new MemoryTool(workspace, checkpoints));
+        registry.register(new MemoryTool(workspace, checkpoints, ctx.store, session.id, session, jarDir));
         ModelConfig contextModel = modelForSession(session);
         registry.register(new ContextTool(session, safeContextLimit(contextModel, session), config));
         registry.register(new PermissionTool(config));
@@ -453,6 +544,7 @@ public class SessionManager {
         if (server.tools == null || server.tools.isEmpty()) return;
         for (WorkspaceCtx ctx : ctxByName.values()) {
             for (SessionHandle h : ctx.sessions) {
+                if (!h.isLoaded()) continue;
                 registerMcpTools(h.loop.registry(), server);
             }
         }
@@ -479,6 +571,7 @@ public class SessionManager {
         ModelConfig mc = models.defaultModel();
         Session s = Session.create(ctx.workspace.workDir(), mc.modelName);
         s.modelDisplayName = mc.displayName;
+        s.runtimeModelConfig = mc.copy();
         s.title = title;
         LlmClient llm = newLlm(mc);
         SkillSet.Result sk = skillsOf(currentWorkspaceName);
@@ -499,6 +592,7 @@ public class SessionManager {
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
         loop.setAllSkills(sk.skills);   // 会话级快照：本会话独享、不可变
         loop.setSessionStore(ctx.store); // 落盘接线：每轮/退出兜底落盘生效
+        loop.setGlobalMemoryRoot(jarDir);
         configureAgentRuntime(loop,ctx,s);
         SessionHandle h = new SessionHandle(s.id, currentWorkspaceName, s, loop, controller,
                 title, title == null, llm);
@@ -580,16 +674,18 @@ public class SessionManager {
     }
 
     private void configureAgentRuntime(AgentLoop loop,WorkspaceCtx ctx,Session parent) {
-        loop.setAgentRuntimeFactory((name,id) -> {
-            ModelConfig mc=name==null||name.trim().isEmpty()?modelForSession(parent):models.get(name);
-            if(mc==null) throw new IllegalArgumentException("子Agent指定模型不存在: "+name);
-            Workspace isolated=new Workspace(ctx.workspace.workDir());
+        loop.setRootedRuntimeFactory((name,id,executionRoot) -> {
+            ModelConfig mc=name==null||name.trim().isEmpty()
+                    ? (parent.runtimeModelConfig==null?modelForSession(parent):parent.runtimeModelConfig.copy())
+                    : models.get(name); // Explicit model is reserved for side questions, never task subagents.
+            if(mc==null) throw new IllegalArgumentException("指定模型不存在: "+name);
+            Workspace isolated=new Workspace(executionRoot==null?ctx.workspace.workDir():executionRoot);
             List<String> roots=new ArrayList<String>(ctx.workspace.extraAllowedDirs());
             roots.add(tmpDirOf(parent.id).toString());
             roots.add(tmpDirOf(parent.id+"-agent-"+id).toString());
             roots.add(ctx.skillsDir);
             isolated.setExtraAllowedDirs(roots);
-            isolated.restore(loop.workspace().cwd().toString());
+            if(executionRoot==null)isolated.restore(loop.workspace().cwd().toString());
             Session child=Session.create(isolated.workDir(),mc.modelName);
             child.id=parent.id+"-agent-"+id; child.modelDisplayName=mc.displayName;
             LlmClient client=newLlm(mc);
@@ -599,21 +695,23 @@ public class SessionManager {
                 if(prior!=null&&mc.displayName.equals(prior.model)&&prior.maxContextTokens>=8192) safe=Math.min(safe,prior.maxContextTokens);
                 ToolRegistry tools=newRegistry(ctx,child,isolated);
                 tools.register(new com.minion.core.tools.TodoWriteTool(child.todos));
-                return new AgentRuntime(client,mc.displayName,safe,mc.compressThreshold,mc.maxOutputTokens,tools,isolated,true);
+                return new AgentRuntime(client,mc.displayName,safe,mc.compressThreshold,mc.maxOutputTokens,mc.stableContextTokens,tools,isolated,true);
             } catch(RuntimeException e) { client.close(); throw e; }
         });
     }
 
     public void configureAgentDefaults(SessionHandle h,String model,String mode,String tools) {
         if(h==null||h.deleted) throw new IllegalArgumentException("会话不存在");
-        if(model!=null&&!model.isEmpty()&&models.get(model)==null) throw new IllegalArgumentException("模型不存在");
+        if(!ensureLoaded(h)) throw new IllegalStateException("会话加载失败");
+        if(model!=null&&!model.trim().isEmpty()) throw new IllegalArgumentException("子Agent模型已锁定为主会话模型，不能单独配置");
         if(!"worker".equals(mode)&&!"explore".equals(mode)) throw new IllegalArgumentException("模式只支持worker/explore");
-        h.session.subAgentModelName=model; h.session.subAgentMode=mode; h.session.subAgentTools=tools==null?"":tools.trim();
+        h.session.subAgentModelName=null; h.session.subAgentMode=mode; h.session.subAgentTools=tools==null?"":tools.trim();
         if(!h.running) persist(h);
     }
 
     public void configureContext(SessionHandle h,String profile,int safeWindow) {
         if(h==null||h.deleted) throw new IllegalArgumentException("会话不存在");
+        if(!ensureLoaded(h)) throw new IllegalStateException("会话加载失败");
         int configured=modelForSession(h).maxContextTokens;
         if(safeWindow!=0&&(safeWindow<8192||safeWindow>configured)) throw new IllegalArgumentException("安全窗口需为8192到模型配置上限之间；0表示自动");
         if(!"compact".equals(profile)&&!"balanced".equals(profile)) throw new IllegalArgumentException("profile支持balanced/compact");
@@ -624,6 +722,7 @@ public class SessionManager {
     }
     public void resetObservedContext(SessionHandle h) {
         if(h==null||h.deleted||h.running) throw new IllegalArgumentException("请等待会话空闲后重置；请先确认服务端窗口已调整");
+        if(!ensureLoaded(h)) throw new IllegalStateException("会话加载失败");
         h.session.observedContextLimit=0;
         configureSafeContext(h.loop.contextManager(),modelForSession(h),h.session); persist(h);
     }
@@ -631,12 +730,13 @@ public class SessionManager {
     /** Restore a single child without re-issuing the user's root task or draining queued work. */
     public String controlSubAgent(SessionHandle h,String id,String action) {
         if(h==null||h.deleted) return "会话不存在";
+        if(!ensureLoaded(h)) return "会话加载失败";
         if("stop".equals(action)) return h.loop.stopSubAgent(id)?"已请求停止子Agent，保留断点":"子Agent不在运行";
         if(!"resume".equals(action)&&!"retry".equals(action)) return "支持stop/resume/retry";
         if(h.running) return "恢复/重试前请先停止主任务并等待结束，避免重复执行";
         TaskState.Child child=h.session.taskState.child(id);
         if(child==null||!java.util.Objects.equals(child.taskId,h.session.taskState.id)) return "未找到当前任务的子Agent";
-        final long generation=h.beginDispatch(); notifyRunningChanged(h,true);
+        final long generation=h.beginDispatch(); promoteSession(h); notifyRunningChanged(h,true);
         h.pool.submit(() -> {
             try { h.controller.onSystem(h.loop.resumeSubAgent(id,"retry".equals(action))); }
             finally { if(h.finishDispatch(generation)) notifyRunningChanged(h,false); }
@@ -645,18 +745,30 @@ public class SessionManager {
     }
 
     public boolean cancelQueued(SessionHandle h,int index) {
+        if(!ensureLoaded(h)) return false;
         if(h==null||!h.removeQueued(index)) return false;
         persistQueue(h); return true;
     }
     public void cancelQueuedTask(SessionHandle h,SessionHandle.QueuedMessage expected) {
+        if(!ensureLoaded(h)) throw new IllegalArgumentException("会话加载失败");
         synchronized(h) {
-            List<SessionHandle.QueuedMessage> items=h.queuedSnapshot();
-            for(int i=0;i<items.size();i++) if(items.get(i).createdAt==expected.createdAt&&items.get(i).text.equals(expected.text)) { cancelQueued(h,i+1); return; }
+            if(h.removeQueued(expected.id,expected.revision)){persistQueue(h);return;}
         }
         throw new IllegalArgumentException("队列已变化，任务可能已开始；未取消其他任务");
     }
+    public void editQueuedTask(SessionHandle h,SessionHandle.QueuedMessage expected,String text) {
+        if(h==null||h.deleted)throw new IllegalArgumentException("会话已删除");
+        if(!ensureLoaded(h)) throw new IllegalArgumentException("会话加载失败");
+        synchronized(h){
+            if(!h.editQueued(expected.id,expected.revision,text))throw new IllegalArgumentException("队列条目已开始、被取消或被修改；未覆盖当前任务，请刷新后检查");
+            WorkspaceCtx ctx=ctxByName.get(h.workspaceName);
+            try {if(ctx==null)throw new java.io.IOException("工作空间不存在");ctx.store.saveQueue(h.session);}
+            catch(Exception e){h.rollbackQueuedEdit(expected.id,expected.revision+1,expected.text);throw new IllegalStateException("队列保存失败，已撤回文字修改: "+e.getMessage(),e);}
+            for(Listener l:listeners)l.onSessionQueueChanged(h);
+        }
+    }
     public void background(Runnable work) { branches.submit(work); }
-    public void saveSettings(SessionHandle h) { if(!h.running) persist(h); }
+    public void saveSettings(SessionHandle h) { if(ensureLoaded(h)&&!h.running) persist(h); }
 
     public static final class SideQuestion {
         public String question,answer,model,record;
@@ -668,6 +780,7 @@ public class SessionManager {
 
     public void askSideQuestion(SessionHandle h,String question,String model,java.util.function.Consumer<SideQuestion> done) {
         if(h==null||h.deleted||question==null||question.trim().isEmpty()) throw new IllegalArgumentException("请输入旁支问题");
+        if(!ensureLoaded(h)) throw new IllegalStateException("会话加载失败");
         if(question.length()>12000) throw new IllegalArgumentException("旁支问题限12000字符");
         String state=h.session.taskState.render(null);
         final String background=state.length()>6000?state.substring(0,6000):state;
@@ -723,9 +836,16 @@ public class SessionManager {
         ModelConfig mc = models.get(name);
         WorkspaceCtx ctx = h == null ? null : ctxByName.get(h.workspaceName);
         if (mc == null || ctx == null || h.deleted || !ctx.sessions.contains(h)) return false;
-        if (name.equals(h.session.modelDisplayName)) return true;
-        replaceSessionModel(h, mc);
-        if (!h.running) persist(h); // 运行中的会话在本轮结束时自然落盘，避免并发遍历消息
+        if (!ensureLoaded(h)) return false;
+        synchronized (h) {
+            if (name.equals(h.session.modelDisplayName)) return true;
+            if (h.running) {
+                h.controller.onWarning("当前任务或子Agent仍在运行；为保证模型一致，请结束任务后再切换主模型");
+                return false;
+            }
+            replaceSessionModel(h, mc);
+            persist(h);
+        }
         return true;
     }
 
@@ -752,15 +872,19 @@ public class SessionManager {
             ((ContextTool) contextTool).setMaxTokens(cm == null ? mc.maxContextTokens : cm.maxTokens());
         h.session.modelName = mc.modelName;
         h.session.modelDisplayName = mc.displayName;
+        h.session.runtimeModelConfig = mc.copy();
+        h.pendingModelRefresh = false;
     }
 
     /**
      * 旧版针对用户内网Qwen3.8空响应现象的经验保护，不代表模型官方窗口。
-     * 对该型号自动模式先按60k运行，其他型号不套用此限制；若服务端仍更小，
-     * AgentLoop 会从超限/空响应继续学习并把结果保存在 session.observedContextLimit。
+     * 对旧版非Flash型号的自动模式先按60k运行；Flash部署可按模型配置使用更大窗口。
+     * 若服务端实际窗口更小，
+     * AgentLoop 只从明确的 HTTP 上下文超限学习，并把结果保存在 session.observedContextLimit。
      */
     private static void configureSafeContext(ContextManager cm, ModelConfig mc, Session session) {
         cm.setOutputReserveTokens(mc.maxOutputTokens);
+        cm.setStableContextTokens(mc.stableContextTokens);
         cm.setInitialSafeMax(safeContextLimit(mc, session));
     }
 
@@ -769,7 +893,8 @@ public class SessionManager {
         // 以实际模型名判断；用户沿用旧“千问3.8”标识配置DeepSeek时也不能误套60K。
         String id = (mc.modelName != null && !mc.modelName.trim().isEmpty() ? mc.modelName
                 : mc.displayName == null ? "" : mc.displayName).toLowerCase(java.util.Locale.ROOT);
-        if ((session==null||session.preferredContextLimit==0)&&(id.contains("qwen3.8") || id.contains("qwen-3.8")
+        if ((session==null||session.preferredContextLimit==0)&&!id.contains("flash")
+                &&(id.contains("qwen3.8") || id.contains("qwen-3.8")
                 || id.contains("qwen_3.8") || id.contains("千问3.8"))) {
             safe = Math.min(safe, 60000);
         }
@@ -783,8 +908,12 @@ public class SessionManager {
     public void applyModelChanged() {
         for (WorkspaceCtx ctx : ctxByName.values()) {
             for (SessionHandle h : ctx.sessions) {
-                replaceSessionModel(h, modelForSession(h));
-                if (!h.running) persist(h);
+                if (!h.isLoaded()) continue; // 未打开会话在首次加载时直接使用最新配置。
+                synchronized (h) {
+                    if (h.running) { h.pendingModelRefresh = true; continue; }
+                    replaceSessionModel(h, modelForSession(h));
+                    persist(h);
+                }
             }
         }
     }
@@ -794,15 +923,18 @@ public class SessionManager {
         if (ctx == null) return new ArrayList<SessionHandle>();
         List<SessionHandle> visible = new ArrayList<SessionHandle>();
         for (SessionHandle h : ctx.sessions) if (!h.session.archived) visible.add(h);
+        final Map<String,Integer> ranks = new HashMap<String,Integer>();
+        for (int i=0;i<ctx.order.size();i++) ranks.put(ctx.order.get(i),i);
         visible.sort(new Comparator<SessionHandle>() {
             @Override public int compare(SessionHandle a, SessionHandle b) {
+                if (a.session.pinned != b.session.pinned) return a.session.pinned ? -1 : 1;
                 if (!ctx.order.isEmpty()) {
-                    int ai = ctx.order.indexOf(a.id), bi = ctx.order.indexOf(b.id);
+                    int ai = ranks.containsKey(a.id) ? ranks.get(a.id) : -1;
+                    int bi = ranks.containsKey(b.id) ? ranks.get(b.id) : -1;
                     if (ai >= 0 && bi >= 0) return Integer.compare(ai, bi);
                     if (ai >= 0) return -1;
                     if (bi >= 0) return 1;
                 }
-                if (a.session.pinned != b.session.pinned) return a.session.pinned ? -1 : 1;
                 return b.id.compareTo(a.id);
             }
         });
@@ -814,7 +946,8 @@ public class SessionManager {
         WorkspaceCtx ctx = ctxByName.get(currentWorkspaceName);
         if (ctx == null || source == null || target == null || source == target
                 || source.deleted || target.deleted || source.session.archived || target.session.archived
-                || !ctx.sessions.contains(source) || !ctx.sessions.contains(target)) return false;
+                || !ctx.sessions.contains(source) || !ctx.sessions.contains(target)
+                || source.session.pinned != target.session.pinned) return false;
         List<SessionHandle> visible = sessions();
         visible.remove(source);
         int index = visible.indexOf(target);
@@ -832,6 +965,27 @@ public class SessionManager {
         catch (IOException e) { notifyError("保存会话顺序失败: " + e.getMessage()); }
     }
 
+    /** 运行时将会话移到所属项目的组首；手动置顶始终优先于普通会话。 */
+    private void promoteSession(SessionHandle h) {
+        WorkspaceCtx ctx = ctxByName.get(h.workspaceName);
+        if (ctx == null || h.deleted || !ctx.sessions.contains(h)) return;
+        ctx.order.remove(h.id);
+        ctx.order.add(0, h.id);
+        saveSessionOrder(ctx);
+        // The first send assigns the local title on the session worker. Do not emit
+        // a title-changed event before that assignment; observers would see a
+        // pending title and could mistake reordering for successful title creation.
+        if (!h.titlePending) notifyTitleChanged(h);
+    }
+
+    public void setPinned(SessionHandle h, boolean pinned) {
+        if (h == null || h.deleted || h.session.pinned == pinned) return;
+        if (!ensureLoaded(h)) return;
+        h.session.pinned = pinned;
+        persist(h);
+        promoteSession(h);
+    }
+
     /** 按 id 查找会话（跨所有工作空间）：页签点击路径——页签与工作空间无关 */
     public SessionHandle findSession(String id) {
         for (WorkspaceCtx ctx : ctxByName.values()) {
@@ -845,6 +999,7 @@ public class SessionManager {
     public SessionHandle currentSession() { return currentSession; }
 
     public void renameSession(SessionHandle h, String newTitle) {
+        if (!ensureLoaded(h)) return;
         h.title = newTitle;
         h.session.title = newTitle;
         persist(h);
@@ -858,7 +1013,7 @@ public class SessionManager {
         if (ctx == null) return;
         if (h.running) stop(h);
         shutdownSessionTools(h);
-        h.loop.shutdown();
+        if (h.isLoaded()) h.loop.shutdown();
         h.pool.shutdownNow();
         h.closeAll(); // 会话删除即释放其 LLM 客户端（当前 + 待回收，okhttp 资源）
         ctx.sessions.remove(h);
@@ -878,8 +1033,14 @@ public class SessionManager {
     public void activateSession(SessionHandle h) {
         if (h.deleted) return; // 已删句柄不可再激活（防已删会话残留激活态/后续 send 落空）
         if (!currentWorkspaceName.equals(h.workspaceName)) return; // 非当前工作空间的句柄不激活
+        if (!ensureLoaded(h)) return;
+        boolean wasUnread = h.completionUnread || h.pauseUnread;
         h.completionUnread = false; // 用户点击查看后清除绿色完成提示；重复激活同样生效
-        if (currentSession == h) return; // 重复激活（页签选中/左侧点击重叠）幂等跳过，避免重放闪烁
+        h.pauseUnread = false;
+        if (currentSession == h) {
+            if (wasUnread) for (Listener l : listeners) l.onSessionViewed(h);
+            return; // 重复激活不重绑视图，避免重放闪烁
+        }
         if (currentSession != null) currentSession.controller.eventList().setActive(false, null);
         currentSession = h;
         h.controller.eventList().setActive(true, null);
@@ -976,7 +1137,7 @@ public class SessionManager {
             notifySessionDeleted(h);
             if (h.running) { h.loop.interrupt(); hasRunning = true; } // 终止运行中循环（stop 语义）
             shutdownSessionTools(h);
-            h.loop.shutdown();
+            if (h.isLoaded()) h.loop.shutdown();
             h.pool.shutdownNow();
             h.closeAll(); // 工作空间删除即释放其全部会话的 LLM 客户端（当前 + 待回收）
             h.controller.eventList().setActive(false, null); // 移除被删会话的 active 残留
@@ -1027,14 +1188,29 @@ public class SessionManager {
     }
 
     private void send(final SessionHandle h, final String text, final List<ImagePart> images, final boolean queuedTask) {
+        send(h,text,images,queuedTask,null);
+    }
+
+    private void sendScheduled(final SessionHandle h,final com.minion.core.agent.LocalJobs.Job job){
+        send(h,job.prompt,null,true,job);
+    }
+
+    private void send(final SessionHandle h, final String text, final List<ImagePart> images, final boolean queuedTask,
+                      final com.minion.core.agent.LocalJobs.Job scheduledJob) {
         if (h == null) return;
         final WorkspaceCtx ctx = ctxByName.get(h.workspaceName);
         if (ctx == null) return;
+        if (!ensureLoaded(h)) return;
         final long dispatchGeneration = h.beginDispatch();
+        final long submittedAtNanos=System.nanoTime();
+        promoteSession(h);
         h.pool.submit(new Runnable() {
             @Override public void run() {
+                final long dispatchQueueMillis=java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-submittedAtNanos);
+                boolean dispatchTimingRecorded=false;
                 try {
                     if (h.deleted) return; // 队列积压期间被删除
+                    if (!ensureLoaded(h)) { h.finishDispatch(dispatchGeneration); return; }
                     if (h.titlePending) {
                         h.title = TitleGenerator.localTitle(text); // 本地截取，不再走 LLM 摘要
                         if (h.deleted) return; // 摘要期间被删除：不再落盘/通知
@@ -1049,8 +1225,16 @@ public class SessionManager {
                         String currentText = text;
                         List<ImagePart> currentImages = images;
                         boolean forceNew = queuedTask;
+                        boolean scheduledTurn = scheduledJob != null;
+                        boolean automaticContinuation = false;
                         while (!h.deleted) {
-                            h.loop.runUserTurn(currentText, currentImages, forceNew);
+                            if(automaticContinuation) {
+                                automaticContinuation=false;
+                                if(!h.loop.runContinuationTurn()) break;
+                            }
+                            else if(scheduledTurn)h.loop.runScheduledTurn(currentText,forceNew,new java.util.HashSet<String>(scheduledJob.allowedTools));
+                            else h.loop.runUserTurn(currentText, currentImages, forceNew);
+                            if(!dispatchTimingRecorded){h.loop.recordQueueWait(dispatchQueueMillis);dispatchTimingRecorded=true;}
                             synchronized(h) {
                                 synchronized(h.session.pendingSupplements) {
                                     if(h.loop.lastTurnSucceeded() && !h.session.pendingSupplements.isEmpty()) {
@@ -1061,7 +1245,25 @@ public class SessionManager {
                                 }
                             }
                             if (!h.loop.lastTurnSucceeded()) {
+                                // Resume only an ordinary task stopped by the tool-round boundary.
+                                // A queued user instruction, interruption, scheduled read-only job,
+                                // or tool-free turn must never trigger unattended extra work.
+                                boolean noSupplements;
+                                synchronized(h.session.pendingSupplements) {noSupplements=h.session.pendingSupplements.isEmpty();}
+                                if(!scheduledTurn && !h.deleted && !h.loop.wasInterrupted()
+                                        && h.loop.lastTurnToolRounds()>0 && noSupplements
+                                        && h.queuedSnapshot().isEmpty()
+                                        && "paused".equals(h.session.taskState.status)
+                                        && "round_limit".equals(h.session.taskState.pauseCode)
+                                        && h.session.taskState.canAutomaticallyContinue()) {
+                                    h.controller.onSystem("工具轮次边界已保存，正在自动续接未完成任务（有界且不重放用户指令）");
+                                    automaticContinuation=true;
+                                    continue;
+                                }
                                 if (!h.queuedSnapshot().isEmpty()) h.controller.onSystem("当前任务暂停/失败，后续队列保留，不会自动执行");
+                                else if("round_limit".equals(h.session.taskState.pauseCode)
+                                        && !h.session.taskState.canAutomaticallyContinue())
+                                    h.controller.onSystem("自动续接预算已用尽，任务仍未完成；断点已保存，请人工检查后继续");
                                 break;
                             }
                             SessionHandle.QueuedMessage queued;
@@ -1075,6 +1277,7 @@ public class SessionManager {
                             currentText = queued.text;
                             currentImages = queued.images;
                             forceNew = true;
+                            scheduledTurn = false;
                         }
                     } finally {
                         if (h.deleted) {
@@ -1116,6 +1319,7 @@ public class SessionManager {
     }
 
     public void persistQueue(SessionHandle h) {
+        if (!ensureLoaded(h)) return;
         WorkspaceCtx ctx=ctxByName.get(h.workspaceName);
         if(ctx!=null && !h.deleted) {
             try { ctx.store.saveQueue(h.session); }
@@ -1127,6 +1331,7 @@ public class SessionManager {
     /** Default is queue; only an explicit promotion steers the running task. */
     public void stageGuidance(SessionHandle h, String text, List<ImagePart> images) {
         if(h==null || h.deleted) return;
+        if(!ensureLoaded(h)) return;
         synchronized(h) {
             h.enqueue(text,images,true);
             persistQueue(h);
@@ -1140,6 +1345,7 @@ public class SessionManager {
 
     public void promoteGuidance(SessionHandle h) {
         if(h==null || h.deleted) return;
+        if(!ensureLoaded(h)) return;
         synchronized(h) {
             SessionHandle.QueuedMessage task=h.takeGuide();
             if(task==null) return;
@@ -1150,7 +1356,7 @@ public class SessionManager {
     }
 
     public void discardGuidance(SessionHandle h) {
-        if(h!=null) { h.takeGuide(); persistQueue(h); }
+        if(ensureLoaded(h)) { h.takeGuide(); persistQueue(h); }
     }
 
     /** 运行中补充：入 AgentLoop 挂起队列 + 发聊天标识事件（UI 事件仅在点击时发一次，注入不重发） */
@@ -1159,14 +1365,24 @@ public class SessionManager {
     /** 运行中补充（带图）：图片占位并入聊天标识事件（聊天区不渲染图片本体） */
     public void sendSupplement(final SessionHandle h, final String text, final List<ImagePart> images) {
         if (h == null || text == null || text.trim().isEmpty()) return;
+        if (!ensureLoaded(h)) return;
         h.loop.offerSupplement(text, images);
         h.controller.onUserSupplement(ImagePart.displayText(images, text));
     }
 
     /** 回答 AskUserQuestion：完成挂起的等待（未挂起时忽略）；回答作为工具结果回传继续本轮 */
     public void sendAnswer(final SessionHandle h, final String text) {
-        if (h == null || !h.running) return;
-        h.loop.answerAskUser(text);
+        sendAnswer(h, text, null);
+    }
+
+    /** 返回是否接收；失败时输入框保留草稿，不转成新任务或运行中补充。 */
+    public boolean sendAnswer(final SessionHandle h, final String text, final List<ImagePart> images) {
+        return h != null && !h.deleted && h.running && h.loop != null && h.loop.answerAskUser(text, images);
+    }
+
+    public boolean sendAnswer(final SessionHandle h, final String text, final List<ImagePart> images, final String expectedQuestionId) {
+        return h != null && !h.deleted && h.running && h.loop != null
+                && h.loop.answerAskUser(text, images, expectedQuestionId);
     }
 
     /** 当前工作空间 workDir（文件补全遍历根；无当前空间返回 null） */
@@ -1177,6 +1393,7 @@ public class SessionManager {
 
     /** 斜杠命令本地分发：命中 → 聊天区回显命令 + 系统行结果（不入 LLM 历史）；未命中 → 按普通消息发送 */
     public void dispatchCommand(SessionHandle h, String text) {
+        if (!ensureLoaded(h)) return;
         String sessionResult = dispatchSessionCommand(h, text);
         if (sessionResult != null) {
             h.controller.onUserMessage(text);
@@ -1208,18 +1425,18 @@ public class SessionManager {
             WorkspaceCtx ctx = ctxByName.get(h.workspaceName); if (ctx == null) return "工作空间不存在";
             StringBuilder out = new StringBuilder("会话目录："); int count=0;
             for (SessionHandle item : ctx.sessions) {
-                String hay=(item.title==null?"":item.title)+" "+item.session.preview()+" "+item.id;
+                String hay=(item.title==null?"":item.title)+" "+item.preview()+" "+item.id;
                 if(archivedOnly&&!item.session.archived)continue;
                 if(!all&&!archivedOnly&&!query.isEmpty()&&!hay.toLowerCase().contains(query.toLowerCase()))continue;
                 if(!all&&!archivedOnly&&query.isEmpty()&&item.session.archived)continue;
                 out.append('\n').append(item.session.pinned?"[置顶] ":"").append(item.session.archived?"[归档] ":"")
-                        .append(item.id).append("  ").append(item.title==null?"(新会话)":item.title).append(" — ").append(item.session.preview());count++;
+                        .append(item.id).append("  ").append(item.title==null?"(新会话)":item.title).append(" — ").append(item.preview());count++;
             }
             return count==0?"未找到会话":out.append("\n共 ").append(count).append(" 个").toString();
         }
         if(parts.length<2)return "用法: /session pin|unpin|archive|unarchive|fork|export [路径]|import <路径>";
         String action=parts[1].toLowerCase();
-        if("pin".equals(action)||"unpin".equals(action)){h.session.pinned="pin".equals(action);persist(h);notifyTitleChanged(h);return h.session.pinned?"会话已置顶":"已取消置顶";}
+        if("pin".equals(action)||"unpin".equals(action)){setPinned(h,"pin".equals(action));return h.session.pinned?"会话已置顶":"已取消置顶";}
         if("archive".equals(action)||"unarchive".equals(action)){h.session.archived="archive".equals(action);persist(h);notifyTitleChanged(h);return h.session.archived?"会话已归档（/sessions archived 查看）":"会话已恢复";}
         if("fork".equals(action))return forkSession(h);
         if("export".equals(action))return exportSession(h,parts.length>2?parts[2]:"");
@@ -1244,6 +1461,7 @@ public class SessionManager {
     }
 
     private void persist(SessionHandle h) {
+        if (!h.isLoaded() || h.deleted) return; // 列表占位对象绝不写回覆盖正文。
         WorkspaceCtx ctx = ctxByName.get(h.workspaceName);
         if (ctx == null) return;
         try {
@@ -1269,9 +1487,11 @@ public class SessionManager {
      *  不等就退出会让 killTree 没跑完，bash 子进程变孤儿继续占 CPU（关窗残留实测根因）。
      *  工具任务中断后最多 killTree(5s)+join(5s) 结束，等 8s 足够；杀不掉的极端情况限时返回。 */
     public void shutdown() {
+        jobClock.shutdownNow();
         branches.shutdownNow();
         for (WorkspaceCtx ctx : ctxByName.values()) {
             for (SessionHandle h : ctx.sessions) {
+                if (!h.isLoaded()) { h.pool.shutdownNow(); continue; }
                 if (h.running) h.loop.interrupt();
                 shutdownSessionTools(h);
                 h.loop.shutdown();
@@ -1284,6 +1504,7 @@ public class SessionManager {
 
     /** 回收由开发工作台启动的后台服务，防止关窗/删会话后残留 cmd、Python 或 Node 进程。 */
     private static void shutdownSessionTools(SessionHandle h) {
+        if (!h.isLoaded()) return;
         com.minion.core.tools.Tool tool = h.loop.registry().get("Process");
         if (tool instanceof ProcessTool) ((ProcessTool) tool).shutdown();
     }

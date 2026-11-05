@@ -85,6 +85,10 @@ public final class DiagnosticsTool implements Tool {
         appendExecutable(sb, "Git", "git", "--version");
         appendExecutable(sb, "Chrome", resolvedBrowser(), "--version");
         appendExecutable(sb, "Node", "node", "--version");
+        appendExecutable(sb, "OCR Tesseract", config.ocrPath(), "--version");
+        sb.append("OCR语言: ").append(config.ocrLanguage()).append("（实际语言包须ocr试读验证）\n");
+        appendExecutable(sb, "LibreOffice可选预览", config.officePath(), "--headless", "--version");
+        sb.append("能力: PDF分页文字/页面图像由内置PDFBox提供；视觉识别须模型接口支持；Python是本地进程，不是OS沙箱。\n");
         appendExecutable(sb, "PowerShell", "powershell", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()");
         try {
             PythonRuntime.RunResult r = python.status(workspace.cwd());

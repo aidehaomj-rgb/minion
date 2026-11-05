@@ -87,8 +87,9 @@ public class WriteTool implements Tool {
             return ToolResult.error("写入被取消（等待文件锁时线程中断）: " + p);
         }
         try {
+            CheckpointStore.Entry checkpoint=null;
             if (checkpoints != null) {
-                try { checkpoints.create(p, "Write"); }
+                try { checkpoint=checkpoints.create(p, "Write"); }
                 catch (IOException e) { return ToolResult.error("创建写入前检查点失败，未修改文件: " + e.getMessage()); }
             }
             byte[] data = content.getBytes(StandardCharsets.UTF_8);
@@ -100,6 +101,7 @@ public class WriteTool implements Tool {
                 data = joined;
             }
             AtomicFiles.writeBytes(p, data);
+            if(checkpoint!=null)checkpoints.seal(checkpoint);
         } finally {
             lock.unlock();
         }

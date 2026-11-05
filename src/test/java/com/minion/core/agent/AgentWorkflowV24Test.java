@@ -54,11 +54,41 @@ public class AgentWorkflowV24Test {
             one.get(3,TimeUnit.SECONDS); two.get(3,TimeUnit.SECONDS); assertEquals(1,peak.get());
         } finally {pool.shutdownNow();}
     }
+    @Test public void stalledBrowserDoesNotBlockOtherSessionsFileTools() throws Exception {
+        Workspace ws=new Workspace(tmp.getRoot().toString());
+        CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
+        Tool browser=new Tool(){public String name(){return "BrowserAction";}public String description(){return "test";}
+            public JsonObject schema(){return new JsonObject();}
+            public ToolResult execute(JsonObject args)throws Exception {entered.countDown();release.await(10,TimeUnit.SECONDS);return ToolResult.success("done");}};
+        Tool file=new Tool(){public String name(){return "Python";}public String description(){return "test";}
+            public JsonObject schema(){return new JsonObject();}
+            public ToolResult execute(JsonObject args){return ToolResult.success("independent");}};
+        ExecutorService pool=Executors.newFixedThreadPool(3);
+        try {
+            Future<ToolResult> waiting=pool.submit(()->new ToolExecutionGuard(ws,false).execute(browser,new JsonObject()));
+            assertTrue(entered.await(1,TimeUnit.SECONDS));
+            Future<ToolResult> other=pool.submit(()->new ToolExecutionGuard(ws,false).execute(file,new JsonObject()));
+            assertEquals("independent",other.get(1,TimeUnit.SECONDS).output);
+            Future<ToolResult> competingBrowser=pool.submit(()->new ToolExecutionGuard(ws,false).execute(browser,new JsonObject()));
+            ToolResult busy=competingBrowser.get(4,TimeUnit.SECONDS);
+            assertFalse(busy.ok);assertTrue(busy.noSideEffect);
+            release.countDown();assertTrue(waiting.get(3,TimeUnit.SECONDS).ok);
+        } finally {release.countDown();pool.shutdownNow();}
+    }
     @Test public void readOnlyPolicyFailsClosedForShellPluginsAndKnowledgeWrites() {
         AgentToolPolicy p=new AgentToolPolicy(true,"");
-        for(String tool:Arrays.asList("Write","Edit","Bash","Python","Excel","mcp_tool","Secrets","task")) assertFalse(tool,p.visible(tool));
+        for(String tool:Arrays.asList("Write","Edit","Bash","Python","mcp_tool","Secrets","task")) assertFalse(tool,p.visible(tool));
+        assertTrue(p.permits("Excel",json("{\"action\":\"validate\"}")));
+        assertFalse(p.permits("Excel",json("{\"action\":\"patch_cells\"}")));
+        assertFalse(p.permits("Excel",json("{\"action\":\"read\",\"filter\":\"x>1\"}")));
+        assertTrue(p.permits("Document",json("{\"action\":\"pdf_view\"}")));
+        assertFalse(p.permits("Document",json("{\"action\":\"docx_report\"}")));
         assertTrue(p.permits("Knowledge",json("{\"action\":\"search\"}")));
         assertFalse(p.permits("Knowledge",json("{\"action\":\"save\"}")));
+        AgentToolPolicy worker = new AgentToolPolicy(false, "");
+        assertFalse(worker.visible("Memory"));
+        assertTrue(worker.permits("Knowledge", json("{\"action\":\"search\"}")));
+        assertFalse(worker.permits("Knowledge", json("{\"action\":\"save\"}")));
         AgentToolPolicy white=new AgentToolPolicy(false,"Read, Glob"); assertTrue(white.visible("Read")); assertFalse(white.visible("Write"));
     }
     @Test public void checkpointAndLedgerPersistEvidenceWithoutPromotingOldGoal() throws Exception {
@@ -73,17 +103,38 @@ public class AgentWorkflowV24Test {
         write(file,"changed"); assertFalse(restored.checkpointFilesValid()); assertTrue(restored.checkpointStatus().contains("changed"));
         restored.begin("新任务",true); assertTrue(restored.childSnapshot().isEmpty()); assertNull(restored.nextStep);
     }
-    @Test public void childUsesChosenRuntimeAndSideQuestionCannotModifyParent() throws Exception {
+    @Test public void childIsLockedToParentButSideQuestionRemainsSeparate() throws Exception {
         FakeLlmClient parent=new FakeLlmClient(),child=new FakeLlmClient(); child.addTurn("已完成子范围"); child.compressResult="旁支回答";
         AgentLoop loop=loop(parent); loop.session().taskState.begin("原任务",false);
         loop.session().messages.add(Message.user("保留原文")); final List<String> chosen=new ArrayList<String>();
-        loop.setAgentRuntimeFactory((name,id) -> { chosen.add(name); return new AgentRuntime(child,name,60000,.8,new ToolRegistry(),loop.workspace(),true); });
-        String result=loop.runSubAgent(json("{\"description\":\"只查1行\",\"model\":\"configured-child\",\"mode\":\"explore\"}"));
-        assertTrue(result.contains("已返回")); assertTrue(parent.requests.isEmpty()); assertEquals("configured-child",chosen.get(0));
-        assertEquals("configured-child",loop.session().taskState.childSnapshot().get(0).model);
+        loop.setAgentRuntimeFactory((name,id) -> { chosen.add(name); return new AgentRuntime(child,name==null?"parent":name,60000,.8,new ToolRegistry(),loop.workspace(),true); });
+        assertTrue(loop.runSubAgent(json("{\"description\":\"只查1行\",\"model\":\"configured-child\"}"))
+                .contains("不能单独指定model"));
+        assertTrue(chosen.isEmpty());
+        String result=loop.runSubAgent(json("{\"description\":\"只查1行\",\"mode\":\"explore\"}"));
+        assertTrue(result.contains("已返回")); assertTrue(parent.requests.isEmpty()); assertNull(chosen.get(0));
+        assertEquals("parent",loop.session().taskState.childSnapshot().get(0).model);
         String before=new Gson().toJson(loop.session());
         assertEquals("旁支回答",loop.askSideQuestion("说明术语","other-model","任务背景"));
         assertEquals(before,new Gson().toJson(loop.session())); assertEquals("other-model",chosen.get(1)); loop.shutdown();
+    }
+    @Test public void taskToolDoesNotAdvertiseOrAcceptChildModelOverride() {
+        AgentLoop loop=loop(new FakeLlmClient());
+        TaskTool tool=new TaskTool(loop);
+        assertFalse(tool.schema().getAsJsonObject("properties").has("model"));
+        ToolResult denied=tool.execute(json("{\"description\":\"查一行\",\"model\":\"other-model\"}"));
+        assertFalse(denied.ok); assertTrue(denied.output.contains("主会话模型"));
+        loop.shutdown();
+    }
+    @Test public void legacyChildCannotResumeOnDifferentParentModel() throws Exception {
+        FakeLlmClient llm=new FakeLlmClient();AgentLoop loop=loop(llm);
+        loop.session().taskState.begin("主任务",false);
+        TaskState.Child old=loop.session().taskState.startChild("旧模型分工");
+        loop.session().taskState.configureChild(old.id,"explore","Read","other-model","old-record.json");
+        String result=loop.resumeSubAgent(old.id,false);
+        assertTrue(result.contains("请核对文件后选择重试"));
+        assertTrue(llm.requests.isEmpty());
+        loop.shutdown();
     }
     @Test public void childResumePreservesCompletedActionsAndRemovesBrokenToolPairs() throws Exception {
         Path record=tmp.getRoot().toPath().resolve("child.json"); FakeLlmClient llm=new FakeLlmClient(); llm.addTurn("只补缺失已完成");

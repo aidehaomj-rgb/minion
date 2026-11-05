@@ -76,7 +76,7 @@ public class SettingsDialog {
 
         // 左列导航：TabPane 侧放文字旋转 90°（历史"字倒了"根因）不可用；ListView 复用现有深色样式
         final ListView<String> nav = new ListView<String>();
-        nav.getItems().addAll("基础设置", "模型", "MCP", "工具", "关于");
+        nav.getItems().addAll("基础设置", "文档/OCR", "模型", "MCP", "工具", "关于");
         nav.setPrefWidth(120);
         nav.setMinWidth(120); // HBox 空间不足时按 HGrow 优先级分配，无 HGrow 的子项会被压到最小宽度；minWidth 保证导航列不被压塌
         final Node model = modelPane(models, manager);
@@ -87,6 +87,7 @@ public class SettingsDialog {
         nav.getSelectionModel().selectedItemProperty().addListener((obs, ov, item) -> {
             if (item == null) return;
             content.getChildren().setAll("基础设置".equals(item) ? basic.root
+                    : "文档/OCR".equals(item) ? basic.documentRoot
                     : "模型".equals(item) ? model
                     : "MCP".equals(item) ? mcpNode
                     : "工具".equals(item) ? toolsNode : about);
@@ -281,9 +282,12 @@ public class SettingsDialog {
         TextField maxOut = new TextField(mc == null ? "8192" : String.valueOf(mc.maxOutputTokens <= 0 ? 8192 : mc.maxOutputTokens));
         TextField thr = new TextField(mc == null ? "80" : String.valueOf(ContextManager.normalizedThreshold(mc.compressThreshold)*100));
         thr.setPromptText("百分比，例如90；不是0.9");
+        TextField stable = new TextField(mc == null ? "0" : String.valueOf(mc.stableContextTokens));
+        stable.setPromptText("0=默认150000；可按内网实测调节");
         TextField keep = new TextField(mc == null ? "50" : String.valueOf(mc.keepRecentMessages));
         maxCtx.setId("model-context-window"); thr.setId("model-compression-percent");
         maxOut.setId("model-output-budget"); keep.setId("model-keep-recent");
+        stable.setId("model-stable-context");
 
         grid.addRow(0, new Label("标识名:"), displayName);
         grid.addRow(1, new Label("URL:"), url);
@@ -296,19 +300,22 @@ public class SettingsDialog {
         grid.addRow(8, new Label("maxOutputTokens:"), maxOut);
         grid.addRow(9, new Label("上下文窗口 (token):"), maxCtx);
         grid.addRow(10, new Label("自动压缩阈值 (%):"), thr);
-        grid.addRow(11, new Label("keepRecentMessages:"), keep);
+        grid.addRow(11, new Label("稳定工作区 (token):"), stable);
+        grid.addRow(12, new Label("keepRecentMessages:"), keep);
         Label preview = new Label(); preview.setWrapText(true); preview.setMaxWidth(430);
         preview.setId("model-compression-preview");
         Runnable refreshPreview = () -> {
             try {
-                ContextSettings s=ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText());
-                preview.setText("按配置窗口预计在 "+s.triggerTokens()+" token 自动压缩，保留单次输出余量。\n按模型保存；服务端超限/空响应恢复及本会话安全窗口仍可能提前压缩。\n1M填写1000000或服务端公布的准确值；本地配置不会改变服务端容量。");
+                ContextSettings s=ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText(),stable.getText());
+                preview.setText("预计在 "+s.triggerTokens()+" token 自动压缩（稳定工作区"+(s.stable==0?"默认150K":s.stable+" token")+"，另受百分比与输出余量限制）。"
+                        +(s.triggerTokens()>200000?"\n高于200K：请先用内网长任务实测首字延迟、工具调用和停止准确性。":"")
+                        +"\n按模型保存；服务端超限/空响应恢复及本会话安全窗口仍可能提前压缩。1M是上限，不是每轮应填满的工作区。");
             } catch(IllegalArgumentException e) { preview.setText(e.getMessage()); }
         };
-        for(TextField field:new TextField[]{maxCtx,thr,maxOut,keep})
+        for(TextField field:new TextField[]{maxCtx,thr,maxOut,keep,stable})
             field.textProperty().addListener((obs,old,value) -> refreshPreview.run());
         refreshPreview.run();
-        grid.add(preview,0,12,2,1);
+        grid.add(preview,0,13,2,1);
         provider.valueProperty().addListener((obs, old, value) -> {
             boolean sfm = "sfm-agent".equalsIgnoreCase(value);
             modelName.setDisable(sfm);
@@ -320,7 +327,7 @@ public class SettingsDialog {
         thinking.setDisable(sfm);
         d.getDialogPane().setContent(grid);
         d.getDialogPane().lookupButton(ButtonType.OK).addEventFilter(ActionEvent.ACTION, event -> {
-            try { ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText()); }
+            try { ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText(),stable.getText()); }
             catch(IllegalArgumentException ex) { event.consume(); preview.setText(ex.getMessage()); }
         });
 
@@ -335,10 +342,11 @@ public class SettingsDialog {
             out.sessionId = sessionId.getText().trim();
             out.thinking = thinking.isSelected();
             out.reasoningEffort = effort.getValue() == null ? "max" : effort.getValue();
-            ContextSettings settings=ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText());
+            ContextSettings settings=ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText(),stable.getText());
             out.maxOutputTokens = settings.output;
             out.maxContextTokens = settings.window;
             out.compressThreshold = settings.ratio;
+            out.stableContextTokens = settings.stable;
             out.keepRecentMessages = settings.keep;
             return out;
         });
@@ -679,10 +687,14 @@ public class SettingsDialog {
     /** 基础设置页：控件 + 保存逻辑（按钮栏「应用」接线用） */
     private static class BasicPane {
         final Node root;
+        final Node documentRoot;
         private final Config config;
         private final TextField skillsDir;
         private final TextField sharedKnowledgeDir;
         private final TextField pythonPath;
+        private final TextField ocrPath;
+        private final TextField ocrLanguage;
+        private final TextField officePath;
         private final TextArea toolWhitelist;
         private final TextArea cmdWhitelist;
         private final CheckBox allowOutside;
@@ -737,6 +749,16 @@ public class SettingsDialog {
                 if (file != null) pythonPath.setText(file.getAbsolutePath());
             });
             pythonBox.getChildren().addAll(pythonPath, browsePython);
+            ocrPath = new TextField(config.ocrPath());
+            ocrLanguage = new TextField(config.ocrLanguage());
+            officePath = new TextField(config.officePath());
+            VBox documentBox = new VBox(12,
+                    row("Tesseract程序路径:", ocrPath),
+                    row("OCR语言（chi_sim+eng）:", ocrLanguage),
+                    row("LibreOffice程序路径:", officePath),
+                    new Label("本地运行，不自动安装；OCR需语言包，预览需LibreOffice。\n应用后可用Diagnostics检查；缺依赖不代表资料没有文字。"));
+            documentBox.setPadding(new Insets(12));
+            documentRoot=documentBox;
             toolWhitelist = new TextArea(config.get("confirm.whitelist.tools", ""));
             toolWhitelist.setPrefRowCount(2);
             toolWhitelist.setPrefColumnCount(20); // 默认 40 列偏好宽 ≈624px 把基础页撑到 794，触发 HBox 压缩导航列；20 列后偏好宽 ~500 与内容区匹配
@@ -779,6 +801,9 @@ public class SettingsDialog {
             config.set("skills.dir", skillsDir.getText().trim());
             config.set("knowledge.shared.dir", sharedKnowledgeDir.getText().trim());
             config.set("python.path", pythonPath.getText().trim());
+            config.set("ocr.path", ocrPath.getText().trim());
+            config.set("ocr.language", ocrLanguage.getText().trim());
+            config.set("office.path", officePath.getText().trim());
             // 白名单是逗号分隔的单行配置：多行粘贴的换行替换为空格，否则落盘后重载会静默丢内容
             config.set("confirm.whitelist.tools",
                     toolWhitelist.getText().trim().replace('\n', ' ').replace('\r', ' '));
@@ -805,15 +830,17 @@ public class SettingsDialog {
 
     // ===== 关于页 =====
 
+    static java.util.List<String> aboutText() {
+        return java.util.Arrays.asList("兼容win7的代码开发助手",
+                "离线版：V45（任务续跑、精准记忆与多Agent协同）", "开发语言：Java 8 + JavaFX");
+    }
+
     private static VBox aboutPane() {
         VBox box = new VBox(10);
         box.setPadding(new Insets(16));
-        box.getChildren().addAll(
-                new Label("兼容win7的代码开发助手"),
-                new Separator(),
-                new Label("作者：尹承"),
-                new Label("联系方式：258915527@qq.com"),
-                new Label("开发语言：Java 8 + JavaFX"));
+        java.util.List<String> lines = aboutText();
+        box.getChildren().addAll(new Label(lines.get(0)), new Separator());
+        for (int i = 1; i < lines.size(); i++) box.getChildren().add(new Label(lines.get(i)));
         return box;
     }
 

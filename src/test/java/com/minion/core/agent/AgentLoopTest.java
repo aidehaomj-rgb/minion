@@ -92,6 +92,9 @@ public class AgentLoopTest {
         args.addProperty("prompt","只返回id与证据，不改变主任务");
         String result=loop.runSubAgent(args);
         assertTrue(result.contains("子Agent ID"));
+        assertTrue(result.contains("【已完成（子Agent自报，非核验事实）】"));
+        assertTrue(result.contains("【证据路径】"));
+        assertTrue(result.contains("【完整记录】"));
         assertTrue(llm.requests.get(0).messages.get(1).content.contains("只返回id与证据"));
         assertEquals("主目标未完成",loop.session().todos.items.get(0).text);
         assertEquals(1,loop.session().taskState.children.size());
@@ -1041,42 +1044,34 @@ public class AgentLoopTest {
         assertNull(msgs.get(1).images); // 无图输入不产生 images
     }
 
-    /** 带图请求失败（如 DeepSeek 400 不支持 image_url）：自动移除图片降级为纯文本重试，会话恢复可用 */
+    /** 视觉接口拒绝图片时不可清图后以纯文本假装已经看图。 */
     @Test
-    public void imageFailure_degradesToTextAndRetries() {
+    public void imageFailure_keepsPixelsAndReportsCapabilityError() {
         llm.addTurnError("400: 不支持 image_url");
-        llm.addTurn("好的，已按文字处理");
         AgentLoop loop = newLoop();
         ImagePart img = new ImagePart();
         img.mime = "image/png"; img.base64 = "QUJD"; img.name = "截图.png";
         loop.runUserTurn("看图", Collections.singletonList(img));
-        // 两次请求：第一次带图失败，第二次降级纯文本成功
-        assertEquals(2, llm.requests.size());
-        // 历史中带图消息 images 已清空（下轮请求不会再触发 400）
+        assertEquals(1, llm.requests.size());
         Message user = loop.messages().get(0);
         assertEquals(Message.Role.USER, user.role);
-        assertNull(user.images);
-        // 降级成功不显示错误，仅提示一次
-        assertEquals(0, ui.errors.size());
-        assertEquals(1, ui.warnings.stream().filter(s -> !s.contains("正在核验")).count());
-        assertTrue(ui.warnings.get(0).contains("图片"));
-        // 正常完成：assistant 回复入历史
-        assertEquals("好的，已按文字处理", loop.messages().get(1).content);
+        assertEquals(1, user.images.size());
+        assertEquals(1, ui.errors.size());
+        assertTrue(ui.errors.get(0).contains("原图已保留"));
     }
 
-    /** 降级后仍失败：不无限重试，正常报错退出 */
+    /** 不能因其他模型错误就误判图片不受支持、清掉历史图像。 */
     @Test
-    public void imageFailure_degradeRetryFailsAgain_stopsWithError() {
-        llm.addTurnError("400: 不支持 image_url");
-        llm.addTurnError("500: 服务错误");
+    public void unrelatedFailure_doesNotRemoveImages() {
+        llm.addTurnError("400: 参数错误");
         AgentLoop loop = newLoop();
         ImagePart img = new ImagePart();
         img.mime = "image/png"; img.base64 = "QUJD"; img.name = "截图.png";
         loop.runUserTurn("看图", Collections.singletonList(img));
-        // 原请求 + 降级重试各一次，不无限循环
-        assertEquals(2, llm.requests.size());
+        assertEquals(1, llm.requests.size());
+        assertNotNull(loop.messages().get(0).images);
         assertEquals(1, ui.errors.size());
-        assertEquals("500: 服务错误", ui.errors.get(0));
+        assertEquals("400: 参数错误", ui.errors.get(0));
     }
 
     /** 带思考的测试客户端：onThinking + onContent + onFinish */
@@ -1717,8 +1712,8 @@ public class AgentLoopTest {
         assertTrue(hint.content.contains("当前目标尚未交付"));
         assertEquals(2,llm.stopReviewRequests.size());
         assertTrue(ui.warnings.toString().contains("阶段性回复"));
-        assertEquals("分析已完成，结果文件已生成并核验。",
-                loop.messages().get(loop.messages().size() - 1).content);
+        assertTrue(loop.messages().get(loop.messages().size() - 1).content
+                .startsWith("分析已完成，结果文件已生成并核验。"));
     }
 
     @Test
@@ -1830,7 +1825,7 @@ public class AgentLoopTest {
         llm.addTurnWithTools(null, null, null);
         llm.addTurn("最终产生有效结果");
         AgentLoop loop = newLoop();
-        loop.runUserTurn("执行复杂任务");
+        loop.runUserTurn("解释复杂任务");
 
         assertEquals(3, llm.requests.size());
         assertEquals("只有思考后的恢复轮应关闭思考，空响应后必须重新开启", 1,
@@ -1859,6 +1854,7 @@ public class AgentLoopTest {
         assertTrue(ui.warnings.toString().contains("强制压缩上下文"));
         assertTrue(ui.warnings.toString().contains("空响应恢复压缩完成"));
         assertEquals("压缩后恢复输出", loop.messages().get(loop.messages().size() - 1).content);
+        assertEquals("空响应不能证明服务端窗口缩小",0,loop.session().observedContextLimit);
     }
 
     @Test
@@ -1879,6 +1875,7 @@ public class AgentLoopTest {
         assertTrue(ui.warnings.toString().contains("强制压缩上下文"));
         assertTrue(ui.warnings.toString().contains("空响应恢复压缩完成"));
         assertEquals("压缩后继续完成分析", loop.messages().get(loop.messages().size() - 1).content);
+        assertEquals("只有思考不能永久降低自动压缩线",0,loop.session().observedContextLimit);
     }
 
     @Test

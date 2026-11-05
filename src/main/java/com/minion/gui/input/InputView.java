@@ -2,6 +2,8 @@ package com.minion.gui.input;
 
 import com.minion.core.config.Config;
 import com.minion.core.llm.ImagePart;
+import com.minion.core.tools.ToolResult;
+import com.minion.core.tools.ViewImageTool;
 import com.minion.gui.icon.IconFactory;
 import com.minion.gui.session.SessionHandle;
 import com.minion.gui.session.SessionManager;
@@ -62,6 +64,7 @@ public class InputView extends VBox {
     private final HBox pendingGuideRow = new HBox(8);
     private final Label pendingGuideLabel = new Label();
     private final Button guideNowButton = new Button("立即引导");
+    private final Button editGuideButton = new Button("编辑");
     private final Button cancelGuideButton = new Button("取消");
     private final ContextRing contextRing = new ContextRing();
     private final SVGPath arrowIcon = IconFactory.send();
@@ -99,6 +102,7 @@ public class InputView extends VBox {
     private boolean running;
     private boolean askPending;
     private String askQuestion;
+    private String askQuestionId;
     /** 运行中用户先暂存、尚未点击“立即引导”的内容；不得提前进入模型或聊天事件流。 */
 
     public InputView(final SessionManager manager, final Config config) {
@@ -144,7 +148,12 @@ public class InputView extends VBox {
         guideNowButton.setOnAction(e -> sendPendingGuide());
         cancelGuideButton.getStyleClass().add("btn-guide-cancel");
         cancelGuideButton.setOnAction(e -> clearPendingGuide());
-        pendingGuideRow.getChildren().addAll(pendingGuideLabel, guideNowButton, cancelGuideButton);
+        editGuideButton.getStyleClass().add("btn-guide-cancel");
+        editGuideButton.setOnAction(e -> {
+            if(current!=null)com.minion.gui.dialog.QueueEditor.show(getScene()==null?null:getScene().getWindow(),manager,current,current.pendingGuide());
+            refreshPendingGuideRow();
+        });
+        pendingGuideRow.getChildren().addAll(pendingGuideLabel, editGuideButton, guideNowButton, cancelGuideButton);
         pendingGuideRow.setVisible(false);
         pendingGuideRow.setManaged(false);
 
@@ -603,6 +612,7 @@ public class InputView extends VBox {
             running = h != null && h.running;
             askPending = h != null && h.askPending;
             askQuestion = h == null ? null : h.askQuestion;
+            askQuestionId = h == null || h.loop == null ? null : h.loop.pendingAskUserId();
             updateButton();
             updatePrompt();
             refreshPendingGuideRow();
@@ -648,6 +658,7 @@ public class InputView extends VBox {
             if (current != h) return;
             this.askPending = h.askPending;
             this.askQuestion = h.askQuestion;
+            this.askQuestionId = h.loop == null ? null : h.loop.pendingAskUserId();
             updateButton();
             updatePrompt();
         });
@@ -810,9 +821,17 @@ public class InputView extends VBox {
 
     private void onAction(boolean allowStop) {
         // 输入区缓存由异步回调更新；实际发消息时使用会话即时状态，防重复发送串轮。
+        boolean displayedAnswerMode = askPending;
         if (current != null) {
             running = current.running;
             askPending = current.askPending;
+        }
+        // 界面仍显示“回答”但提问已经结束：这次点击不能偷偷变成发新任务/补充/停止。
+        // 刷新按钮语义并保留草稿，用户看到新状态后可自行决定是否再次发送。
+        if (displayedAnswerMode && !askPending) {
+            updateButton(); updatePrompt();
+            if (hasContent()) notifyChat("提问状态已改变，回答未发送。文字和附件已保留，请检查后重试。");
+            return;
         }
         switch (allowStop ? buttonMode(running, askPending, hasContent())
                 : keyboardMode(running, askPending, hasContent())) {
@@ -828,14 +847,11 @@ public class InputView extends VBox {
                 break;
             }
             case ANSWER: {
-                if (!composedImages().isEmpty()) {
-                    notifyChat("回答模式暂不支持图片，请删除图片后再回答");
-                    return;
-                }
                 String text = composedText();
-                if (text == null || text.trim().isEmpty()) return;
-                clearComposer();
-                if (current != null) manager.sendAnswer(current, text);
+                List<ImagePart> images = composedImages();
+                if ((text == null || text.trim().isEmpty()) && images.isEmpty()) return;
+                if (manager.sendAnswer(current, text, images, askQuestionId)) clearComposer();
+                else notifyChat("回答未发送：提问已结束、状态已改变或附件无效。文字和附件已保留，请检查后重试。");
                 break;
             }
             case STOP:
@@ -924,8 +940,13 @@ public class InputView extends VBox {
                         notifyChat("图片超过 " + (ImagePart.MAX_FILE_BYTES / 1024 / 1024) + "MB，已跳过: " + f.getName());
                         continue;
                     }
-                    byte[] bytes = Files.readAllBytes(f.toPath());
-                    addChip(InputChip.imageChip(mimeFor(f.getName()), Base64.getEncoder().encodeToString(bytes), f.getName()));
+                    ToolResult overview = ViewImageTool.loadOverview(f.toPath());
+                    if (!overview.ok || overview.images == null || overview.images.isEmpty()) {
+                        notifyChat("图片无法进入视觉通道（" + f.getName() + "）: " + overview.output);
+                        continue;
+                    }
+                    ImagePart image = overview.images.get(0);
+                    addChip(InputChip.imageChip(image.mime, image.base64, f.getName()));
                     have++;
                 } else {
                     if (documents >= AttachmentReader.MAX_ATTACHMENTS) {

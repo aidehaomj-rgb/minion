@@ -15,6 +15,12 @@
   </properties>
 
   <dependencies>
+    <!-- 保留 R2 的 Win7/Java8 原生进程句柄支持；仅调用进程清理时加载。 -->
+    <dependency>
+      <groupId>net.java.dev.jna</groupId>
+      <artifactId>jna</artifactId>
+      <version>5.13.0</version>
+    </dependency>
     <dependency>
       <groupId>com.google.code.gson</groupId>
       <artifactId>gson</artifactId>

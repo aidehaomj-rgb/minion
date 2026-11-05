@@ -31,7 +31,7 @@ public final class StatusDot {
                 : com.minion.gui.session.SessionHandle.ActivityState.NONE);
     }
 
-    /** 建三态状态点：运行黄+呼吸，完成未查看绿+常亮，已查看隐藏。 */
+    /** 运行黄+呼吸，回合结束（完成或暂停）统一绿色常亮；已查看隐藏。 */
     public static Circle create(com.minion.gui.session.SessionHandle.ActivityState state) {
         Circle dot = new Circle(4);
         dot.getStyleClass().add("status-dot");
@@ -40,6 +40,11 @@ public final class StatusDot {
             startPulse(dot);
         } else if (state == com.minion.gui.session.SessionHandle.ActivityState.COMPLETED_UNREAD) {
             dot.getStyleClass().add("status-dot-completed");
+        } else if (state == com.minion.gui.session.SessionHandle.ActivityState.PAUSED_UNREAD) {
+            // 恢复旧版视觉约定：只要本轮对话已经结束，未查看提示统一显示绿色。
+            // 保留 paused 类供状态语义/后续扩展使用，但不再用橙色误导为异常。
+            dot.getStyleClass().add("status-dot-completed");
+            dot.getStyleClass().add("status-dot-paused");
         } else {
             dot.setVisible(false);
             dot.setManaged(false);

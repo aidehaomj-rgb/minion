@@ -298,6 +298,12 @@ public class MainWindow {
                     }
                 });
             }
+            @Override public void onSessionViewed(SessionHandle h) {
+                Platform.runLater(() -> {
+                    updateTab(h);
+                    sessionList.refresh();
+                });
+            }
             @Override public void onCompressingChanged(SessionHandle h, boolean compressing) {
                 if (inputView != null) inputView.setCompressing(h, compressing);
                 Platform.runLater(() -> {
@@ -340,6 +346,8 @@ public class MainWindow {
                     if (!openedIds.contains(h.id)) {
                         openedIds.add(h.id); // 打开过的会话才有页签（懒加载）；无标题会话以「(新会话)」占位建页签，标题生成后 updateTab 刷新
                         addTab(h);
+                    } else {
+                        updateTab(h); // 激活会清除“完成未查看”；页签与侧栏同步撤下绿灯
                     }
                     selectTab(h);
                     refreshModelMenu();
@@ -675,7 +683,7 @@ public class MainWindow {
                 String title = h.title == null ? "(新会话)" : h.title;
                 t.setText(tabTitle(title));
                 t.setTooltip(new Tooltip(title)); // 完整标题提示
-                t.setGraphic(runningIndicator(h));
+                updateTabStatus(t, h.activityState());
                 return;
             }
         }
@@ -687,7 +695,7 @@ public class MainWindow {
         Tab t = new Tab(tabTitle(title));
         t.setUserData(h.id);
         t.setTooltip(new Tooltip(title)); // 完整标题提示
-        t.setGraphic(runningIndicator(h));
+        updateTabStatus(t, h.activityState());
         t.setClosable(true);
         t.setOnCloseRequest(e -> {
             e.consume(); // 不触发 TabPane 默认移除，由本流程显式移除
@@ -708,6 +716,7 @@ public class MainWindow {
             // 关闭流程：卸载视图缓存（再次从左侧打开时重新加载）+ 移除页签
             openedIds.remove(h.id);
             viewCache.remove(h.id);
+            StatusDot.stopPulseIn(t.getGraphic());
             tabs.getTabs().remove(t);
             if (chatView != null && chatView.handle() == h) {
                 manager.deactivateSession(h); // 幂等守卫不再拦截再次激活
@@ -722,6 +731,7 @@ public class MainWindow {
     private void removeTabById(String id) {
         for (Tab t : tabs.getTabs()) {
             if (id.equals(t.getUserData())) {
+                StatusDot.stopPulseIn(t.getGraphic());
                 tabs.getTabs().remove(t);
                 return;
             }
@@ -737,8 +747,10 @@ public class MainWindow {
         }
     }
 
-    private Node runningIndicator(SessionHandle h) {
-        // 呼吸动画由 StatusDot Timeline 驱动（CSS keyframe JavaFX 8 不支持）
-        return StatusDot.create(h.running);
+    static void updateTabStatus(Tab tab, SessionHandle.ActivityState state) {
+        // 与左侧列表共用状态：运行黄灯、回合结束绿灯，查看后隐藏。
+        // 替换旧节点前停止呼吸动画，避免 Timeline 持有已卸载的页签节点。
+        StatusDot.stopPulseIn(tab.getGraphic());
+        tab.setGraphic(StatusDot.create(state));
     }
 }

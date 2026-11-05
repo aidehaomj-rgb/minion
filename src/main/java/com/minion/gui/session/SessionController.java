@@ -58,6 +58,8 @@ public class SessionController implements AgentUi {
         for (Message m : messages) {
             if (m == null || m.role == null) continue;
             if (m.role == Message.Role.USER) {
+                // 回答已由对应 TOOL 重演一次；这条消息只承载像素，不重复显示为新用户任务。
+                if (m.toolImage && m.replyToToolCallId != null) continue;
                 // 带图消息事件文本拼图片占位（聊天区不渲染图片本体）
                 events.add(new EventList.Ev(m.supplement
                         ? EventList.Kind.USER_SUPPLEMENT : EventList.Kind.USER_MESSAGE,
