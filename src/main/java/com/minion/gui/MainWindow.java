@@ -13,6 +13,7 @@ import com.minion.gui.session.AutoScrollPolicy;
 import com.minion.gui.session.SessionHandle;
 import com.minion.gui.session.SessionManager;
 import com.minion.gui.sidebar.SessionListView;
+import com.minion.gui.sidebar.ProjectSidebarView;
 import com.minion.gui.sidebar.WorkspaceListView;
 import com.minion.gui.theme.Theme;
 import com.minion.core.tools.dev.ProjectTool;
@@ -24,10 +25,13 @@ import javafx.geometry.Pos;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.CacheHint;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuButton;
+import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.Tab;
@@ -35,12 +39,9 @@ import javafx.scene.control.TabPane;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.ColumnConstraints;
-import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
-import javafx.scene.layout.RowConstraints;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.Screen;
@@ -50,38 +51,56 @@ import javafx.util.Duration;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/** 主窗口：自绘标题栏（无边框）/ 左侧 1/4 侧栏（上会话下工作空间）/ 右侧 3/4（页签栏 + 消息区 + 输入区），GridPane 固定 25%/75% 不可拖拽 */
+/** 主窗口：自绘标题栏、可拖动侧栏与独立报告工作区。 */
 public class MainWindow {
 
     private final Stage stage;
     private final SessionManager manager;
     private final TabPane tabs = new TabPane();
+    private BorderPane root;
+    private boolean synchronizingTabs;
     private SessionListView sessionList;
+    private ProjectSidebarView projectSidebar;
+    private AutomationCenter automationCenter;
     private ChatView chatView;
     private ScrollPane chatScroll;
     private final AutoScrollPolicy policy = new AutoScrollPolicy();
-    /** 会话视图缓存（key = 会话 id）：切页签不重建消息区，只增量重放新事件；删除会话/切工作空间清理 */
-    private final Map<String, ChatView> viewCache = new HashMap<String, ChatView>();
-    /** 无活动会话时的空白占位（clearChatPane 后 setContent 用；视图内容保留在缓存中不销毁） */
-    private final Region placeholder = new Region();
+    /** 按项目内会话句柄缓存，避免不同项目复制得到的同 ID 会话误绑。
+     *  LRU 上限 8 个：每视图常驻最多 200 段 TextArea 节点，无上限时长开多会话内存只增不减；
+     *  逐出最久未访问的视图（当前展示的视图不逐出），逐出前解绑直通监听，重开时从事件缓冲全量重建。 */
+    private final Map<SessionHandle, ChatView> viewCache =
+            new LinkedHashMap<SessionHandle, ChatView>(16, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(Map.Entry<SessionHandle, ChatView> eldest) {
+                    if (size() <= 8 || eldest.getValue() == chatView) return false;
+                    eldest.getValue().bind(false);
+                    return true;
+                }
+            };
+    /** 无活动会话时的工作台起始页；会话视图仍独立缓存。 */
+    private final StackPane placeholder = new StackPane();
     private InputView inputView;
-    /** 运行状态指示器（正文区左下角悬浮齿轮+动态文案；仅当前激活会话运行时显示） */
+    /** 运行状态指示器（输入框上方；仅当前会话运行或压缩时显示） */
     private RunningIndicator runningIndicator;
     /** 用户浏览历史消息时显示，点击立即回到最新对话并恢复流式跟随。 */
     private Button jumpLatestButton;
     /** 对话与生成报告共用的右侧工作区。 */
     private SplitPane workspaceSplit;
-    private StackPane chatHost;
+    private VBox conversationColumn;
     private ArtifactPreviewPane artifactPreview;
+    private com.minion.gui.artifact.LocalFileLinks fileLinks;
+    private SessionHandle previewOwner;
+    private double workspaceDivider=Double.NaN;
+    private boolean workspaceFocused;
     private Button reportButton;
-    private TitleBar titleBar; // 自绘标题栏（openSettings 刷新顶部模型名用）
+    private MenuButton modelButton;
     private HBox tabsBar; // 右侧顶部页签栏（无会话时整行隐藏）
-    /** 已打开会话 id 集合：页签存在性的唯一权威（页签 ⇔ openedIds 含 id）；切工作空间保留 */
-    private final Set<String> openedIds = new HashSet<String>();
+    /** 已打开会话 id 集合：页签存在性的唯一权威（页签 ⇔ openedIds 含句柄）；切工作空间保留 */
+    private final Set<SessionHandle> openedIds = new HashSet<SessionHandle>();
 
     public MainWindow(Stage stage, SessionManager manager) {
         this.stage = stage;
@@ -90,6 +109,7 @@ public class MainWindow {
 
     public void show() {
         stage.setTitle("minion");
+        com.minion.gui.icon.AppIcons.install(stage);
         stage.initStyle(StageStyle.UNDECORATED); // 需求 1：隐藏系统标题栏
         stage.setMinWidth(960);
         stage.setMinHeight(640);
@@ -105,8 +125,9 @@ public class MainWindow {
 
         // 根容器：AnchorPane 承载内容 + 8 个缩放区域（ResizeHelper 覆盖在边缘）
         AnchorPane frame = new AnchorPane();
-        BorderPane root = new BorderPane();
-        root.getStyleClass().add("root");
+        root = new BorderPane();
+        root.getStyleClass().addAll("root", "minion-workbench");
+        Theme.apply(root, MinionApp.config().uiTheme());
         AnchorPane.setTopAnchor(root, 0.0);
         AnchorPane.setBottomAnchor(root, 0.0);
         AnchorPane.setLeftAnchor(root, 0.0);
@@ -114,39 +135,30 @@ public class MainWindow {
         frame.getChildren().add(root);
 
         // 自绘标题栏：应用名 | 模型标签 | 留白 | ⚙ | 窗口按钮
-        Label modelLabel = new Label(modelLabelText());
-        modelLabel.getStyleClass().add("topbar-model");
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.SELECTED_TAB);
-        // 需求：标题栏页签点击激活对应会话（userData 存会话 id）；跨工作空间的页签点击先自动切回该空间
+        tabs.getStyleClass().add("conversation-tabs");
+        tabs.setMinHeight(42);tabs.setPrefHeight(42);tabs.setMaxHeight(42);tabs.setMinWidth(0);
+        // 需求：标题栏页签点击激活对应会话（userData 存会话句柄，避免不同项目重复ID误绑）；跨工作空间的页签点击先自动切回该空间
         tabs.getSelectionModel().selectedItemProperty().addListener((obs, ov, nv) -> {
-            if (nv == null) return;
-            Object id = nv.getUserData();
-            if (id == null) return;
-            // JavaFX 8 幽灵选中防御：TabPaneSkin 移除页签时执行 clearSelection()+select(旧选中项)，
-            // 旧选中项已不在 tabs 列表 → SingleSelectionModel 走 setSelectedItem 分支产生幽灵选中，
-            // 若不拦截会 activateSession 已关闭会话 → onSessionActivated 复活页签（点 X 关不掉）
-            if (!tabs.getTabs().contains(nv)) return;
-            SessionHandle h = manager.findSession((String) id); // 跨所有工作空间查找
-            if (h == null) return; // 已删会话的残留页签（理论上 onSessionDeleted 已清理）：忽略
-            if (!manager.workspaces().currentName().equals(h.workspaceName)) {
-                manager.switchWorkspace(h.workspaceName); // 页签与工作空间无关：自动切回所属空间
-            }
-            manager.activateSession(h); // deleted/空间守卫由 activateSession 内部处理
-        });
-        titleBar = new TitleBar(stage, modelLabel, this::openSettings, this::confirmClose);
-        root.setTop(titleBar);
+            if (nv == null || synchronizingTabs) return;
+            if (!(nv.getUserData() instanceof SessionHandle) || !tabs.getTabs().contains(nv)) return;
+            SessionHandle h=(SessionHandle)nv.getUserData();
+            manager.openSessionAcrossProjects(h,null);
 
-        // 左侧 1/4 侧栏（会话/工作空间）+ 右侧 3/4（消息区 + 输入区）→ GridPane，百分比列固定 25%/75%
+        });
+        root.setTop(new TitleBar(stage, this::confirmClose));
+
+        // 侧栏可以拖动；初始宽度见下方 SidebarSplit。
         VBox sidebar = new VBox(8);
         sidebar.getStyleClass().add("panel");
         sidebar.setMinWidth(200);
         sessionList = new SessionListView(manager,
                 h -> {
-                    removeTabById(h.id);
-                    openedIds.remove(h.id); // 删除会话：打开标记一并清除
-                    viewCache.remove(h.id); // 删除会话：缓存视图一并释放
+                    removeTab(h);
+                    openedIds.remove(h); // 删除会话：打开标记一并清除
+                    viewCache.remove(h); // 删除会话：缓存视图一并释放
                     if (chatView != null && chatView.handle() == h) clearChatPane();
-                    sessionList.refresh();
+                    refreshSidebar();
                 });
         VBox.setVgrow(sessionList, Priority.ALWAYS);
         Button newSession = new Button("＋ 新建会话");
@@ -170,7 +182,18 @@ public class MainWindow {
         wsBox.getChildren().addAll(newProject, newWs, wsList);
         VBox.setVgrow(wsBox, Priority.ALWAYS);
         // VBox(8) 间距自然分隔上下两区，不加分隔线
-        sidebar.getChildren().setAll(sessionBox, wsBox);
+        VBox legacySidebar=new VBox(8,sessionBox,wsBox);
+        projectSidebar=new ProjectSidebarView(manager,legacySidebar,h->{
+            removeTab(h);openedIds.remove(h);viewCache.remove(h);
+            if(chatView!=null&&chatView.handle()==h)clearChatPane();refreshSidebar();
+        },wsList::editWorkspace,name->{
+            if(!name.equals(manager.workspaces().currentName()))manager.switchWorkspace(name);
+            onNewSession();
+        },()->onNewProject(wsList),()->onNewWorkspace(wsList),()->{sessionList.refresh();wsList.refresh();},()->{
+            if(automationCenter==null)automationCenter=new AutomationCenter(manager,stage);
+            automationCenter.show();
+        },this::openSettings);
+        VBox.setVgrow(projectSidebar,Priority.ALWAYS);sidebar.getChildren().setAll(projectSidebar);
         // 需求：会话/工作空间高度固定黄金比例 0.618:0.382（VBox 无权重 API，监听高度动态设 prefHeight 实现）
         sidebar.heightProperty().addListener((obs, ov, nv) -> {
             double h = Math.max(0, nv.doubleValue() - sidebar.getSpacing()); // 扣除两区间距
@@ -179,8 +202,7 @@ public class MainWindow {
             wsBox.setPrefHeight(h - sessionH);
         });
 
-        // 右侧：页签栏（会话 Tab）+ 消息区（ChatView）+ 输入区
-        VBox right = new VBox(8);
+        VBox right = new VBox();
         right.getStyleClass().add("panel-dark");
         chatScroll = new ScrollPane();
         chatScroll.getStyleClass().add("chat-scroll");
@@ -188,22 +210,23 @@ public class MainWindow {
         // 外层 workspaceSplit 的样式无法覆盖它，因此聊天滚动区本身也必须退出焦点遍历。
         chatScroll.setFocusTraversable(false);
         chatScroll.setFitToWidth(true);
-        chatScroll.setFitToHeight(true); // 消息区铺满正文窗口：内容少时 ChatView 拉伸到视口高（背景 #121314 铺满）
+        chatScroll.setFitToHeight(true);
         chatScroll.setPrefHeight(200); // 固定 pref：否则 prefHeight 随消息内容增长，挤压右侧 VBox 把页签行压扁（探针验证）
+        configureWelcome();
         chatScroll.setContent(placeholder); // 激活会话后换 ChatView
         setupAutoScroll();
         WheelScrollAccelerator.attach(chatScroll); // 滚轮加速：每格固定像素滚动（替换 JavaFX 8 默认慢速比例滚动）
         inputView = new InputView(manager, MinionApp.config());
-        // 运行状态指示器：挂到输入框左侧，不再覆盖流式思考/回复内容
+        // 运行状态指示器：独占输入框上方的一行，不覆盖流式输出。
         runningIndicator = new RunningIndicator();
-        inputView.setLeftStatusNode(runningIndicator);
+        inputView.setStatusNode(runningIndicator);
         jumpLatestButton = new Button("↓ 最新对话");
         jumpLatestButton.getStyleClass().add("btn-jump-latest");
         jumpLatestButton.setTooltip(new Tooltip("直达对话底部并继续跟随新消息"));
         jumpLatestButton.setVisible(false);
         jumpLatestButton.setManaged(false);
         jumpLatestButton.setOnAction(e -> jumpToLatest());
-        chatHost = new StackPane(chatScroll, jumpLatestButton);
+        StackPane chatHost = new StackPane(chatScroll, jumpLatestButton);
         // JavaFX 8 无 StackPane.setFillWidth/Height（12+ 才有）：用 max 钳制防默认 fill 拉伸铺满
         runningIndicator.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
         StackPane.setAlignment(jumpLatestButton, Pos.BOTTOM_RIGHT);
@@ -212,19 +235,48 @@ public class MainWindow {
         workspaceSplit = new SplitPane();
         workspaceSplit.getStyleClass().add("workspace-split");
         workspaceSplit.setFocusTraversable(false); // 禁止 JavaFX 8 默认焦点环给整个对话区描亮边
-        workspaceSplit.getItems().add(chatHost);
-        artifactPreview = new ArtifactPreviewPane(this::closeArtifactPreview);
+        conversationColumn = new VBox(chatHost, inputView);
+        conversationColumn.getStyleClass().add("conversation-column");
+        conversationColumn.setMinWidth(250);
+        VBox.setVgrow(chatHost, Priority.ALWAYS);
+        workspaceSplit.getItems().add(conversationColumn);
+        fileLinks=new com.minion.gui.artifact.LocalFileLinks(this::fileLinkBase,()->stage,
+                path->openArtifactPreview(path.toString()),this::fileLinkError);
+        artifactPreview = new ArtifactPreviewPane(()->{
+            SessionHandle h=manager.currentSession();if(h!=null)h.suppressArtifactAutoOpen=true;
+            closeArtifactPreview();
+        },fileLinks);
+        artifactPreview.setSelectionListener(path->{SessionHandle h=previewOwner;if(h!=null&&manager.currentSession()==h&&!h.deleted)h.selectedArtifactPath=path.toString();});
+        artifactPreview.setFocusAction(this::focusArtifactWorkspace);
+        stage.addEventHandler(javafx.stage.WindowEvent.WINDOW_HIDDEN,e->{artifactPreview.close();fileLinks.close();});
         VBox.setVgrow(workspaceSplit, Priority.ALWAYS);
         // 页签栏（右侧顶部，下带 1px 分隔线；页签为空时整行隐藏）
-        reportButton = new Button("报告");
-        reportButton.setTooltip(new Tooltip("在右侧工作区打开本会话最近生成的任务报告"));
-        reportButton.setVisible(false);
-        reportButton.setManaged(false);
+        reportButton = new Button("工作区");
+        reportButton.getStyleClass().add("workspace-top-action");
+        reportButton.setGraphic(outlineIcon("M3 4h14v12H3z M11 4v12"));
+        reportButton.setTooltip(new Tooltip("在右侧预览本会话的交付文件与引用文件"));
         reportButton.setOnAction(e -> {
             SessionHandle h = manager.currentSession();
-            if (h != null) openArtifactPreview(h.lastArtifactPath);
+            if (!workspaceSplit.getItems().contains(artifactPreview))
+                openArtifactPreview(h,h==null?null:h.selectedArtifactPath==null?com.minion.gui.artifact.ArtifactSelection.preferred(h.session):h.selectedArtifactPath);
+            else {if(h!=null)h.suppressArtifactAutoOpen=true;closeArtifactPreview();}
         });
-        tabsBar = new HBox(8, tabs, reportButton);
+        modelButton = new MenuButton();
+        modelButton.getStyleClass().add("btn-ghost");
+        modelButton.getStyleClass().add("model-picker");
+        modelButton.setMaxWidth(225);
+        modelButton.setMinWidth(0);
+        modelButton.setTextOverrun(javafx.scene.control.OverrunStyle.ELLIPSIS);
+        modelButton.setTooltip(new Tooltip("仅切换当前会话的模型；运行中从下次请求生效"));
+        refreshModelMenu();
+        inputView.setModelSelector(modelButton);
+        Button taskButton=new Button("任务");
+        taskButton.getStyleClass().add("workspace-top-action");
+        taskButton.setGraphic(outlineIcon("M6 3h9v14H5V6z M7 8h6 M7 12h6"));
+        taskButton.setTooltip(new Tooltip("主任务断点、子Agent、队列、上下文预算和旁支提问"));
+        taskButton.setOnAction(e -> { SessionHandle h=manager.currentSession(); if(h!=null) new TaskDashboard(stage,manager,h).show(); });
+        tabsBar = new HBox(5, tabs, taskButton, reportButton);
+        tabsBar.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(tabs, Priority.ALWAYS);
         tabsBar.getStyleClass().add("tabs-bar");
         tabs.getTabs().addListener((ListChangeListener<Tab>) c -> {
@@ -235,7 +287,7 @@ public class MainWindow {
         // 启动时无页签（懒加载）；注册监听后立即同步一次初始可见性
         tabsBar.setVisible(!tabs.getTabs().isEmpty());
         tabsBar.setManaged(!tabs.getTabs().isEmpty());
-        right.getChildren().setAll(tabsBar, workspaceSplit, inputView);
+        right.getChildren().setAll(tabsBar, workspaceSplit);
 
         // 右侧面板外包 StackPane：ConfirmSheet 遮罩与卡片挂其顶层（遮罩范围即右侧，不越分隔线）
         StackPane rightStack = new StackPane(right);
@@ -245,32 +297,28 @@ public class MainWindow {
             if (showing) runningIndicator.suspend(); else runningIndicator.resume();
         }));
 
-        // 需求：左右无分隔线、不可拖拽，侧栏严格占整体 1/4（GridPane 百分比列随窗口缩放）
-        GridPane center = new GridPane();
-        ColumnConstraints leftCol = new ColumnConstraints();
-        leftCol.setPercentWidth(25);
-        ColumnConstraints rightCol = new ColumnConstraints();
-        rightCol.setPercentWidth(75);
-        center.getColumnConstraints().addAll(leftCol, rightCol);
-        RowConstraints row = new RowConstraints();
-        row.setVgrow(Priority.ALWAYS); // 行撑满可用空间：chatScroll pref 固定后防底部留白
-        center.getRowConstraints().add(row);
-        center.add(sidebar, 0, 0);
-        center.add(rightStack, 1, 0); // 右侧为 StackPane 宿主（ConfirmSheet 遮罩挂顶层，不越分隔线）
+        // 外层侧栏分隔条与右侧报告分隔条互不影响。
+        SplitPane center = SidebarSplit.create(sidebar, rightStack);
+        sidebar.maxWidthProperty().bind(javafx.beans.binding.Bindings.createDoubleBinding(
+                () -> Math.max(180, Math.min(420, center.getWidth() - 606)), center.widthProperty()));
         root.setCenter(center);
 
         // 注册 manager 监听（Tab 维护；内容与 Task 5 一致，含 clearChatPane）
         manager.addListener(new SessionManager.Listener() {
+            @Override public void onSessionQueueChanged(SessionHandle h) {
+                inputView.onQueueChanged(h);
+            }
             @Override public void onSessionTitleChanged(SessionHandle h) {
                 Platform.runLater(() -> {
                     updateTab(h);
-                    sessionList.refresh(); // 重命名后侧栏列表同步新标题（refresh 仅重建 cell，不触发回调，无通知循环）
+                    refreshSidebar(); // 重命名后侧栏列表同步新标题（refresh 仅重建 cell，不触发回调，无通知循环）
                 });
             }
             @Override public void onSessionRunningChanged(SessionHandle h, boolean running) {
+                if(running)h.suppressArtifactAutoOpen=false;
                 Platform.runLater(() -> {
                     updateTab(h);
-                    sessionList.refresh();
+                    refreshSidebar();
                 });
                 if (inputView != null) inputView.onRunningChanged(h, running);
                 // 仅当前激活会话反映到指示器（chatView 字段 FX 线程读写，统一 runLater 访问）
@@ -280,6 +328,15 @@ public class MainWindow {
                         runningIndicator.setCompressing(false); // 运行结束复位压缩态
                     }
                 });
+            }
+            @Override public void onSessionViewed(SessionHandle h) {
+                Platform.runLater(() -> {
+                    updateTab(h);
+                    refreshSidebar();
+                });
+            }
+            @Override public void onExternalWaitChanged(SessionHandle h, String jobId) {
+                Platform.runLater(()->{if(chatView!=null&&chatView.handle()==h)runningIndicator.setExternalWait(jobId!=null);});
             }
             @Override public void onCompressingChanged(SessionHandle h, boolean compressing) {
                 if (inputView != null) inputView.setCompressing(h, compressing);
@@ -301,9 +358,16 @@ public class MainWindow {
             }
             @Override public void onArtifactCreated(SessionHandle h, String path) {
                 Platform.runLater(() -> {
-                    if (chatView != null && chatView.handle() == h) {
+                    if (chatView != null && com.minion.gui.artifact.ArtifactSelection.sameOwner(chatView.handle(),manager.currentSession(),h)&&!h.deleted) {
                         updateReportButton(h);
-                        openArtifactPreview(path);
+                        artifactPreview.setArtifacts(com.minion.gui.artifact.ArtifactSelection.ordered(h.session));
+                        com.minion.core.agent.GeneratedArtifact item=com.minion.gui.artifact.ArtifactSelection.find(h.session,path);
+                        String preferred=com.minion.gui.artifact.ArtifactSelection.preferred(h.session);
+                        if(!h.suppressArtifactAutoOpen
+                                &&com.minion.gui.artifact.ArtifactSelection.presentable(item)
+                                &&preferred!=null&&preferred.equals(path)
+                                &&artifactPreview.followsNewArtifacts())
+                            openArtifactPreview(h,path,true);
                     }
                 });
             }
@@ -320,15 +384,26 @@ public class MainWindow {
             }
             @Override public void onSessionActivated(SessionHandle h) {
                 Platform.runLater(() -> {
-                    if (!openedIds.contains(h.id)) {
-                        openedIds.add(h.id); // 打开过的会话才有页签（懒加载）；无标题会话以「(新会话)」占位建页签，标题生成后 updateTab 刷新
-                        addTab(h);
+                    if(h.deleted || manager.currentSession()!=h)return;
+                    if(projectSidebar!=null)projectSidebar.reveal(h);
+                    synchronizingTabs=true;
+                    try {
+                        if (!openedIds.contains(h)) {
+                            openedIds.add(h);
+                            addTab(h);
+                        } else {
+                            updateTab(h);
+                        }
+                        selectTab(h);
+                    } finally {
+                        synchronizingTabs=false;
                     }
-                    selectTab(h);
-                    closeArtifactPreview(); // 预览属于原会话；新会话可通过“报告”再次打开自己的报告
+                    refreshModelMenu();
+                    closeArtifactPreview(); // 预览属于原会话；新会话可通过“成果”再次打开
+                    artifactPreview.clear();
                     updateReportButton(h);
                     if (chatView != null) chatView.rememberVvalue(chatScroll.getVvalue()); // 切走前记滚动位置
-                    ChatView cached = viewCache.get(h.id);
+                    ChatView cached = viewCache.get(h);
                     if (cached != null) {
                         // 缓存命中：不重建消息区，只增量重放上次绑定后的新事件（毫秒级），恢复滚动位置
                         chatView = cached;
@@ -336,13 +411,21 @@ public class MainWindow {
                         chatScroll.setContent(chatView);
                         chatScroll.setVvalue(chatView.savedVvalue());
                         if (inputView != null) inputView.bindSession(h);
-                        sessionList.refresh(); // 激活即刷新该会话相对时间（不停留切换前旧值）
-                        runningIndicator.setRunning(h.running); // 切会话：按新会话运行态刷新指示器
+                        refreshSidebar(); // 激活即刷新该会话相对时间（不停留切换前旧值）
+                        runningIndicator.setRunning(h.running);
+                    runningIndicator.setExternalWait(h.externalJob!=null); // 切会话：按新会话运行态刷新指示器
                         runningIndicator.setCompressing(false); // 切会话复位压缩态（压缩事件按会话隔离）
                         return;
                     }
                     chatView = ChatView.forSession(h);
-                    viewCache.put(h.id, chatView);
+                    chatView.setFileLinkHandler(href->{if(manager.currentSession()==h)fileLinks.open(sessionFileLink(h,href));},
+                            href->fileLinks.menu(sessionFileLink(h,href),path->openArtifactPreview(h,path.toString())));
+                    chatView.setOpenArtifactArchive(() -> {
+                        if(manager.currentSession()!=h || h.deleted) return;
+                        openArtifactPreview(h, null);
+                        artifactPreview.showArtifactIndex();
+                    });
+                    viewCache.put(h, chatView);
                     chatView.setScrollBottomRequest(() -> {
                         policy.forceFollow();
                         Platform.runLater(() -> chatScroll.setVvalue(1.0)); // 布局完成后置底
@@ -365,8 +448,9 @@ public class MainWindow {
                     chatView.bind(true);
                     chatScroll.setContent(chatView);
                     if (inputView != null) inputView.bindSession(h);
-                    sessionList.refresh(); // 激活即刷新该会话相对时间（不停留切换前旧值）
-                    runningIndicator.setRunning(h.running); // 切会话：按新会话运行态刷新指示器
+                    refreshSidebar(); // 激活即刷新该会话相对时间（不停留切换前旧值）
+                    runningIndicator.setRunning(h.running);
+                    runningIndicator.setExternalWait(h.externalJob!=null); // 切会话：按新会话运行态刷新指示器
                     runningIndicator.setCompressing(false); // 切会话复位压缩态（压缩事件按会话隔离）
                 });
             }
@@ -375,14 +459,15 @@ public class MainWindow {
                     clearChatPane();
                     viewCache.clear(); // 工作空间切换：不跨空间残留缓存视图；openedIds 保留（页签与空间无关）
                     wsList.refresh();
-                    sessionList.refresh();
+                    refreshSidebar();
+                    refreshModelMenu();
                 });
             }
             @Override public void onSessionDeleted(SessionHandle h) {
                 Platform.runLater(() -> {
-                    removeTabById(h.id);
-                    openedIds.remove(h.id);
-                    viewCache.remove(h.id); // 死页签清理（幂等：与 SessionListView.onDeleted 回调共存）
+                    removeTab(h);
+                    openedIds.remove(h);
+                    viewCache.remove(h); // 死页签清理（幂等：与 SessionListView.onDeleted 回调共存）
                     if (chatView != null && chatView.handle() == h) clearChatPane();
                 });
             }
@@ -395,8 +480,7 @@ public class MainWindow {
         });
 
         Scene scene = new Scene(frame);
-        scene.getStylesheets().add(
-                getClass().getResource("/theme/theme.css").toExternalForm());
+        scene.getStylesheets().addAll(Theme.STYLESHEET, Theme.WORKBENCH);
         stage.setScene(scene);
 
         // 系统关闭事件（Alt+F4/任务栏关闭）与自绘 ✕ 共用 confirmClose
@@ -408,23 +492,72 @@ public class MainWindow {
         ResizeHelper.attach(stage, frame); // 无边框窗口边缘/四角缩放
 
         stage.show();
+        // FX8 lays out an undecorated window at its actual scene width after show().
+        // Set the initial pixel width once; resizing and user drags remain independent.
+        Platform.runLater(() -> {
+            double width = center.getWidth();
+            if (width > 0) center.setDividerPositions(SidebarSplit.defaultSidebarWidth(width) / width);
+        });
+        WindowsTaskbar.install(stage);
     }
 
-    /** 顶部模型标签文本：显示当前模型的模型名（modelName），缺失时回退标识名（displayName） */
-    private String modelLabelText() {
-        ModelConfig c = manager.models().current();
-        String name = (c != null && c.modelName != null && !c.modelName.trim().isEmpty())
-                ? c.modelName.trim() : manager.models().currentName();
-        return "模型: " + name;
+    private void configureWelcome() {
+        placeholder.getStyleClass().add("workbench-welcome");
+        StackPane mark = new StackPane(outlineIcon("M10 1l2.5 6.5L19 10l-6.5 2.5L10 19l-2.5-6.5L1 10l6.5-2.5z"));
+        mark.getStyleClass().add("welcome-mark");
+        mark.setMaxSize(Region.USE_PREF_SIZE, Region.USE_PREF_SIZE);
+        Label eyebrow = new Label("MINION 工作台");
+        eyebrow.getStyleClass().add("welcome-eyebrow");
+        Label title = new Label("今天想处理什么？");
+        title.getStyleClass().add("welcome-title");
+        Label subtitle = new Label("在下方输入任务或添加文件，也可以从左侧继续已有对话。");
+        subtitle.getStyleClass().add("welcome-description");
+        subtitle.setWrapText(true);
+        subtitle.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
+        Button start = new Button("＋ 新建对话");
+        start.getStyleClass().add("welcome-start");
+        start.setOnAction(e -> onNewSession());
+        VBox copy = new VBox(10, mark, eyebrow, title, subtitle, start);
+        copy.setAlignment(Pos.CENTER);
+        copy.setMaxWidth(410);
+        placeholder.getChildren().setAll(copy);
+        // 垂直居中：ScrollPane fitToHeight 对作为内容的 StackPane 不稳定生效（内容按 pref 高度
+        // 顶对齐，欢迎块偏上）；直接绑定视口高度，StackPane 拉满后在几何中心摆放内容
+        placeholder.minHeightProperty().bind(chatScroll.heightProperty());
     }
 
-    /** 右上角 ⚙：打开设置窗，关闭后刷新顶部模型名（TitleBar.modelLabel() 持有引用） */
+    private static javafx.scene.shape.SVGPath outlineIcon(String data) {
+        javafx.scene.shape.SVGPath icon = new javafx.scene.shape.SVGPath();
+        icon.setContent(data);
+        icon.getStyleClass().add("workbench-outline-icon");
+        return icon;
+    }
+
+    private void refreshModelMenu() {
+        if (modelButton == null) return;
+        SessionHandle current = manager.currentSession();
+        ModelConfig selected = manager.modelForSession(current);
+        String selectedName = selected == null ? "" : selected.displayName;
+        modelButton.setDisable(current == null);
+        modelButton.setText(selectedName);
+        modelButton.setAccessibleText("当前模型：" + selectedName);
+        modelButton.getItems().clear();
+        for (ModelConfig model : manager.models().list()) {
+            final String name = model.displayName;
+            MenuItem item = new MenuItem((name.equals(selectedName) ? "✓  " : "    ") + name);
+            item.setOnAction(e -> {
+                manager.selectModelForSession(manager.currentSession(), name);
+                refreshModelMenu();
+            });
+            modelButton.getItems().add(item);
+        }
+    }
+
+    /** 左侧栏底部设置入口；关闭后刷新输入区模型菜单。 */
     private void openSettings() {
         SettingsDialog.show(stage, manager.models(), manager, MinionApp.config(),
                 manager.mcpManager(), manager.plugins());
-        if (titleBar != null) {
-            titleBar.modelLabel().setText(modelLabelText());
-        }
+        refreshModelMenu();
     }
 
     /**
@@ -460,34 +593,93 @@ public class MainWindow {
     private void clearChatPane() {
         if (chatView != null) chatView.bind(false); // 分离监听器（EventList 缓冲保留，视图缓存保留）
         chatView = null;
-        chatScroll.setContent(placeholder); // 无活动会话：空白占位
+        chatScroll.setContent(placeholder);
         if (inputView != null) inputView.bindSession(null); // current=null → 下次发送自动建会话
         runningIndicator.setRunning(false); // 无活动会话：指示器隐藏并停动画
         runningIndicator.setCompressing(false);
         updateReportButton(null);
         closeArtifactPreview();
+        refreshModelMenu();
     }
 
     private void updateReportButton(SessionHandle h) {
         if (reportButton == null) return;
-        boolean available = h != null && h.lastArtifactPath != null && !h.lastArtifactPath.trim().isEmpty();
-        reportButton.setVisible(available);
-        reportButton.setManaged(available);
+        int count=h==null?0:com.minion.gui.artifact.ArtifactSelection.ordered(h.session).size();
+        reportButton.setText(count==0?"工作区":"工作区 · "+count);
     }
 
     private void openArtifactPreview(String path) {
-        if (path == null || path.trim().isEmpty()) return;
+        openArtifactPreview(manager.currentSession(),path);
+    }
+    private void openArtifactPreview(SessionHandle owner,String path) {
+        openArtifactPreview(owner,path,false);
+    }
+    private void openArtifactPreview(SessionHandle owner,String path,boolean updated) {
+        if(owner!=null&&(owner.deleted||chatView==null||!com.minion.gui.artifact.ArtifactSelection.sameOwner(chatView.handle(),manager.currentSession(),owner)))return;
+        if(owner==null&&path!=null)return;
+        previewOwner=owner;
+        artifactPreview.setLinkMenus(href->fileLinks.menu(href,p->openArtifactPreview(owner,p.toString())));
         if (!workspaceSplit.getItems().contains(artifactPreview)) {
             workspaceSplit.getItems().add(artifactPreview);
+            restoreWorkspaceDivider();
+            reportButton.getStyleClass().add("workspace-top-active");
         }
-        artifactPreview.open(path);
-        workspaceSplit.setDividerPositions(0.56);
+        SessionHandle h=owner==null?manager.currentSession():owner;
+        artifactPreview.setArtifacts(h==null?java.util.Collections.emptyList():com.minion.gui.artifact.ArtifactSelection.ordered(h.session));
+        if(path!=null&&!path.trim().isEmpty()){
+            if(updated)artifactPreview.openUpdated(path);else artifactPreview.open(path);
+        }
     }
 
     private void closeArtifactPreview() {
         if (workspaceSplit != null && artifactPreview != null) {
+            if(workspaceFocused)focusArtifactWorkspace(false);
+            rememberWorkspaceDivider();
+            artifactPreview.suspend();
+            previewOwner=null;
             workspaceSplit.getItems().remove(artifactPreview);
+            if(reportButton!=null)reportButton.getStyleClass().remove("workspace-top-active");
         }
+    }
+
+    private void rememberWorkspaceDivider(){
+        if(workspaceSplit.getItems().size()!=2)return;
+        double pos=workspaceSplit.getDividerPositions()[0];
+        if(pos>=0.22&&pos<=0.80)workspaceDivider=pos;
+    }
+
+    private void restoreWorkspaceDivider() {
+        workspaceSplit.setDividerPositions(Double.isNaN(workspaceDivider)
+                ? SidebarSplit.defaultConversationShare(workspaceSplit.getWidth()) : workspaceDivider);
+    }
+
+    private void focusArtifactWorkspace(boolean expand){
+        if(expand==workspaceFocused||!workspaceSplit.getItems().contains(artifactPreview))return;
+        if(expand){rememberWorkspaceDivider();workspaceSplit.getItems().remove(conversationColumn);}
+        else if(!workspaceSplit.getItems().contains(conversationColumn)){
+            workspaceSplit.getItems().add(0,conversationColumn);restoreWorkspaceDivider();
+        }
+        workspaceFocused=expand;artifactPreview.setFocusedMode(expand);
+    }
+
+    private java.nio.file.Path fileLinkBase() {
+        SessionHandle h=manager.currentSession();
+        return fileLinkBase(h);
+    }
+    private java.nio.file.Path fileLinkBase(SessionHandle h) {
+        if(h!=null&&h.session!=null) {
+            String path=h.session.cwd==null||h.session.cwd.trim().isEmpty()?h.session.workDir:h.session.cwd;
+            if(path!=null)return java.nio.file.Paths.get(path).toAbsolutePath().normalize();
+        }
+        return java.nio.file.Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
+    }
+    private String sessionFileLink(SessionHandle h,String href) {
+        try{return com.minion.gui.artifact.LocalFileLinks.resolve(href,fileLinkBase(h)).toUri().toASCIIString();}
+        catch(Exception invalidOrWeb){return href;}
+    }
+    private void fileLinkError(String message) {
+        Alert alert=new Alert(Alert.AlertType.INFORMATION,message,ButtonType.OK);
+        alert.setTitle("文件操作");alert.setHeaderText(null);alert.initOwner(stage);Theme.style(alert);alert.show();
     }
 
     /** 自动滚动节流：流式增长触发的 setVvalue(1.0) 合并为每 150ms 至多一次。
@@ -525,14 +717,9 @@ public class MainWindow {
      *  vmax 恒 1.0 不可用（vvalue 为归一化比例），内容增长改监听内容节点高度变化；
      *  会话切换时内容节点被替换，须随 contentProperty 重挂监听 */
     private void setupAutoScroll() {
-        // 关闭视口缓存：ScrollPaneSkin 构造硬编码 viewport setCache(true)（离屏缓存），
-        // 聊天内容大时每次滚动/更新都全量重绘+上传大纹理到 GPU——es2 管线长会话下会堵死渲染队列（假死根因）。
-        // skin 就绪后 lookup .viewport 取消缓存，改为视口内直接重绘（仅视口大小的绘制，无离屏拷贝上传）。
+        // 按实际管线分流：软件渲染缓存视口，硬件管线关闭离屏纹理缓存。
         chatScroll.skinProperty().addListener((obs, ov, nv) -> {
-            if (nv != null) {
-                Node viewport = chatScroll.lookup(".viewport");
-                if (viewport != null) viewport.setCache(false);
-            }
+            if (nv != null) Platform.runLater(this::applyViewportCache);
         });
         javafx.beans.value.ChangeListener<javafx.geometry.Bounds> contentGrew = (obs, o, n) -> {
             if (policy.shouldFollow()) requestAutoScroll();
@@ -548,7 +735,15 @@ public class MainWindow {
         });
     }
 
-    /** 动态半屏容差（归一化）：0.5×视口高/可滚动行程；未超一屏返回 1.0（恒贴底） */
+    /** 软件管线启用视口缓存，避免流式更新反复全量绘制。 */
+    private void applyViewportCache() {
+        Node viewport = chatScroll.lookup(".viewport");
+        if (viewport == null) return;
+        boolean software = RenderPipeline.isSoftware();
+        viewport.setCache(software);
+        if (software) viewport.setCacheHint(CacheHint.SPEED);
+    }
+
     private double eps() {
         double viewport = chatScroll.getViewportBounds().getHeight();
         double content = chatScroll.getContent() != null
@@ -557,10 +752,14 @@ public class MainWindow {
         return scrollable <= 0 ? 1.0 : 0.5 * viewport / scrollable;
     }
 
+    private void refreshSidebar(){
+        if(projectSidebar!=null){projectSidebar.refresh();if(projectSidebar.legacyMode())sessionList.refresh();}
+        else if(sessionList!=null)sessionList.refresh();
+    }
     private void onNewSession() {
         SessionHandle h = manager.createSession(null); // titlePending，无页签
         if (h == null) return; // 终审修复：当前空间删除中（后台 awaitTermination ≤5s）被点击，createSession 返回 null，忽略即可
-        sessionList.refresh(); // createSession 无 Listener 通知，UI 层自行刷新
+        refreshSidebar(); // createSession 无 Listener 通知，UI 层自行刷新
         manager.activateSession(h);
         // 会话激活后，onSessionActivated 回调在 show() 注册的监听器中绑定消息区与输入区
     }
@@ -612,7 +811,7 @@ public class MainWindow {
             a.setTitle("新建失败");
             a.showAndWait();
         }
-        wsList.refresh();
+        wsList.refresh();refreshSidebar();
     }
 
     private static final int TAB_TITLE_MAX = 16; // 页签标题截取长度（过长撑宽页签栏致标题栏错乱）
@@ -627,23 +826,23 @@ public class MainWindow {
 
     private void updateTab(SessionHandle h) {
         for (Tab t : tabs.getTabs()) {
-            if (h.id.equals(t.getUserData())) {
+            if (h == t.getUserData()) {
                 String title = h.title == null ? "(新会话)" : h.title;
                 t.setText(tabTitle(title));
-                t.setTooltip(new Tooltip(title)); // 完整标题提示
-                t.setGraphic(runningIndicator(h));
+                t.setTooltip(new Tooltip(h.workspaceName+" / "+title));
+                updateTabStatus(t, h.activityState());
                 return;
             }
         }
-        if (openedIds.contains(h.id)) addTab(h); // 补建页签（无标题会话标题生成后；已关闭页签的不复活——openedIds 已移除）
+        if (openedIds.contains(h)) addTab(h); // 补建页签（无标题会话标题生成后；已关闭页签的不复活——openedIds 已移除）
     }
 
     private void addTab(SessionHandle h) {
         String title = h.title == null ? "(新会话)" : h.title;
         Tab t = new Tab(tabTitle(title));
-        t.setUserData(h.id);
-        t.setTooltip(new Tooltip(title)); // 完整标题提示
-        t.setGraphic(runningIndicator(h));
+        t.setUserData(h);
+        t.setTooltip(new Tooltip(h.workspaceName+" / "+title));
+        updateTabStatus(t, h.activityState());
         t.setClosable(true);
         t.setOnCloseRequest(e -> {
             e.consume(); // 不触发 TabPane 默认移除，由本流程显式移除
@@ -662,8 +861,9 @@ public class MainWindow {
                 manager.stop(h); // 中断运行（会话不删除，保留在列表）
             }
             // 关闭流程：卸载视图缓存（再次从左侧打开时重新加载）+ 移除页签
-            openedIds.remove(h.id);
-            viewCache.remove(h.id);
+            openedIds.remove(h);
+            viewCache.remove(h);
+            StatusDot.stopPulseIn(t.getGraphic());
             tabs.getTabs().remove(t);
             if (chatView != null && chatView.handle() == h) {
                 manager.deactivateSession(h); // 幂等守卫不再拦截再次激活
@@ -674,10 +874,11 @@ public class MainWindow {
         tabs.getSelectionModel().select(t);
     }
 
-    /** 按会话 id 移除页签（删除联动；侧栏删除按钮回调与页签关闭共用） */
-    private void removeTabById(String id) {
+    /** 按句柄移除页签，删除一项目的会话不影响其他项目的同 ID 页签。 */
+    private void removeTab(SessionHandle h) {
         for (Tab t : tabs.getTabs()) {
-            if (id.equals(t.getUserData())) {
+            if (h == t.getUserData()) {
+                StatusDot.stopPulseIn(t.getGraphic());
                 tabs.getTabs().remove(t);
                 return;
             }
@@ -686,15 +887,17 @@ public class MainWindow {
 
     private void selectTab(SessionHandle h) {
         for (Tab t : tabs.getTabs()) {
-            if (h.id.equals(t.getUserData())) {
+            if (h == t.getUserData()) {
                 tabs.getSelectionModel().select(t);
                 return;
             }
         }
     }
 
-    private Node runningIndicator(SessionHandle h) {
-        // 呼吸动画由 StatusDot Timeline 驱动（CSS keyframe JavaFX 8 不支持）
-        return StatusDot.create(h.running);
+    static void updateTabStatus(Tab tab, SessionHandle.ActivityState state) {
+        // 与左侧列表共用状态：运行黄灯、回合结束绿灯，查看后隐藏。
+        // 替换旧节点前停止呼吸动画，避免 Timeline 持有已卸载的页签节点。
+        StatusDot.stopPulseIn(tab.getGraphic());
+        tab.setGraphic(StatusDot.create(state));
     }
 }

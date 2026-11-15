@@ -1,6 +1,7 @@
 package com.minion.gui.command;
 
 import com.minion.core.agent.AgentLoop;
+import com.minion.core.agent.ExecutionMode;
 import com.minion.core.agent.Session;
 import com.minion.core.agent.SystemPromptBuilder;
 import com.minion.core.config.Config;
@@ -77,6 +78,22 @@ public class CommandDispatcherTest {
         assertTrue(r.contains("/compact"));
         assertTrue(r.contains("/tokens"));
         assertTrue(r.contains("/capabilities"));
+        assertTrue(r.contains("/plan"));
+        assertTrue(r.contains("/goal"));
+        assertTrue(r.contains("/review"));
+    }
+
+    @Test public void planAndNormalCommandsArmOnlyTheNextTurn() {
+        assertTrue(dispatcher.dispatch(h,"/plan").contains("计划模式"));
+        llm.addTurn("可评审计划");
+        h.loop.runUserTurn("分析修改方案");
+        assertTrue(llm.lastRequestMessages.get(0).content.contains("当前回合模式：计划"));
+        assertEquals(ExecutionMode.PLAN,h.loop.currentExecutionMode());
+        dispatcher.dispatch(h,"/normal");
+        llm.addTurn("普通回答");
+        h.loop.runUserTurn("解释一下");
+        assertTrue(llm.lastRequestMessages.get(0).content.contains("当前回合模式：普通"));
+        assertEquals(ExecutionMode.NORMAL,h.loop.currentExecutionMode());
     }
 
     @Test public void skills_listsSkillNames() {

@@ -5,6 +5,9 @@ import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.Tooltip;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -13,7 +16,7 @@ import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 /**
- * 自绘标题栏（无边框窗口）：应用名 | 模型标签 | 留白（弹性）| 设置 | 最小化 | 最大化 | 关闭（图标为 SVG，IconFactory 集中管理）。
+ * 自绘标题栏（无边框窗口）：应用名 | 留白 | 最小化 | 最大化 | 关闭。
  * 拖动标题栏移动窗口；双击空白区切换最大化。关闭走 confirmClose（与系统关闭共用退出确认）。
  * 最大化不用 stage.setMaximized（无边框窗口在 Windows 上会覆盖任务栏），改手动定位到
  * Screen.getPrimary().getVisualBounds()（系统已排除任务栏区域），还原时恢复记录的原 bounds。
@@ -27,40 +30,43 @@ public class TitleBar extends HBox {
     private Rectangle2D restore;    // 最大化前的窗口 bounds（null=未最大化）
     private final Button max;
 
-    public TitleBar(Stage stage, Label modelLabel,
-                    Runnable openSettings, Runnable confirmClose) {
+    public TitleBar(Stage stage, Runnable confirmClose) {
         this.stage = stage;
-        this.modelLabel = modelLabel; // 设置窗关闭后 MainWindow 刷新顶部模型名用
         getStyleClass().add("topbar");
         setSpacing(10);
 
-        Label app = new Label("minion");
+        ImageView emblem = new ImageView(new Image(
+                TitleBar.class.getResourceAsStream("/app/minion-24.png")));
+        emblem.setFitWidth(20);
+        emblem.setFitHeight(20);
+        Label app = new Label("Minion", emblem);
         app.getStyleClass().add("topbar-title");
+        app.setGraphicTextGap(8);
+        Label mode = new Label("本地工作台");
+        mode.getStyleClass().add("topbar-mode");
 
         Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS); // 原页签区弹性占位：模型名与右侧按钮之间留白
-
-        Button gear = new Button();
-        gear.setGraphic(sized(IconFactory.settings()));
-        gear.getStyleClass().add("btn-ghost");
-        gear.setOnAction(e -> openSettings.run());
+        HBox.setHgrow(spacer, Priority.ALWAYS);
 
         Button min = new Button();
+        describe(min, "最小化");
         min.setGraphic(sized(IconFactory.remove()));
         min.getStyleClass().add("btn-ghost");
         min.setOnAction(e -> stage.setIconified(true));
 
         max = new Button();
+        describe(max, "最大化 / 还原");
         max.setGraphic(maximizeIcon(maxed));
         max.getStyleClass().add("btn-ghost");
         max.setOnAction(e -> toggleMaximize()); // 手动最大化（不挡任务栏）
 
         Button close = new Button();
+        describe(close, "关闭");
         close.setGraphic(sized(IconFactory.close()));
         close.getStyleClass().add("btn-close");
         close.setOnAction(e -> confirmClose.run());
 
-        getChildren().addAll(app, modelLabel, spacer, gear, min, max, close);
+        getChildren().addAll(app, mode, spacer, min, max, close);
 
         // 拖动移动窗口（记录按下偏移，拖拽按屏幕坐标差值移动）
         setOnMousePressed(e -> {
@@ -71,13 +77,20 @@ public class TitleBar extends HBox {
             stage.setX(e.getScreenX() - dragX);
             stage.setY(e.getScreenY() - dragY);
         });
-        // 双击标题栏空白处切换最大化：只认标题栏自身与其两个 Label（应用名/模型名）
+        // 双击标题栏空白处切换最大化；操作按钮不参与。
         setOnMouseClicked(e -> {
             if (e.getClickCount() == 2
-                    && (e.getTarget() == this || e.getTarget() == app || e.getTarget() == modelLabel)) {
+                    && (e.getTarget() == this || e.getTarget() == spacer || e.getTarget() == app
+                        || e.getTarget() == emblem || e.getTarget() == mode)) {
                 toggleMaximize();
             }
         });
+    }
+
+    private static void describe(Button button, String name) {
+        button.getStyleClass().add("window-action");
+        button.setAccessibleText(name);
+        button.setTooltip(new Tooltip(name));
     }
 
     /** 手动最大化目标 bounds：直接使用可视区（Windows 已排除任务栏；本方法独立成静态以便单测） */
@@ -115,8 +128,4 @@ public class TitleBar extends HBox {
         max.setGraphic(maximizeIcon(maxed));
     }
 
-    /** 模型标签（MainWindow 设置窗关闭后刷新顶部模型名用） */
-    public Label modelLabel() { return modelLabel; }
-
-    private final Label modelLabel;
 }

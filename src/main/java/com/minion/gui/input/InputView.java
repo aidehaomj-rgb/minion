@@ -2,14 +2,17 @@ package com.minion.gui.input;
 
 import com.minion.core.config.Config;
 import com.minion.core.llm.ImagePart;
+import com.minion.core.tools.ToolResult;
+import com.minion.core.tools.ViewImageTool;
 import com.minion.gui.icon.IconFactory;
 import com.minion.gui.session.SessionHandle;
 import com.minion.gui.session.SessionManager;
 import javafx.application.Platform;
-import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.Tooltip;
@@ -18,10 +21,10 @@ import javafx.scene.input.DragEvent;
 import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.input.TransferMode;
-import javafx.scene.layout.ColumnConstraints;
+import javafx.scene.image.Image;
 import javafx.scene.layout.FlowPane;
-import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -40,8 +43,13 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.WeakHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /** 底部输入区：4/9 宽居中大框（上=块行+输入框，下=底部操作行：上传按钮左 + 发送按钮右）+ /命令与 @文件补全弹层。
  *  @文件确认后内联进输入框（@路径 文本，所见即所得；扫描异步后台线程，不卡输入）；/命令、/技能、粘贴、图片为块。
@@ -49,19 +57,29 @@ import java.util.concurrent.Executors;
  *  背景按状态取色（btn-send-empty #f48771 / btn-send-full #ff947c）。上传按钮（回形针）支持图片和常用文档。
  *  运行中 + 有内容 → 放入待引导区，点击“立即引导”后才补充；等待回答 + 有内容 → 回答；运行中 + 空 → 终止。 */
 public class InputView extends VBox {
+    /** Early Minion centered the composer at 61.8%; keep it usable in a split and capped on ultrawide. */
+    private static final double COMPOSER_WIDTH_SHARE = .618;
+    private static final double COMPOSER_COMFORT_WIDTH = 500;
+    private static final double COMPOSER_MAX_WIDTH = 960;
 
     /** 按钮模式：图标/透明度/背景类/动作的判定依据（ANSWER_DIM=提问挂起且空输入，变淡箭头等待输入回答） */
     enum BtnMode { SEND, SEND_DIM, SUPPLEMENT, ANSWER, ANSWER_DIM, STOP }
 
     private final SessionManager manager;
     private final Config config;
-    private final TextArea input = new TextArea();
+    // Route the native context menu through the same routing as keyboard paste.
+    private final TextArea input = new TextArea() {
+        @Override public void paste() { pasteFromSystemClipboard(); }
+    };
     private final Button sendButton = new Button();
     private final Button uploadButton = new Button();
+    private final HBox bottomRow = new HBox(6);
     private final HBox pendingGuideRow = new HBox(8);
     private final Label pendingGuideLabel = new Label();
     private final Button guideNowButton = new Button("立即引导");
+    private final Button editGuideButton = new Button("编辑");
     private final Button cancelGuideButton = new Button("取消");
+    private final AtomicLong bindingGeneration = new AtomicLong();
     private final ContextRing contextRing = new ContextRing();
     private final SVGPath arrowIcon = IconFactory.send();
     private final SVGPath stopIcon = IconFactory.stop();
@@ -75,11 +93,14 @@ public class InputView extends VBox {
     private int pasteSeq;
     /** 占位符 → 最近被移除的粘贴块：文本撤销（Ctrl+Z）使占位符重现时恢复块，避免占位文本原样发出 */
     private final Map<String, InputChip> droppedPastes = new LinkedHashMap<String, InputChip>();
+    private final Map<SessionHandle,ComposerDraft> drafts=new WeakHashMap<SessionHandle,ComposerDraft>();
+    private boolean restoringComposer;
+    private long appliedBinding;
     /** reconcile 重入锁：清理占位残片改文本会再触发文本监听 */
     private boolean reconciling;
     private VBox frame; // 大框（弹层锚点）
     /** 输入区三列布局；第 0 列用于运行状态提示，第 1 列保持输入框 61.8% 宽。 */
-    private final GridPane root = new GridPane();
+    private final VBox composerShell = new VBox(6);
     private CompletionParser.Token lastToken; // 弹层可见时待替换的词
     /** 最近一次 @文件确认内联插入的完整文本（@路径）：该词保持原样时抑制弹层重开 */
     private String inlineJustInserted;
@@ -93,29 +114,38 @@ public class InputView extends VBox {
         t.setDaemon(true);
         return t;
     });
+    /** 附件解析线程（daemon 单线程）：图片解码/文档提取/PNG 编码移出 FX 线程，选多个大附件不再冻结界面 */
+    private final ExecutorService attachmentPool = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "minion-attachments");
+        t.setDaemon(true);
+        return t;
+    });
     private volatile SessionHandle current;
     // FX 线程缓存的状态（bindSession/onRunningChanged/onAskChanged 维护）
     private boolean running;
     private boolean askPending;
     private String askQuestion;
+    private String askQuestionId;
     /** 运行中用户先暂存、尚未点击“立即引导”的内容；不得提前进入模型或聊天事件流。 */
-    private String pendingGuideText;
-    private final List<ImagePart> pendingGuideImages = new ArrayList<ImagePart>();
-    private SessionHandle pendingGuideSession;
 
     public InputView(final SessionManager manager, final Config config) {
         this.manager = manager;
         this.config = config;
-        getStyleClass().add("panel-dark");
-        setPadding(new Insets(0, 16, 24, 16)); // 顶部 0：输入框顶部贴消息区（上移半行，总高减半行 96→84）；底部 24：距正文部分底部1行
+        getStyleClass().addAll("panel-dark", "workbench-composer");
+        setAlignment(Pos.TOP_CENTER);
 
         input.getStyleClass().add("input-textarea");
+        input.setTooltip(new Tooltip());
         input.setWrapText(true);
         input.setPrefRowCount(2); // 加一行
         input.setMaxHeight(6 * 24);
+        input.setFocusTraversable(true);
+        input.addEventHandler(MouseEvent.MOUSE_PRESSED, e -> {
+            if(!input.isFocused())input.requestFocus();
+        });
         // reconcile 先于补全解析：占位符增删同步粘贴块后再解析，弹层与发送按钮基于最终文本
-        input.textProperty().addListener((obs, ov, nv) -> { updateButton(); reconcilePasteChips(); onTextChanged(); });
-        input.caretPositionProperty().addListener((obs, ov, nv) -> onTextChanged());
+        input.textProperty().addListener((obs, ov, nv) -> { if(!restoringComposer){updateButton();reconcilePasteChips();onTextChanged();} });
+        input.caretPositionProperty().addListener((obs, ov, nv) -> {if(!restoringComposer)onTextChanged();});
         // 弹层显示改为输入内容驱动：输入框失焦（点击聊天区/侧栏）时关闭，点击输入框本身不关；
         // 焦点进入时刷新文案——设置窗勾选发送键后点回输入框，提示与 tooltip 立即正确
         // 聚焦边框：聚焦时大框边框 #f48771，失焦还原 #232733（frame 构造晚于本监听注册，判空）
@@ -146,7 +176,12 @@ public class InputView extends VBox {
         guideNowButton.setOnAction(e -> sendPendingGuide());
         cancelGuideButton.getStyleClass().add("btn-guide-cancel");
         cancelGuideButton.setOnAction(e -> clearPendingGuide());
-        pendingGuideRow.getChildren().addAll(pendingGuideLabel, guideNowButton, cancelGuideButton);
+        editGuideButton.getStyleClass().add("btn-guide-cancel");
+        editGuideButton.setOnAction(e -> {
+            if(current!=null)com.minion.gui.dialog.QueueEditor.show(getScene()==null?null:getScene().getWindow(),manager,current,current.pendingGuide());
+            refreshPendingGuideRow();
+        });
+        pendingGuideRow.getChildren().addAll(pendingGuideLabel, editGuideButton, guideNowButton, cancelGuideButton);
         pendingGuideRow.setVisible(false);
         pendingGuideRow.setManaged(false);
 
@@ -168,7 +203,7 @@ public class InputView extends VBox {
             // Enter 发送模式弹层打开时不发送，Enter/Ctrl+Enter 均走弹层确认
             if (isSendKey(e.getCode(), ctrl, shift, alt, meta, enterSends) && !(enterSends && popup.isShowing())) {
                 e.consume();
-                onAction();
+                onAction(false); // 发送键绝不能在清空输入后变成停止键。
                 return;
             }
             // Enter 发送模式：弹层关闭时 Ctrl+Enter 显式插入换行（JavaFX TextArea 对 Ctrl+Enter 无默认换行绑定，须 replaceSelection）
@@ -177,29 +212,11 @@ public class InputView extends VBox {
                 input.replaceSelection("\n");
                 return;
             }
-            // 长文本粘贴（Ctrl+V / Shift+Insert）→ 变块：块进块行，占位符插在光标处（有选区则替换选区），
-            // 发送时占位符原位展开为全文，保证落位 = 光标位置；短文本不拦截走默认粘贴
-            if ((e.isControlDown() && e.getCode() == KeyCode.V)
-                    || (e.isShiftDown() && e.getCode() == KeyCode.INSERT)) {
-                Clipboard clipboard = Clipboard.getSystemClipboard();
-                if (clipboard.hasFiles()) {
-                    addAttachments(clipboard.getFiles());
-                    e.consume();
-                    return;
-                }
-                if (clipboard.hasImage()) {
-                    addClipboardImage(clipboard);
-                    e.consume();
-                    return;
-                }
-                String clip = clipboard.getString();
-                if (InputChip.shouldChipPaste(clip)) {
-                    InputChip chip = InputChip.pasteChip(clip, "[粘贴块" + (++pasteSeq) + "]");
-                    addChip(chip);
-                    input.replaceSelection(chip.placeholder);
-                    e.consume();
-                    return;
-                }
+            if (!alt && !meta && ((ctrl && e.getCode() == KeyCode.V)
+                    || (!ctrl && shift && e.getCode() == KeyCode.INSERT))) {
+                e.consume();
+                input.paste();
+                return;
             }
             // 补全弹层优先：↑↓ 移动、Enter/Tab 确认、Esc 仅关弹层
             if (popup.isShowing()) {
@@ -229,6 +246,11 @@ public class InputView extends VBox {
         // 大框：上=块行+输入框，下=底部操作行（上传按钮左 + 弹性空白 + 发送按钮右）
         frame = new VBox(6);
         frame.getStyleClass().add("input-frame");
+        frame.addEventHandler(MouseEvent.MOUSE_PRESSED, e -> {
+            if(e.getTarget() instanceof Node && containsNode(input,(Node)e.getTarget()))return;
+            if(!input.isFocused())input.requestFocus();
+            if(input.getCaretPosition()<0)input.positionCaret(input.getLength());
+        });
         frame.setOnDragOver(e -> {
             if (e.getGestureSource() != frame && e.getDragboard().hasFiles()) e.acceptTransferModes(TransferMode.COPY);
             e.consume();
@@ -247,7 +269,8 @@ public class InputView extends VBox {
         VBox.setVgrow(composer, Priority.ALWAYS);
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox bottomRow = new HBox(8);
+        bottomRow.setAlignment(Pos.CENTER_LEFT);
+        bottomRow.getStyleClass().add("composer-actions");
         bottomRow.getChildren().addAll(uploadButton, contextRing, spacer, sendButton);
         frame.getChildren().addAll(pendingGuideRow, composer, bottomRow);
 
@@ -267,26 +290,30 @@ public class InputView extends VBox {
             }
         });
 
-        // 黄金比例 0.618 宽居中（占正文部分总宽度）：3 列百分比（19.1% / 61.8% / 19.1%）
-        ColumnConstraints left = new ColumnConstraints();
-        left.setPercentWidth(19.1);
-        ColumnConstraints center = new ColumnConstraints();
-        center.setPercentWidth(61.8);
-        ColumnConstraints right = new ColumnConstraints();
-        right.setPercentWidth(19.1);
-        root.getColumnConstraints().addAll(left, center, right);
-        root.add(frame, 1, 0);
-        getChildren().add(root);
+        // Center within the conversation column, not across the sidebar or report.
+        // Use all available space instead of pinching the editor in a narrow split.
+        composerShell.setMinWidth(0);
+        composerShell.maxWidthProperty().bind(javafx.beans.binding.Bindings.createDoubleBinding(() -> {
+            double available = Math.max(0, getWidth() - getInsets().getLeft() - getInsets().getRight());
+            return Math.min(available, Math.min(COMPOSER_MAX_WIDTH,
+                    Math.max(COMPOSER_COMFORT_WIDTH, available * COMPOSER_WIDTH_SHARE)));
+        }, widthProperty(), insetsProperty()));
+        composerShell.getChildren().add(frame);
+        getChildren().add(composerShell);
         updatePrompt(); // askPending 默认 false，显示正常发送键提示
     }
 
-    /** 把运行/重试/压缩提示挂到输入框左边，避免覆盖消息滚动区。 */
-    public void setLeftStatusNode(Node node) {
+    /** 状态独占一行，不挤占窄栏的输入框宽度。 */
+    public void setStatusNode(Node node) {
         if (node == null) return;
-        root.add(node, 0, 0);
-        GridPane.setHalignment(node, javafx.geometry.HPos.RIGHT);
-        GridPane.setValignment(node, javafx.geometry.VPos.CENTER);
-        GridPane.setMargin(node, new Insets(0, 12, 0, 0));
+        node.managedProperty().bind(node.visibleProperty());
+        composerShell.getChildren().add(0, node);
+    }
+
+    /** 输入框底部固定入口：放在发送箭头左侧，不受会话页签宽度影响。 */
+    public void setModelSelector(Node selector) {
+        if (selector == null) return;
+        bottomRow.getChildren().add(bottomRow.getChildren().size() - 1, selector);
     }
 
     /** 确认插入的最终文本：@ 文件补全补回 @ 前缀（FileSuggester 的 insertText 为纯路径）。
@@ -395,7 +422,7 @@ public class InputView extends VBox {
         return false;
     }
 
-    /** 渲染单个块：Label + 关闭按钮（SVG 叉，点击删除并还焦输入框）；COMMAND/SKILL/FILE 超 40 字符挂完整内容 tooltip */
+    /** 长粘贴块可以查看原文，其余块保持原有行为。 */
     private Node chipView(InputChip chip) {
         Label label = new Label(chip.display);
         label.getStyleClass().add("chip-label");
@@ -416,11 +443,29 @@ public class InputView extends VBox {
         });
         HBox box = new HBox(6);
         box.getStyleClass().addAll("input-chip", chipTypeClass(chip.type));
-        box.getChildren().addAll(label, close);
+        if(chip.type==InputChip.Type.PASTE){
+            Button preview=new Button(chip.display+" · 查看全文");
+            preview.getStyleClass().addAll("chip-label","chip-preview");
+            preview.setOnAction(e->showPastedText(chip));
+            box.getChildren().addAll(preview,close);
+        }else box.getChildren().addAll(label, close);
         if (chip.type != InputChip.Type.PASTE && chip.content.length() > 40) {
             Tooltip.install(box, new Tooltip(chip.content));
         }
         return box;
+    }
+
+    private void showPastedText(InputChip chip){
+        if(!chips.contains(chip))return;
+        Dialog<ButtonType> dialog=new Dialog<ButtonType>();
+        dialog.setTitle(chip.display);
+        if(getScene()!=null&&getScene().getWindow()!=null)dialog.initOwner(getScene().getWindow());
+        com.minion.gui.theme.Theme.style(dialog);
+        TextArea body=new TextArea(chip.content);
+        body.setEditable(false);body.setWrapText(false);body.setPrefSize(620,330);
+        dialog.getDialogPane().setContent(body);
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        dialog.showAndWait();
     }
 
     /** 块类型 → 语义样式类 */
@@ -442,8 +487,15 @@ public class InputView extends VBox {
         return hasContent ? BtnMode.SUPPLEMENT : BtnMode.STOP;
     }
 
+    /** 键盘发送没有“停止”语义，空输入/按键自动重复只消费事件。 */
+    static BtnMode keyboardMode(boolean running, boolean askPending, boolean hasContent) {
+        BtnMode mode = buttonMode(running, askPending, hasContent);
+        return mode == BtnMode.STOP ? BtnMode.SEND_DIM : mode;
+    }
+
     /** 文本/光标变化 → 重新解析补全模式并刷新弹层（弹层异常不得打断输入，兜底隐藏） */
     private void onTextChanged() {
+        if(restoringComposer||appliedBinding!=bindingGeneration.get())return;
         try {
             String text = input.getText();
             int caret = input.getCaretPosition();
@@ -549,8 +601,12 @@ public class InputView extends VBox {
      *  runLater 执行避免事件派发期间改输入区 */
     private void confirmApply(final CompletionParser.Token t, final String insert) {
         if (t == null || insert == null || insert.isEmpty()) return;
+        final SessionHandle owner=current;
+        final long binding=bindingGeneration.get();
+        final String original=input.getText();
         Platform.runLater(new Runnable() {
             @Override public void run() {
+                if(current!=owner||binding!=bindingGeneration.get()||!original.equals(input.getText()))return;
                 if (t.mode == CompletionParser.Mode.FILE) {
                     // 内联：token 区间整体替换为 @路径，光标置于插入文本末尾；不再建块
                     final String inline = insertionText(t.mode, insert);
@@ -582,20 +638,28 @@ public class InputView extends VBox {
         addChip(InputChip.textChip(InputChip.modeToType(t.mode), text));
     }
 
+    /** 仅 FX 线程调用（MainWindow 的 runLater 内）；不加 synchronized——对 Node 加锁反而扩大外部死锁面 */
     public void bindSession(SessionHandle h) {
-        final SessionHandle previous = this.current;
-        this.current = h;
-        Platform.runLater(() -> {
-            boolean changed = previous != h;
-            if (changed) {
-                clearComposer(); // 草稿属于旧会话，禁止串入新会话
-                clearPendingGuide();
+        final long binding = bindingGeneration.incrementAndGet();
+        Runnable apply=() -> {
+            if(bindingGeneration.get()!=binding)return;
+            final SessionHandle previous=current;
+            if(previous!=h||h==null){
+                saveDraft(previous);
+                current=h;
+                restoreDraft(h);
             }
+            appliedBinding=binding;
             running = h != null && h.running;
             askPending = h != null && h.askPending;
             askQuestion = h == null ? null : h.askQuestion;
+            askQuestionId = h == null || h.loop == null ? null : h.loop.pendingAskUserId();
             updateButton();
             updatePrompt();
+            refreshPendingGuideRow();
+            Platform.runLater(() -> {
+                if(!isDisabled()&&getScene()!=null)focusInput();
+            });
             // @文件列表预热：绑定会话即后台扫描所属工作空间（每项目独立缓存 5 分钟；
             // 缓存命中零开销——同项目内切会话/切回均不再扫描）
             final String dir = manager.currentWorkspaceDir();
@@ -604,7 +668,7 @@ public class InputView extends VBox {
             contextRing.setCompressing(false);
             contextRing.setVisible(false);
             contextRing.setManaged(false);
-            if (h != null && h.loop.contextManager() != null) {
+            if (h != null && h.loop != null && h.loop.contextManager() != null) {
                 final SessionHandle target = h;
                 h.pool.execute(new Runnable() {
                     @Override public void run() {
@@ -616,26 +680,67 @@ public class InputView extends VBox {
                     }
                 });
             }
-        });
+        };
+        // FX navigation switches text and owner together, not on a later pulse with a new owner and old text.
+        if(Platform.isFxApplicationThread())apply.run();else Platform.runLater(apply);
+    }
+
+    /** Focus the native text editor without changing the existing caret position. */
+    public void focusInput(){
+        if(!Platform.isFxApplicationThread()){Platform.runLater(this::focusInput);return;}
+        if(isDisabled()||!isVisible())return;
+        input.requestFocus();
+        if(input.getCaretPosition()<0)input.positionCaret(input.getLength());
+    }
+
+    private static boolean containsNode(Node parent,Node possibleChild){
+        for(Node node=possibleChild;node!=null;node=node.getParent())if(node==parent)return true;
+        return false;
+    }
+
+    private void saveDraft(SessionHandle owner){
+        if(owner==null)return;
+        if(owner.deleted||input.getText().isEmpty()&&chips.isEmpty()){drafts.remove(owner);return;}
+        drafts.put(owner,new ComposerDraft(input.getText(),input.getAnchor(),input.getCaretPosition(),input.getScrollTop(),input.getScrollLeft(),pasteSeq,inlineJustInserted,chips,droppedPastes));
+    }
+    private void restoreDraft(SessionHandle owner){
+        ComposerDraft draft=owner==null||owner.deleted?null:drafts.remove(owner);
+        restoringComposer=true;
+        try{
+            chips.clear();chipRow.getChildren().clear();droppedPastes.clear();pasteSeq=0;inlineJustInserted=null;
+            popup.hide();lastToken=null;pendingLoadDir=null;
+            // setText resets TextInputControl's undo history; clear()/deleteText() would allow cross-chat Ctrl+Z.
+            input.setText("");
+            if(draft!=null){
+                pasteSeq=draft.pasteSeq;inlineJustInserted=draft.inline;droppedPastes.putAll(draft.dropped);
+                chips.addAll(draft.chips);for(InputChip chip:chips)chipRow.getChildren().add(chipView(chip));
+                input.setText(draft.text);input.selectRange(draft.anchor,draft.caret);
+                input.setScrollTop(draft.scrollTop);input.setScrollLeft(draft.scrollLeft);
+            }
+            refreshChipRow();
+        }finally{restoringComposer=false;}
     }
 
     public void onRunningChanged(SessionHandle h, boolean running) {
-        if (current != h) return;
+        final long binding=bindingGeneration.get();
         Platform.runLater(() -> {
-            this.running = running;
+            if (current != h||binding!=bindingGeneration.get()) return;
+            this.running = h.running; // 延迟的旧回调不能覆盖当前真实运行状态。
             updateButton();
             updatePrompt();
             refreshPendingGuideRow();
-            contextRing.setRunning(running);
+            contextRing.setRunning(this.running);
         });
     }
 
     /** AskUserQuestion 挂起状态变化（MainWindow 转发自 SessionManager 监听） */
     public void onAskChanged(SessionHandle h, boolean asking, String question) {
-        if (current != h) return;
+        final long binding=bindingGeneration.get();
         Platform.runLater(() -> {
-            this.askPending = asking;
-            this.askQuestion = question;
+            if (current != h||binding!=bindingGeneration.get()) return;
+            this.askPending = h.askPending;
+            this.askQuestion = h.askQuestion;
+            this.askQuestionId = h.loop == null ? null : h.loop.pendingAskUserId();
             updateButton();
             updatePrompt();
         });
@@ -644,11 +749,13 @@ public class InputView extends VBox {
     /** 上下文统计更新（MainWindow 转发 SessionManager.Listener）：仅当前会话生效；
      *  无数据（max<=0）时隐藏不占位 */
     public void onContextStats(SessionHandle h, int used, int max) {
-        if (current != h) return;
+        final long binding=bindingGeneration.get();
         Platform.runLater(new Runnable() {
             @Override public void run() {
+                if(current!=h||binding!=bindingGeneration.get())return;
                 double threshold = 0.8; // 兜底；正常从 ContextManager 实时读取
-                if (h.loop.contextManager() != null) threshold = h.loop.contextManager().threshold();
+                if (h!=null&&h.loop!=null&&h.loop.contextManager() != null && max > 0)
+                    threshold = (double) h.loop.contextManager().autoCompressAtTokens() / max;
                 boolean active = used > 0 && max > 0;
                 contextRing.update(used, max, threshold, running);
                 contextRing.setVisible(active);
@@ -659,9 +766,9 @@ public class InputView extends VBox {
 
     /** 压缩状态变化（MainWindow 转发）：仅当前会话生效，环形旋转动画 */
     public void setCompressing(SessionHandle h, boolean compressing) {
-        if (current != h) return;
+        final long binding=bindingGeneration.get();
         Platform.runLater(new Runnable() {
-            @Override public void run() { contextRing.setCompressing(compressing); }
+            @Override public void run() {if(current==h&&binding==bindingGeneration.get())contextRing.setCompressing(compressing);}
         });
     }
 
@@ -672,6 +779,7 @@ public class InputView extends VBox {
 
     /** 发送后清空：块 + 文本区 + 弹层（块行 unmanaged 自动归位）；占位符状态一并重置 */
     private void clearComposer() {
+        drafts.remove(current);
         chips.clear();
         chipRow.getChildren().clear();
         droppedPastes.clear();
@@ -689,13 +797,16 @@ public class InputView extends VBox {
     }
 
     private void updatePrompt() {
+        boolean enterSends = config.enterSends();
+        input.getTooltip().setText(sendKeyLabel(enterSends) + " 发送 · "
+                + (enterSends ? "Shift+Enter" : "Enter") + " 换行\n@ 引用文件 · / 命令");
         if (askPending) {
             String q = askQuestion == null ? "" : askQuestion;
             input.setPromptText("回答: " + (q.length() > 40 ? q.substring(0, 40) + "…" : q));
         } else if (running) {
-            input.setPromptText("输入补充指令，发送后进入待引导区");
+            input.setPromptText("补充指令…");
         } else {
-            input.setPromptText("输入消息…  (@ 引用文件  / 命令  " + sendKeyLabel(config.enterSends()) + " 发送)");
+            input.setPromptText("输入消息…");
         }
     }
 
@@ -729,7 +840,7 @@ public class InputView extends VBox {
         switch (mode) {
             case SEND:       applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "发送 (" + sendKey + ")"); break;
             case SEND_DIM:   applyStyle(arrowIcon, buttonStyleClass(mode), 0.35, "输入消息后发送 (" + sendKey + ")"); break;
-            case SUPPLEMENT: applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "加入待引导区，确认后再发送 (" + sendKey + ")"); break;
+            case SUPPLEMENT: applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "排队为下一项任务；点击立即引导可补充当前任务 (" + sendKey + ")"); break;
             case ANSWER:     applyStyle(arrowIcon, buttonStyleClass(mode), 1.0, "回答模型的提问 (" + sendKey + ")"); break;
             case ANSWER_DIM: applyStyle(arrowIcon, buttonStyleClass(mode), 0.35, "输入回答后发送 (" + sendKey + ")"); break;
             case STOP:       applyStyle(stopIcon, buttonStyleClass(mode), 1.0, "终止当前运行 (Esc)"); break;
@@ -752,37 +863,34 @@ public class InputView extends VBox {
 
     private void stagePendingGuide(String text, List<ImagePart> images) {
         if (current == null || text == null || text.trim().isEmpty()) return;
-        pendingGuideSession = current;
-        pendingGuideText = mergePendingGuide(pendingGuideText, text);
-        if (images != null) pendingGuideImages.addAll(images);
+        manager.stageGuidance(current, text, images);
         refreshPendingGuideRow();
     }
 
     private void refreshPendingGuideRow() {
-        boolean show = pendingGuideText != null && !pendingGuideText.trim().isEmpty();
+        SessionHandle.QueuedMessage task=current==null?null:current.pendingGuide();
+        boolean show = task != null;
         pendingGuideRow.setVisible(show);
         pendingGuideRow.setManaged(show);
         if (!show) return;
-        String suffix = pendingGuideImages.isEmpty() ? "" : "（附件 " + pendingGuideImages.size() + " 个）";
-        pendingGuideLabel.setText("待引导：" + pendingGuidePreview(pendingGuideText) + suffix);
+        String suffix = task.images.isEmpty() ? "" : "（附件 " + task.images.size() + " 个）";
+        int count = current.queuedSnapshot().size();
+        pendingGuideLabel.setText("完成后自动执行（队列 " + count + " 项）：" + pendingGuidePreview(task.text) + suffix);
         guideNowButton.setText(running ? "立即引导" : "作为新消息发送");
     }
 
     private void sendPendingGuide() {
-        SessionHandle target = pendingGuideSession;
-        String text = pendingGuideText;
-        List<ImagePart> images = new ArrayList<ImagePart>(pendingGuideImages);
-        if (target == null || text == null || text.trim().isEmpty()) return;
-        clearPendingGuide();
-        if (target.running) manager.sendSupplement(target, text, images);
-        else manager.send(target, text, images);
+        manager.promoteGuidance(current);
+        refreshPendingGuideRow();
     }
 
     private void clearPendingGuide() {
-        pendingGuideText = null;
-        pendingGuideImages.clear();
-        pendingGuideSession = null;
+        manager.discardGuidance(current);
         refreshPendingGuideRow();
+    }
+
+    public void onQueueChanged(SessionHandle h) {
+        Platform.runLater(() -> { if(current==h) refreshPendingGuideRow(); });
     }
 
     private void applyStyle(SVGPath graphic, String styleClass, double opacity, String tip) {
@@ -795,7 +903,26 @@ public class InputView extends VBox {
 
     /** Ctrl+Enter / 按钮点击统一入口：按当前模式分发 */
     private void onAction() {
-        switch (buttonMode(running, askPending, hasContent())) {
+        onAction(true);
+    }
+
+    private void onAction(boolean allowStop) {
+        if(appliedBinding!=bindingGeneration.get()||current!=null&&current.deleted)return;
+        // 输入区缓存由异步回调更新；实际发消息时使用会话即时状态，防重复发送串轮。
+        boolean displayedAnswerMode = askPending;
+        if (current != null) {
+            running = current.running;
+            askPending = current.askPending;
+        }
+        // 界面仍显示“回答”但提问已经结束：这次点击不能偷偷变成发新任务/补充/停止。
+        // 刷新按钮语义并保留草稿，用户看到新状态后可自行决定是否再次发送。
+        if (displayedAnswerMode && !askPending) {
+            updateButton(); updatePrompt();
+            if (hasContent()) notifyChat("提问状态已改变，回答未发送。文字和附件已保留，请检查后重试。");
+            return;
+        }
+        switch (allowStop ? buttonMode(running, askPending, hasContent())
+                : keyboardMode(running, askPending, hasContent())) {
             case SEND:
                 onSend();
                 break;
@@ -804,18 +931,15 @@ public class InputView extends VBox {
                 if (text == null || text.trim().isEmpty()) return;
                 List<ImagePart> images = composedImages();
                 clearComposer();
-                stagePendingGuide(text, images); // 只暂存；“立即引导”才真正注入
+                stagePendingGuide(text, images); // 默认下个任务；“立即引导”才注入当前任务
                 break;
             }
             case ANSWER: {
-                if (!composedImages().isEmpty()) {
-                    notifyChat("回答模式暂不支持图片，请删除图片后再回答");
-                    return;
-                }
                 String text = composedText();
-                if (text == null || text.trim().isEmpty()) return;
-                clearComposer();
-                if (current != null) manager.sendAnswer(current, text);
+                List<ImagePart> images = composedImages();
+                if ((text == null || text.trim().isEmpty()) && images.isEmpty()) return;
+                if (manager.sendAnswer(current, text, images, askQuestionId)) clearComposer();
+                else notifyChat("回答未发送：提问已结束、状态已改变或附件无效。文字和附件已保留，请检查后重试。");
                 break;
             }
             case STOP:
@@ -841,6 +965,7 @@ public class InputView extends VBox {
         // 带图消息不走斜杠命令分发（图片无法本地处理，照发普通消息）
         if (images.isEmpty()) {
             manager.dispatchCommand(target, text); // 斜杠命令本地分发；普通消息走 send
+            refreshPendingGuideRow();
         } else {
             manager.send(target, text, images);
         }
@@ -871,13 +996,13 @@ public class InputView extends VBox {
         chooser.setTitle("添加附件");
         chooser.getExtensionFilters().add(new ExtensionFilter("支持的文件",
                 "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp", "*.webp",
-                "*.pdf", "*.docx", "*.xlsx", "*.pptx", "*.txt", "*.md", "*.csv", "*.tsv",
+                "*.pdf", "*.ofd", "*.gd", "*.docx", "*.xlsx", "*.pptx", "*.txt", "*.md", "*.csv", "*.tsv",
                 "*.json", "*.xml", "*.yaml", "*.yml", "*.log", "*.java", "*.py", "*.js", "*.ts",
                 "*.html", "*.css", "*.sql", "*.sh", "*.ps1", "*.bat", "*.properties", "*.ini", "*.conf"));
         chooser.getExtensionFilters().add(new ExtensionFilter("图片文件",
                 "*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp", "*.webp"));
         chooser.getExtensionFilters().add(new ExtensionFilter("文档和文本",
-                "*.pdf", "*.docx", "*.xlsx", "*.pptx", "*.txt", "*.md", "*.csv", "*.tsv",
+                "*.pdf", "*.ofd", "*.gd", "*.docx", "*.xlsx", "*.pptx", "*.txt", "*.md", "*.csv", "*.tsv",
                 "*.json", "*.xml", "*.yaml", "*.yml", "*.log", "*.java", "*.py", "*.js", "*.ts",
                 "*.html", "*.css", "*.sql", "*.sh", "*.ps1", "*.bat", "*.properties", "*.ini", "*.conf"));
         List<File> selected = chooser.showOpenMultipleDialog(getScene().getWindow());
@@ -885,55 +1010,162 @@ public class InputView extends VBox {
         addAttachments(selected);
     }
 
-    /** 文件选择、拖放和剪贴板文件共用同一校验/解析路径。 */
+    /** 文件选择、拖放和剪贴板文件共用同一校验/解析路径。
+     *  重解析（图片解码/文档提取）在附件后台线程执行；上限校验与 addChip 回到 FX 线程按最新块计数判定，
+     *  选多个大文件不再逐个冻结界面。 */
     private void addAttachments(List<File> selected) {
         if (selected == null || selected.isEmpty()) return;
-        int have = 0;
-        for (InputChip c : chips) if (c.type == InputChip.Type.IMAGE) have++;
-        int documents = 0;
-        for (InputChip c : chips) if (c.type == InputChip.Type.FILE && c.display.startsWith("文件：")) documents++;
-        for (File f : selected) {
-            try {
-                if (isImage(f.getName())) {
-                    if (have >= ImagePart.MAX_IMAGES) {
-                        notifyChat("最多上传 " + ImagePart.MAX_IMAGES + " 张图片，已跳过: " + f.getName());
-                        continue;
+        final List<File> files = new ArrayList<File>(selected);
+        attachmentPool.execute(() -> {
+            for (final File f : files) {
+                try {
+                    if (isImage(f.getName())) {
+                        if (f.length() > ImagePart.MAX_FILE_BYTES) {
+                            notifyChat("图片超过 " + (ImagePart.MAX_FILE_BYTES / 1024 / 1024) + "MB，已跳过: " + f.getName());
+                            continue;
+                        }
+                        final ToolResult overview = ViewImageTool.loadOverview(f.toPath());
+                        if (!overview.ok || overview.images == null || overview.images.isEmpty()) {
+                            notifyChat("图片无法进入视觉通道（" + f.getName() + "）: " + overview.output);
+                            continue;
+                        }
+                        final ImagePart image = overview.images.get(0);
+                        runOnFx(() -> {
+                            int have = 0;
+                            for (InputChip c : chips) if (c.type == InputChip.Type.IMAGE) have++;
+                            if (have >= ImagePart.MAX_IMAGES) {
+                                notifyChat("最多上传 " + ImagePart.MAX_IMAGES + " 张图片，已跳过: " + f.getName());
+                                return;
+                            }
+                            addChip(InputChip.imageChip(image.mime, image.base64, f.getName()));
+                        });
+                    } else {
+                        AttachmentReader.Result result;
+                        try { result=AttachmentReader.read(f.toPath()); }
+                        catch(com.minion.core.tools.data.GdSupport.ReaderRequired nativeGd){
+                            result=chooseGdExportOnFx(f);
+                            if(result==null)continue;
+                        }
+                        final AttachmentReader.Result parsed = result;
+                        runOnFx(() -> {
+                            int documents = 0;
+                            for (InputChip c : chips) if (c.type == InputChip.Type.FILE && c.display.startsWith("文件：")) documents++;
+                            if (documents >= AttachmentReader.MAX_ATTACHMENTS) {
+                                notifyChat("最多添加 " + AttachmentReader.MAX_ATTACHMENTS + " 个文档，已跳过: " + f.getName());
+                                return;
+                            }
+                            addChip(InputChip.attachmentChip(parsed.promptText, parsed.displayName));
+                        });
+                        if (result.truncated) notifyChat("附件内容较长，已截取前 " + AttachmentReader.MAX_EXTRACTED_CHARS + " 个字符: " + f.getName());
                     }
-                    if (f.length() > ImagePart.MAX_FILE_BYTES) {
-                        notifyChat("图片超过 " + (ImagePart.MAX_FILE_BYTES / 1024 / 1024) + "MB，已跳过: " + f.getName());
-                        continue;
-                    }
-                    byte[] bytes = Files.readAllBytes(f.toPath());
-                    addChip(InputChip.imageChip(mimeFor(f.getName()), Base64.getEncoder().encodeToString(bytes), f.getName()));
-                    have++;
-                } else {
-                    if (documents >= AttachmentReader.MAX_ATTACHMENTS) {
-                        notifyChat("最多添加 " + AttachmentReader.MAX_ATTACHMENTS + " 个文档，已跳过: " + f.getName());
-                        continue;
-                    }
-                    AttachmentReader.Result result = AttachmentReader.read(f.toPath());
-                    addChip(InputChip.attachmentChip(result.promptText, result.displayName));
-                    documents++;
-                    if (result.truncated) notifyChat("附件内容较长，已截取前 " + AttachmentReader.MAX_EXTRACTED_CHARS + " 个字符: " + f.getName());
+                } catch (Exception ex) {
+                    notifyChat("读取附件失败（" + f.getName() + "）: " + ex.getMessage());
                 }
-            } catch (Exception ex) {
-                notifyChat("读取附件失败（" + f.getName() + "）: " + ex.getMessage());
             }
-        }
+        });
     }
 
-    /** 剪贴板位图转 PNG 后直接进入视觉通道，不在磁盘创建临时文件。 */
-    private void addClipboardImage(Clipboard clipboard) {
+    /** 后台线程跳回 FX 线程执行（已在 FX 线程则直接执行） */
+    private static void runOnFx(Runnable r) {
+        if (Platform.isFxApplicationThread()) r.run();
+        else Platform.runLater(r);
+    }
+
+    /** GD 原件需要弹窗交互（书生阅读器导出）：后台线程经 FX 线程执行对话框并等待结果 */
+    private AttachmentReader.Result chooseGdExportOnFx(final File original) throws Exception {
+        if (Platform.isFxApplicationThread()) return chooseGdExport(original);
+        final AtomicReference<Object> outcome = new AtomicReference<Object>();
+        final CountDownLatch done = new CountDownLatch(1);
+        Platform.runLater(() -> {
+            try { outcome.set(chooseGdExport(original)); }
+            catch (Exception e) { outcome.set(e); }
+            finally { done.countDown(); }
+        });
+        done.await();
+        Object r = outcome.get();
+        if (r instanceof Exception) throw (Exception) r;
+        return (AttachmentReader.Result) r;
+    }
+
+    private AttachmentReader.Result chooseGdExport(File original)throws Exception {
+        javafx.scene.control.Alert prompt=new javafx.scene.control.Alert(javafx.scene.control.Alert.AlertType.INFORMATION);
+        if(getScene()!=null&&getScene().getWindow()!=null)prompt.initOwner(getScene().getWindow());
+        prompt.setTitle("读取书生 GD 公文");
+        prompt.setHeaderText(original.getName());
+        String extra=config!=null&&!config.get("gd.converter.path","").trim().isEmpty()
+                ?"\n也可以在对话里引用原文件，让 Document gd_read 调用已配置的本地转换程序。":"";
+        prompt.setContentText("原生 GD 由书生阅读器解码。请按阅读器支持的格式导出 TXT、PDF 或 OFD，再在这里选择副本。"+extra);
+        ButtonType open=new ButtonType("打开原件"), select=new ButtonType("选择导出副本");
+        prompt.getButtonTypes().setAll(open,select,ButtonType.CANCEL);
+        ButtonType choice=prompt.showAndWait().orElse(ButtonType.CANCEL);
+        if(choice==open){
+            if(!java.awt.Desktop.isDesktopSupported()||!java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.OPEN))
+                throw new java.io.IOException("系统未配置GD打开方式；请手动用书生阅读器打开");
+            java.awt.Desktop.getDesktop().open(original);
+            notifyChat("已用系统关联打开GD原件。导出后请重新选择该GD，点击“选择导出副本”。");
+            return null;
+        }
+        if(choice!=select)return null;
+        FileChooser picker=new FileChooser();picker.setTitle("选择书生阅读器导出的副本");
+        if(original.getAbsoluteFile().getParentFile().isDirectory())picker.setInitialDirectory(original.getAbsoluteFile().getParentFile());
+        picker.getExtensionFilters().add(new ExtensionFilter("GD导出副本","*.txt","*.pdf","*.ofd"));
+        File exported=picker.showOpenDialog(getScene()==null?null:getScene().getWindow());
+        return exported==null?null:AttachmentReader.readGdExport(original.toPath(),exported.toPath());
+    }
+
+    void pasteFromSystemClipboard(){
+        if(!input.isEditable()||input.isDisabled()||appliedBinding!=bindingGeneration.get())return;
+        try{
+            Clipboard clipboard=Clipboard.getSystemClipboard();
+            pasteFrom(clipboard.getString(),clipboard::getFiles,clipboard::getImage);
+        }catch(RuntimeException e){notifyChat("读取剪贴板失败: "+e.getMessage());}
+    }
+
+    /** Ask for alternate representations lazily: Office may advertise text and a rendered image together. */
+    void pasteFrom(String text,Supplier<List<File>> files,Supplier<Image> image){
+        if(text!=null&&!text.isEmpty()){
+            if(InputChip.shouldChipPaste(text)){
+                String placeholder;
+                do{placeholder="[粘贴块"+(++pasteSeq)+"]";}while(input.getText().contains(placeholder));
+                InputChip chip=InputChip.pasteChip(text,placeholder);
+                addChip(chip);
+                input.replaceSelection(placeholder);
+                // A TextFormatter or rejected edit must not leave an unattached block.
+                if(!input.getText().contains(placeholder))removeChipAt(chips.indexOf(chip));
+            }else input.replaceSelection(text);
+            return;
+        }
+        List<File> attachments=files.get();
+        if(attachments!=null&&!attachments.isEmpty()){addAttachments(attachments);return;}
+        Image bitmap=image.get();
+        if(bitmap!=null)addClipboardImage(bitmap);
+    }
+
+    /** 剪贴板位图转 PNG 后直接进入视觉通道，不在磁盘创建临时文件。
+     *  像素快照在 FX 线程完成，PNG 编码与上限判定放附件后台线程，大图不再冻结界面。 */
+    private void addClipboardImage(Image bitmap) {
         int have = 0;
         for (InputChip c : chips) if (c.type == InputChip.Type.IMAGE) have++;
         if (have >= ImagePart.MAX_IMAGES) { notifyChat("最多上传 " + ImagePart.MAX_IMAGES + " 张图片"); return; }
+        final java.awt.image.BufferedImage snapshot;
         try {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            ImageIO.write(SwingFXUtils.fromFXImage(clipboard.getImage(), null), "png", out);
-            byte[] bytes = out.toByteArray();
-            if (bytes.length > ImagePart.MAX_FILE_BYTES) { notifyChat("剪贴板图片超过大小限制"); return; }
-            addChip(InputChip.imageChip("image/png", Base64.getEncoder().encodeToString(bytes), "剪贴板图片.png"));
-        } catch (Exception e) { notifyChat("读取剪贴板图片失败: " + e.getMessage()); }
+            snapshot = SwingFXUtils.fromFXImage(bitmap, null);
+        } catch (Exception e) { notifyChat("读取剪贴板图片失败: " + e.getMessage()); return; }
+        attachmentPool.execute(() -> {
+            try {
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                ImageIO.write(snapshot, "png", out);
+                byte[] bytes = out.toByteArray();
+                if (bytes.length > ImagePart.MAX_FILE_BYTES) { notifyChat("剪贴板图片超过大小限制"); return; }
+                final String base64 = Base64.getEncoder().encodeToString(bytes);
+                runOnFx(() -> {
+                    int n = 0;
+                    for (InputChip c : chips) if (c.type == InputChip.Type.IMAGE) n++;
+                    if (n >= ImagePart.MAX_IMAGES) { notifyChat("最多上传 " + ImagePart.MAX_IMAGES + " 张图片"); return; }
+                    addChip(InputChip.imageChip("image/png", base64, "剪贴板图片.png"));
+                });
+            } catch (Exception e) { notifyChat("读取剪贴板图片失败: " + e.getMessage()); }
+        });
     }
 
     private static boolean isImage(String name) {

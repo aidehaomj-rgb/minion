@@ -15,6 +15,14 @@ public class ChatViewStreamBufferTest {
 
     private ChatView.StreamBuffer buf() { return new ChatView.StreamBuffer(); }
 
+    @Test public void veryLongThinkingAlsoKeepsItsMiddle() {
+        ChatView.StreamBuffer b=buf();
+        char[] chars=new char[60000];java.util.Arrays.fill(chars,'思');
+        String text=new String(chars)+"中间证据"+new String(chars);
+        b.onThinking(text);b.onThinking("结尾");
+        assertEquals(text+"结尾",b.thinking());
+    }
+
     @Test
     public void content_accumulatesDeltas() {
         ChatView.StreamBuffer b = buf();
@@ -56,6 +64,7 @@ public class ChatViewStreamBufferTest {
         assertTrue(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.USER_MESSAGE));
         assertTrue(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.USER_SUPPLEMENT));
         assertTrue(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.TOOL_CALL));
+        assertTrue(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.RESPONSE_END));
     }
 
     @Test
@@ -68,4 +77,37 @@ public class ChatViewStreamBufferTest {
         assertFalse(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.ERROR));
         assertFalse(ChatView.StreamBuffer.isRoundBoundary(EventList.Kind.WARNING));
     }
-}
+
+    @Test
+    public void longHistoryDisplayPreservesFullOriginal() {
+        StringBuilder source = new StringBuilder("BEGIN-");
+        for (int i = 0; i < 30000; i++) source.append('x');
+        source.append("-END");
+        String original = source.toString();
+        String shown = ChatView.clipForDisplay(original);
+        assertTrue(shown.startsWith("BEGIN-"));
+        assertTrue(shown.endsWith("-END"));
+        assertEquals(original, shown);
+        assertEquals(30010, original.length());
+    }
+
+    @Test
+    public void streamBufferPreservesVeryLongOutput() {
+        ChatView.StreamBuffer b = buf();
+        StringBuilder chunk = new StringBuilder("BEGIN-");
+        for (int i = 0; i < 30000; i++) chunk.append('x');
+        b.onContent(chunk.toString());
+        b.onContent("-END");
+        assertTrue(b.content().startsWith("BEGIN-"));
+        assertTrue(b.content().endsWith("-END"));
+        assertEquals(chunk.toString() + "-END", b.content());
+    }
+
+    /** 完成标记是门禁内部记号，展示层必须剥离（含流式跨分片的未完成前缀瞬态） */
+    @org.junit.Test public void taskMarkerIsStrippedFromDisplay() {
+        assertEquals("任务完成，已交付。", com.minion.gui.chat.ChatView.stripTaskMarker("任务完成，已交付。" + com.minion.core.agent.AgentLoop.TASK_COMPLETE_MARKER));
+        assertEquals("正文[1]正常", com.minion.gui.chat.ChatView.stripTaskMarker("正文[1]正常")); // 单个 [ 结尾不受影响
+        assertEquals("任务完成。", com.minion.gui.chat.ChatView.stripTaskMarker("任务完成。[["));       // 半标记前缀
+        assertEquals("任务完成。", com.minion.gui.chat.ChatView.stripTaskMarker("任务完成。[[MINION_")); // 更长前缀
+        assertNull(com.minion.gui.chat.ChatView.stripTaskMarker(null));
+    }}

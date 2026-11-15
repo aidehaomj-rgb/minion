@@ -1,6 +1,8 @@
 package com.minion.gui.dialog;
 
 import com.minion.core.config.Config;
+import com.minion.core.config.ContextSettings;
+import com.minion.core.context.ContextManager;
 import com.minion.core.config.ModelConfig;
 import com.minion.core.config.ModelManager;
 import com.minion.core.mcp.McpManager;
@@ -47,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /** 设置窗（右上角 ⚙）：左列导航 基础设置 / 模型 / MCP / 工具 / 关于，右侧内容切换；模型操作后触发 applyModelChanged 实时生效 */
 public class SettingsDialog {
@@ -57,7 +60,13 @@ public class SettingsDialog {
         Dialog<Void> d = new Dialog<Void>();
         d.initOwner(owner);
         d.setTitle("设置");
-        final BasicPane basic = new BasicPane(config, owner);
+        final Consumer<String> themeChanged = id -> {
+            Theme.apply(d.getDialogPane(), id);
+            if (owner != null && owner.getScene() != null) {
+                Theme.applyTree(owner.getScene().getRoot(), id);
+            }
+        };
+        final BasicPane basic = new BasicPane(config, owner, themeChanged);
         // 按钮栏「关闭」「应用」相邻，调换为关闭在左、应用在右：
         // ButtonData 按 type 分区排列（LEFT 区 < OTHER 区 < RIGHT 区）。APPLY 属 BUTTON_LEFT
         // （应用落最左区，与关闭不相邻/相邻但在前）；改为 OK_DONE 进 OTHER 区，其字符 O 在
@@ -71,12 +80,15 @@ public class SettingsDialog {
             e.consume();
         });
         Theme.style(d);
+        d.getDialogPane().getStyleClass().add("settings-workbench");
+        Theme.apply(d.getDialogPane(), config.uiTheme());
 
         // 左列导航：TabPane 侧放文字旋转 90°（历史"字倒了"根因）不可用；ListView 复用现有深色样式
         final ListView<String> nav = new ListView<String>();
-        nav.getItems().addAll("基础设置", "模型", "MCP", "工具", "关于");
-        nav.setPrefWidth(120);
-        nav.setMinWidth(120); // HBox 空间不足时按 HGrow 优先级分配，无 HGrow 的子项会被压到最小宽度；minWidth 保证导航列不被压塌
+        nav.getItems().addAll("基础设置", "文档/OCR", "模型", "MCP", "工具", "关于");
+        nav.setId("settings-nav");
+        nav.setPrefWidth(136);
+        nav.setMinWidth(136);
         final Node model = modelPane(models, manager);
         final Node mcpNode = mcpPane(mcp, owner);
         final Node toolsNode = ToolsPane.build(plugins, owner);
@@ -85,6 +97,7 @@ public class SettingsDialog {
         nav.getSelectionModel().selectedItemProperty().addListener((obs, ov, item) -> {
             if (item == null) return;
             content.getChildren().setAll("基础设置".equals(item) ? basic.root
+                    : "文档/OCR".equals(item) ? basic.documentRoot
                     : "模型".equals(item) ? model
                     : "MCP".equals(item) ? mcpNode
                     : "工具".equals(item) ? toolsNode : about);
@@ -94,7 +107,6 @@ public class SettingsDialog {
         HBox box = new HBox(0);
         box.getChildren().addAll(nav, content);
         HBox.setHgrow(content, Priority.ALWAYS);
-        // 需求：右侧内容区宽为原 1.5 倍（导航 120 不变：500 → 750，总宽 620 → 870）
         box.setPrefSize(870, 540);
         d.getDialogPane().setContent(box);
         d.showAndWait();
@@ -103,6 +115,15 @@ public class SettingsDialog {
     // ===== 模型页（迁移自 ModelDialog + propagate） =====
 
     private static VBox modelPane(final ModelManager models, final SessionManager manager) {
+        final ComboBox<String> defaultModel = new ComboBox<String>();
+        defaultModel.setId("new-session-default-model");
+        defaultModel.setMaxWidth(Double.MAX_VALUE);
+        refreshDefaultModel(defaultModel, models);
+        defaultModel.valueProperty().addListener((obs, old, selected) -> {
+            if (selected != null && !selected.equals(models.defaultName())) models.setDefault(selected);
+        });
+        Label defaultHelp = new Label("选择后立即保存；仅影响新会话，旧会话保留原模型。");
+        defaultHelp.setWrapText(true);
         final ListView<String> list = new ListView<String>();
         list.setCellFactory(lv -> new ListCell<String>() {
             @Override protected void updateItem(String item, boolean empty) {
@@ -114,7 +135,7 @@ public class SettingsDialog {
                 }
                 setText(item);
                 // 当前激活模型：名称右侧主色圆点（SVG，替代原 "  ●" 文本）
-                if (item.equals(models.currentName())) {
+                if (item.equals(models.defaultName())) {
                     SVGPath dot = IconFactory.dot();
                     IconFactory.size(dot, 8);
                     setGraphic(dot);
@@ -129,7 +150,7 @@ public class SettingsDialog {
         list.setPrefSize(360, 240);
 
         HBox actions = new HBox(8);
-        Button activate = new Button("激活");
+        Button activate = new Button("设为新会话默认");
         Button add = new Button("新建");
         Button edit = new Button("修改");
         Button del = new Button("删除");
@@ -142,14 +163,18 @@ public class SettingsDialog {
             int idx = list.getSelectionModel().getSelectedIndex();
             if (idx < 0) return;
             String name = list.getItems().get(idx);
-            if (!canActivate(name, models.currentName())) return; // 双保险：已激活不可重复激活
-            models.setCurrent(name);
-            manager.applyModelChanged(); // 需求 13：切换模型全量生效
+            if (!canActivate(name, models.defaultName())) return;
+            models.setDefault(name);
+            refreshDefaultModel(defaultModel, models);
             refresh(list, models);
         });
         // 选中项变化（鼠标点击/键盘导航/refresh 重选）联动按钮状态
         list.getSelectionModel().selectedItemProperty().addListener(
-                (obs, o, n) -> activate.setDisable(!canActivate(n, models.currentName())));
+                (obs, o, n) -> activate.setDisable(!canActivate(n, models.defaultName())));
+        defaultModel.valueProperty().addListener((obs, o, n) -> {
+            list.refresh();
+            activate.setDisable(!canActivate(list.getSelectionModel().getSelectedItem(), models.defaultName()));
+        });
         add.setOnAction(e -> {
             ModelConfig mc = form(null);
             if (mc != null) {
@@ -157,6 +182,7 @@ public class SettingsDialog {
                 if (models.currentName().equals(mc.displayName)) manager.applyModelChanged();
             }
             refresh(list, models);
+            refreshDefaultModel(defaultModel, models);
         });
         edit.setOnAction(e -> {
             int idx = list.getSelectionModel().getSelectedIndex();
@@ -167,6 +193,7 @@ public class SettingsDialog {
                 manager.applyModelChanged(); // 参数修改实时生效（含运行中会话，下一轮生效）
             }
             refresh(list, models);
+            refreshDefaultModel(defaultModel, models);
         });
         del.setOnAction(e -> {
             int idx = list.getSelectionModel().getSelectedIndex();
@@ -182,13 +209,21 @@ public class SettingsDialog {
                 manager.applyModelChanged(); // 删除后 current 可能回落，统一 propagate
             }
             refresh(list, models);
+            refreshDefaultModel(defaultModel, models);
         });
         actions.getChildren().addAll(activate, add, edit, del);
 
         VBox box = new VBox(10);
         box.setPadding(new Insets(10));
-        box.getChildren().addAll(list, actions);
+        box.getChildren().addAll(new Label("新会话默认模型"), defaultModel, defaultHelp, list, actions);
         return box;
+    }
+
+    private static void refreshDefaultModel(ComboBox<String> choice, ModelManager models) {
+        List<String> names = new ArrayList<String>();
+        for (ModelConfig model : models.list()) names.add(model.displayName);
+        choice.getItems().setAll(names);
+        choice.setValue(models.defaultName());
     }
 
     private static void refresh(ListView<String> list, ModelManager models) {
@@ -196,7 +231,7 @@ public class SettingsDialog {
         for (ModelConfig m : models.list()) {
             list.getItems().add(m.displayName);
         }
-        int idx = list.getItems().indexOf(models.currentName());
+        int idx = list.getItems().indexOf(models.defaultName());
         // 重选当前模型：「激活」按钮的置灰联动依赖此次选中变化触发监听，勿改为不重选/增量刷新
         list.getSelectionModel().select(idx < 0 ? 0 : idx);
     }
@@ -208,6 +243,13 @@ public class SettingsDialog {
 
     /** 新建（mc==null 带默认值）/ 修改（mc!=null 预填）表单；OK 返回配置，取消返回 null（迁移自 ModelDialog） */
     private static ModelConfig form(ModelConfig mc) {
+        Dialog<ModelConfig> d = modelForm(mc);
+        Optional<ModelConfig> r = d.showAndWait();
+        return r.isPresent() ? r.get() : null;
+    }
+
+    /** 单独构建可验证的设置表单，不启动请求、不显示窗口。 */
+    private static Dialog<ModelConfig> modelForm(ModelConfig mc) {
         Dialog<ModelConfig> d = new Dialog<ModelConfig>();
         d.setTitle(mc == null ? "新建模型" : "修改模型");
         d.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -222,10 +264,10 @@ public class SettingsDialog {
         displayName.setPromptText("页签显示标识");
         if (mc != null) displayName.setDisable(true); // ModelManager.update 不复制 displayName
         TextField url = new TextField(mc == null ? "https://api.deepseek.com/v1/chat/completions" : mc.url);
-        TextField apiKey = new TextField(mc == null ? "" : mc.apiKey);
+        TextField apiKey = new TextField(mc == null || mc.apiKey == null ? "" : mc.apiKey);
         apiKey.setPromptText("sk-...");
-        TextField modelName = new TextField(mc == null ? "" : mc.modelName);
-        TextField sessionId = new TextField(mc == null ? "" : mc.sessionId);
+        TextField modelName = new TextField(mc == null || mc.modelName == null ? "" : mc.modelName);
+        TextField sessionId = new TextField(mc == null || mc.sessionId == null ? "" : mc.sessionId);
         sessionId.setPromptText("SFM Agent 必填；其他模型留空");
         ComboBox<String> provider = new ComboBox<String>();
         provider.getItems().addAll("qwen", "deepseek", "sfm-agent");
@@ -247,8 +289,14 @@ public class SettingsDialog {
         effort.setValue(mc == null ? "max" : mc.reasoningEffort);
         TextField maxCtx = new TextField(mc == null ? "900000" : String.valueOf(mc.maxContextTokens));
         TextField maxOut = new TextField(mc == null ? "8192" : String.valueOf(mc.maxOutputTokens <= 0 ? 8192 : mc.maxOutputTokens));
-        TextField thr = new TextField(mc == null ? "0.8" : String.valueOf(mc.compressThreshold));
+        TextField thr = new TextField(mc == null ? "80" : String.valueOf(ContextManager.normalizedThreshold(mc.compressThreshold)*100));
+        thr.setPromptText("百分比，例如90；不是0.9");
+        TextField stable = new TextField(mc == null ? "0" : String.valueOf(mc.stableContextTokens));
+        stable.setPromptText("0=默认150000；可按内网实测调节");
         TextField keep = new TextField(mc == null ? "50" : String.valueOf(mc.keepRecentMessages));
+        maxCtx.setId("model-context-window"); thr.setId("model-compression-percent");
+        maxOut.setId("model-output-budget"); keep.setId("model-keep-recent");
+        stable.setId("model-stable-context");
 
         grid.addRow(0, new Label("标识名:"), displayName);
         grid.addRow(1, new Label("URL:"), url);
@@ -259,9 +307,24 @@ public class SettingsDialog {
         grid.addRow(6, new Label("思考:"), thinking);
         grid.addRow(7, new Label("effort:"), effort);
         grid.addRow(8, new Label("maxOutputTokens:"), maxOut);
-        grid.addRow(9, new Label("maxContextTokens:"), maxCtx);
-        grid.addRow(10, new Label("compressThreshold:"), thr);
-        grid.addRow(11, new Label("keepRecentMessages:"), keep);
+        grid.addRow(9, new Label("上下文窗口 (token):"), maxCtx);
+        grid.addRow(10, new Label("自动压缩阈值 (%):"), thr);
+        grid.addRow(11, new Label("稳定工作区 (token):"), stable);
+        grid.addRow(12, new Label("keepRecentMessages:"), keep);
+        Label preview = new Label(); preview.setWrapText(true); preview.setMaxWidth(430);
+        preview.setId("model-compression-preview");
+        Runnable refreshPreview = () -> {
+            try {
+                ContextSettings s=ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText(),stable.getText());
+                preview.setText("预计在 "+s.triggerTokens()+" token 自动压缩（稳定工作区"+(s.stable==0?"默认150K":s.stable+" token")+"，另受百分比与输出余量限制）。"
+                        +(s.triggerTokens()>200000?"\n高于200K：请先用内网长任务实测首字延迟、工具调用和停止准确性。":"")
+                        +"\n按模型保存；服务端超限/空响应恢复及本会话安全窗口仍可能提前压缩。1M是上限，不是每轮应填满的工作区。");
+            } catch(IllegalArgumentException e) { preview.setText(e.getMessage()); }
+        };
+        for(TextField field:new TextField[]{maxCtx,thr,maxOut,keep,stable})
+            field.textProperty().addListener((obs,old,value) -> refreshPreview.run());
+        refreshPreview.run();
+        grid.add(preview,0,13,2,1);
         provider.valueProperty().addListener((obs, old, value) -> {
             boolean sfm = "sfm-agent".equalsIgnoreCase(value);
             modelName.setDisable(sfm);
@@ -272,6 +335,10 @@ public class SettingsDialog {
         modelName.setDisable(sfm);
         thinking.setDisable(sfm);
         d.getDialogPane().setContent(grid);
+        d.getDialogPane().lookupButton(ButtonType.OK).addEventFilter(ActionEvent.ACTION, event -> {
+            try { ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText(),stable.getText()); }
+            catch(IllegalArgumentException ex) { event.consume(); preview.setText(ex.getMessage()); }
+        });
 
         d.setResultConverter(bt -> {
             if (bt != ButtonType.OK) return null;
@@ -284,14 +351,15 @@ public class SettingsDialog {
             out.sessionId = sessionId.getText().trim();
             out.thinking = thinking.isSelected();
             out.reasoningEffort = effort.getValue() == null ? "max" : effort.getValue();
-            out.maxOutputTokens = Math.max(256, Math.min(parseInt(maxOut.getText(), 8192), 65536));
-            out.maxContextTokens = parseInt(maxCtx.getText(), 900000);
-            out.compressThreshold = parseDouble(thr.getText(), 0.8);
-            out.keepRecentMessages = parseInt(keep.getText(), 50);
+            ContextSettings settings=ContextSettings.parse(maxCtx.getText(),thr.getText(),maxOut.getText(),keep.getText(),stable.getText());
+            out.maxOutputTokens = settings.output;
+            out.maxContextTokens = settings.window;
+            out.compressThreshold = settings.ratio;
+            out.stableContextTokens = settings.stable;
+            out.keepRecentMessages = settings.keep;
             return out;
         });
-        Optional<ModelConfig> r = d.showAndWait();
-        return r.isPresent() ? r.get() : null;
+        return d;
     }
 
     // ===== MCP 页（列表 + 状态点 + 启用开关 + 新建/编辑/删除/重连） =====
@@ -402,10 +470,22 @@ public class SettingsDialog {
             refresh(list, mcp);
         });
         reconnect.setOnAction(e -> {
-            McpServer s = list.getSelectionModel().getSelectedItem();
+            final McpServer s = list.getSelectionModel().getSelectedItem();
             if (s == null) return;
-            mcp.reconnect(s.name); // 同步等待 ≤10s；成功/失败后状态刷新
-            refresh(list, mcp);
+            // reconnect 同步等待 ≤10s：放后台线程执行，避免期间冻结整个设置窗界面
+            reconnect.setDisable(true);
+            Thread worker = new Thread(() -> {
+                try {
+                    mcp.reconnect(s.name);
+                } finally {
+                    javafx.application.Platform.runLater(() -> {
+                        refresh(list, mcp);
+                        reconnect.setDisable(false);
+                    });
+                }
+            }, "minion-mcp-reconnect");
+            worker.setDaemon(true);
+            worker.start();
         });
         actions.getChildren().addAll(add, edit, del, reconnect);
 
@@ -628,9 +708,17 @@ public class SettingsDialog {
     /** 基础设置页：控件 + 保存逻辑（按钮栏「应用」接线用） */
     private static class BasicPane {
         final Node root;
+        final Node documentRoot;
         private final Config config;
         private final TextField skillsDir;
+        private final TextField sharedKnowledgeDir;
         private final TextField pythonPath;
+        private final TextField ocrPath;
+        private final TextField ocrLanguage;
+        private final TextField officePath;
+        private final TextField gdConverterPath;
+        private final TextField gdConverterArgs;
+        private final ComboBox<String> gdConverterFormat;
         private final TextArea toolWhitelist;
         private final TextArea cmdWhitelist;
         private final CheckBox allowOutside;
@@ -638,8 +726,18 @@ public class SettingsDialog {
         private final CheckBox skipConfirm;
         private final CheckBox enterSends;
 
-        BasicPane(final Config config, final Window owner) {
+        BasicPane(final Config config, final Window owner, final Consumer<String> themeChanged) {
             this.config = config;
+            ComboBox<Theme.Variant> theme = new ComboBox<Theme.Variant>();
+            theme.setId("ui-theme-picker");
+            theme.getItems().setAll(Theme.Variant.values());
+            theme.setValue(Theme.variant(config.uiTheme()));
+            theme.setMaxWidth(Double.MAX_VALUE);
+            theme.valueProperty().addListener((obs, old, selected) -> {
+                if (selected == null) return;
+                config.set("ui.theme", selected.id);
+                themeChanged.accept(selected.id);
+            });
             HBox skillsBox = new HBox(6);
             skillsDir = new TextField(config.skillsDir());
             HBox.setHgrow(skillsDir, Priority.ALWAYS);
@@ -656,6 +754,20 @@ public class SettingsDialog {
                 if (dir != null) skillsDir.setText(dir.getAbsolutePath());
             });
             skillsBox.getChildren().addAll(skillsDir, browse);
+            sharedKnowledgeDir = new TextField(config.sharedKnowledgeDir());
+            HBox knowledgeBox = new HBox(6);
+            HBox.setHgrow(sharedKnowledgeDir, Priority.ALWAYS);
+            Button browseKnowledge = new Button("浏览…");
+            browseKnowledge.getStyleClass().add("btn-ghost");
+            browseKnowledge.setOnAction(e -> {
+                DirectoryChooser dc = new DirectoryChooser();
+                dc.setTitle("选择跨项目共享知识库目录");
+                java.io.File current = new java.io.File(sharedKnowledgeDir.getText().trim());
+                if (current.isDirectory()) dc.setInitialDirectory(current);
+                java.io.File dir = dc.showDialog(owner);
+                if (dir != null) sharedKnowledgeDir.setText(dir.getAbsolutePath());
+            });
+            knowledgeBox.getChildren().addAll(sharedKnowledgeDir, browseKnowledge);
             pythonPath = new TextField(config.pythonPath());
             HBox pythonBox = new HBox(6);
             HBox.setHgrow(pythonPath, Priority.ALWAYS);
@@ -671,6 +783,27 @@ public class SettingsDialog {
                 if (file != null) pythonPath.setText(file.getAbsolutePath());
             });
             pythonBox.getChildren().addAll(pythonPath, browsePython);
+            ocrPath = new TextField(config.ocrPath());
+            ocrLanguage = new TextField(config.ocrLanguage());
+            officePath = new TextField(config.officePath());
+            gdConverterPath = new TextField(config.get("gd.converter.path",""));
+            gdConverterPath.setPromptText("留空：不执行自动转换");
+            gdConverterArgs = new TextField(config.get("gd.converter.args","[\"{input}\",\"{output}\"]"));
+            gdConverterFormat = new ComboBox<>();
+            gdConverterFormat.getItems().addAll("pdf","ofd","txt");
+            gdConverterFormat.setValue(config.get("gd.converter.format","pdf"));
+            Label gdNote=new Label("原生书生 GD：用阅读器导出副本，或配置单位已有、可信的离线命令行转换 EXE（不是阅读器窗口）。参数按工具文档填写 JSON 数组，{input}、{output} 各占一项。");
+            gdNote.setWrapText(true);
+            VBox documentBox = new VBox(12,
+                    row("Tesseract程序路径:", ocrPath),
+                    row("OCR语言（chi_sim+eng）:", ocrLanguage),
+                    row("LibreOffice程序路径:", officePath),
+                    new Label("本地运行，不自动安装；OCR需语言包，预览需LibreOffice。"),
+                    row("GD 转换 EXE:", gdConverterPath),
+                    row("GD 转换参数:", gdConverterArgs),
+                    row("GD 输出格式:", gdConverterFormat),gdNote);
+            documentBox.setPadding(new Insets(12));
+            documentRoot=documentBox;
             toolWhitelist = new TextArea(config.get("confirm.whitelist.tools", ""));
             toolWhitelist.setPrefRowCount(2);
             toolWhitelist.setPrefColumnCount(20); // 默认 40 列偏好宽 ≈624px 把基础页撑到 794，触发 HBox 压缩导航列；20 列后偏好宽 ~500 与内容区匹配
@@ -690,7 +823,9 @@ public class SettingsDialog {
                     config.set("input.enterSends", String.valueOf(nv)));
             VBox rows = new VBox(10);
             rows.getChildren().addAll(
+                    row("界面主题:", theme),
                     row("技能目录 skills.dir:", skillsBox),
+                    row("共享知识库（只读）:", knowledgeBox),
                     row("Python/Anaconda:", pythonBox),
                     row("确认白名单\n(工具, 逗号分隔):", toolWhitelist),
                     row("确认白名单\n(命令, 逗号分隔):", cmdWhitelist),
@@ -710,7 +845,14 @@ public class SettingsDialog {
         /** 「应用」按钮：全部配置项写入，窗口不关闭；port/timeoutMs 非法弹错且该项不写 */
         void apply() {
             config.set("skills.dir", skillsDir.getText().trim());
+            config.set("knowledge.shared.dir", sharedKnowledgeDir.getText().trim());
             config.set("python.path", pythonPath.getText().trim());
+            config.set("ocr.path", ocrPath.getText().trim());
+            config.set("ocr.language", ocrLanguage.getText().trim());
+            config.set("office.path", officePath.getText().trim());
+            config.set("gd.converter.path", gdConverterPath.getText().trim());
+            config.set("gd.converter.args", gdConverterArgs.getText().trim());
+            config.set("gd.converter.format", gdConverterFormat.getValue()==null?"pdf":gdConverterFormat.getValue());
             // 白名单是逗号分隔的单行配置：多行粘贴的换行替换为空格，否则落盘后重载会静默丢内容
             config.set("confirm.whitelist.tools",
                     toolWhitelist.getText().trim().replace('\n', ' ').replace('\r', ' '));
@@ -737,15 +879,18 @@ public class SettingsDialog {
 
     // ===== 关于页 =====
 
+    static java.util.List<String> aboutText() {
+        String version = SettingsDialog.class.getPackage().getImplementationVersion();
+        return java.util.Arrays.asList("Minion · 离线桌面工作台",
+                version == null ? "运行环境：Java 8 + JavaFX" : "应用版本：" + version + " · Java 8 + JavaFX");
+    }
+
     private static VBox aboutPane() {
         VBox box = new VBox(10);
         box.setPadding(new Insets(16));
-        box.getChildren().addAll(
-                new Label("兼容win7的代码开发助手"),
-                new Separator(),
-                new Label("作者：尹承"),
-                new Label("联系方式：258915527@qq.com"),
-                new Label("开发语言：Java 8 + JavaFX"));
+        java.util.List<String> lines = aboutText();
+        box.getChildren().addAll(new Label(lines.get(0)), new Separator());
+        for (int i = 1; i < lines.size(); i++) box.getChildren().add(new Label(lines.get(i)));
         return box;
     }
 

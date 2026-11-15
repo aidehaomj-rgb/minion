@@ -14,13 +14,21 @@ import javafx.util.Duration;
 import java.util.Random;
 
 /**
- * 运行状态指示器：输入框左侧显示（齿轮旋转 + 文案轮换）。
+ * 运行状态指示器：输入框上方显示（齿轮旋转 + 文案轮换）。
  * 齿轮 2s/圈旋转；文案每 10s 随机轮换（正在加载中.../可随时补充信息...）；
  * 上下文压缩中固定显示「上下文压缩中...」（不参与轮换，压缩结束恢复）。
  * 动画规约同 StatusDot：隐藏前必须停全部 Timeline，防动画引用节点泄漏。
- * 挂载方式：由 InputView.setLeftStatusNode 放入输入区左侧列（本组件不管理布局）。
+ * 挂载方式：由 InputView.setStatusNode 放入独立状态行（本组件不管理布局）。
  */
 public class RunningIndicator extends HBox {
+    private boolean externalWait;
+    static final String EXTERNAL_WAIT_TEXT="等待外部作业完成...";
+    public void setExternalWait(boolean waiting) {
+        externalWait=waiting;
+        if(!running)return;
+        if(waiting){text.setText(EXTERNAL_WAIT_TEXT);if(rotateText!=null)rotateText.stop();}
+        else{text.setText(displayText(compressing,pickText(rnd)));startRotateText();}
+    }
 
     /** 轮换文案池（随机选择，允许连续相同） */
     static final String[] ROTATING_TEXTS = {"正在加载中...", "可随时补充信息..."};
@@ -56,7 +64,7 @@ public class RunningIndicator extends HBox {
                 stopAnimations();
             } else if (running) {
                 text.setText(retryBase != null ? retryText(retryProgress, retryBase)
-                        : displayText(compressing, pickText(rnd)));
+                        : externalWait?EXTERNAL_WAIT_TEXT:displayText(compressing, pickText(rnd)));
                 startAnimations();
             }
         });
@@ -115,6 +123,7 @@ public class RunningIndicator extends HBox {
     public void setRunning(boolean running) {
         this.running = running;
         if (!running) {
+            externalWait = false;
             compressing = false;
             retryBase = null;
             retryProgress = null;
@@ -140,6 +149,7 @@ public class RunningIndicator extends HBox {
         if (retryBase != null) return; // 重试态：忽略压缩切换（压缩发生在请求前，理论不可达）
         this.compressing = compressing;
         if (!running) return;
+        if (externalWait) { text.setText(EXTERNAL_WAIT_TEXT); return; }
         text.setText(displayText(compressing, pickText(rnd)));
         if (compressing) {
             if (rotateText != null) rotateText.stop();
@@ -168,16 +178,21 @@ public class RunningIndicator extends HBox {
 
     private void startAnimations() {
         if (spin == null || spin.getStatus() != Animation.Status.RUNNING) {
-            spin = new Timeline(
-                    new KeyFrame(Duration.ZERO, new KeyValue(gear.rotateProperty(), 0)),
-                    new KeyFrame(Duration.millis(SPIN_MS), new KeyValue(gear.rotateProperty(), 360)));
-            spin.setCycleCount(Animation.INDEFINITE);
-            spin.play();
+            // 软件渲染下不转齿轮：60fps 旋转 SVG 每帧都要重新光栅化（2x 渲染倍率实测掉到约 45fps），
+            // 运行态由文案 + 绿色状态点表达（见 Motion）
+            if (!Motion.reduced()) {
+                spin = new Timeline(
+                        new KeyFrame(Duration.ZERO, new KeyValue(gear.rotateProperty(), 0)),
+                        new KeyFrame(Duration.millis(SPIN_MS), new KeyValue(gear.rotateProperty(), 360)));
+                spin.setCycleCount(Animation.INDEFINITE);
+                spin.play();
+            }
         }
         startRotateText();
     }
 
     private void startRotateText() {
+        if(externalWait)return;
         if (compressing || rotateText != null && rotateText.getStatus() == Animation.Status.RUNNING) return;
         rotateText = new Timeline(new KeyFrame(Duration.millis(ROTATE_INTERVAL_MS),
                 e -> text.setText(displayText(compressing, pickText(rnd)))));

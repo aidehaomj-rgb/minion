@@ -12,14 +12,23 @@ import java.util.concurrent.Executors;
 
 /** 会话句柄：GUI 层持有的会话视图状态（后台运行实体为 AgentLoop） */
 public class SessionHandle {
+    public volatile String externalJob;
     /** 最近生成的任务报告，供主窗口关闭后再次打开。 */
     public volatile String lastArtifactPath;
+    /** User's preview selection is distinct from the latest produced artifact. UI-only. */
+    public volatile String selectedArtifactPath;
+    public volatile boolean suppressArtifactAutoOpen;
 
     public final String id;
     /** 所属工作空间名：工作空间重命名时同步更新（非 final，否则 activate/send/persist 按旧名查 ctx 全部失效） */
     public String workspaceName;
-    public final Session session;
-    public final AgentLoop loop;
+    public volatile Session session;
+    /** 未打开的历史会话不创建运行时。 */
+    public volatile AgentLoop loop;
+    public boolean isLoaded() { return loop != null; }
+    public String listPreview, listSummary;
+    public long listMessageTs;
+    public String preview() { return isLoaded() ? session.preview() : listPreview == null ? "(空会话)" : listPreview; }
     public final SessionController controller;
     /** 会话独占工作线程（真并行：每会话一个单线程池，互不阻塞） */
     public final ExecutorService pool;
@@ -36,7 +45,7 @@ public class SessionHandle {
 
     /** 关闭全部客户端（当前 + 待回收）：会话删除/工作空间删除/应用退出时调用 */
     public synchronized void closeAll() {
-        llm.close();
+        if (llm != null) llm.close();
         for (LlmClient c : retiredLlms) c.close();
         retiredLlms.clear();
     }
@@ -53,15 +62,26 @@ public class SessionHandle {
     public volatile boolean titlePending;
     /** 是否正在后台运行（UI 徽标/终止按钮依据） */
     public volatile boolean running;
+    /** Settings changed during a task; refresh the parent client only after it becomes idle. */
+    public volatile boolean pendingModelRefresh;
+    private long dispatchGeneration;
+    public synchronized long beginDispatch() { running=true; return ++dispatchGeneration; }
+    public synchronized boolean finishDispatch(long generation) {
+        if(generation!=dispatchGeneration) return false;
+        running=false; return true;
+    }
     /** 最近一次运行已结束、用户尚未点击查看；仅为本次进程 UI 状态，不落盘。 */
     public volatile boolean completionUnread;
+    /** 内部保留暂停语义；V41 后回合结束提示统一为绿色。 */
+    public volatile boolean pauseUnread;
 
-    public enum ActivityState { NONE, RUNNING, COMPLETED_UNREAD }
+    public enum ActivityState { NONE, RUNNING, COMPLETED_UNREAD, PAUSED_UNREAD }
 
     /** 左侧状态点三态（纯逻辑，便于无 JavaFX 测试）。 */
     public ActivityState activityState() {
         if (running) return ActivityState.RUNNING;
-        return completionUnread ? ActivityState.COMPLETED_UNREAD : ActivityState.NONE;
+        if(completionUnread)return ActivityState.COMPLETED_UNREAD;
+        return pauseUnread?ActivityState.PAUSED_UNREAD:ActivityState.NONE;
     }
     /** 会话已删除（send 中据此中止，防已删除会话的文件/事件复活） */
     public volatile boolean deleted;
@@ -71,39 +91,97 @@ public class SessionHandle {
     public volatile String askQuestion;
 
     /** 显式后台任务队列（/queue add）；与 Steering 的“立即补充当前轮”语义分开。 */
-    private final List<QueuedMessage> queuedMessages = new ArrayList<QueuedMessage>();
+    private List<Session.QueuedTask> queue() {
+        // Gson旧数据/重复ID迁移；每个条目的稳定身份独立于序号、时间和文字。
+        synchronized(session.queuedTasks){java.util.Set<String> ids=new java.util.HashSet<String>();
+        for(Session.QueuedTask t:session.queuedTasks) {
+            if(t.id==null||t.id.trim().isEmpty()||!ids.add(t.id)){t.id=java.util.UUID.randomUUID().toString();ids.add(t.id);}
+            if(t.revision<1)t.revision=1;
+        }}
+        return session.queuedTasks;
+    }
 
     public synchronized int enqueue(String text) {
-        if (text == null || text.trim().isEmpty()) return queuedMessages.size();
-        queuedMessages.add(new QueuedMessage(text.trim(), System.currentTimeMillis()));
-        return queuedMessages.size();
+        return enqueue(text, null, false);
+    }
+
+    public synchronized int enqueue(String text, List<com.minion.core.llm.ImagePart> images, boolean guide) {
+        synchronized (queue()) {
+            if (text == null || text.trim().isEmpty()) return queue().size();
+            Session.QueuedTask task = new Session.QueuedTask();
+            task.text=text.trim(); task.createdAt=System.currentTimeMillis(); task.guidance=guide;
+            if(images!=null) task.images.addAll(images);
+            queue().add(task); return queue().size();
+        }
     }
 
     public synchronized QueuedMessage pollQueued() {
-        return queuedMessages.isEmpty() ? null : queuedMessages.remove(0);
+        synchronized (queue()) { return queue().isEmpty() ? null : new QueuedMessage(queue().remove(0)); }
     }
 
     public synchronized List<QueuedMessage> queuedSnapshot() {
-        return Collections.unmodifiableList(new ArrayList<QueuedMessage>(queuedMessages));
+        synchronized (queue()) {
+            List<QueuedMessage> copy = new ArrayList<QueuedMessage>();
+            for(Session.QueuedTask task:queue()) copy.add(new QueuedMessage(task));
+            return Collections.unmodifiableList(copy);
+        }
+    }
+
+    public synchronized QueuedMessage pendingGuide() {
+        for(QueuedMessage task:queuedSnapshot()) if(task.guidance) return task;
+        return null;
+    }
+
+    public synchronized QueuedMessage takeGuide() {
+        synchronized (queue()) {
+            for(int i=0;i<queue().size();i++) if(queue().get(i).guidance) return new QueuedMessage(queue().remove(i));
+            return null;
+        }
     }
 
     public synchronized boolean removeQueued(int oneBasedIndex) {
         int i = oneBasedIndex - 1;
-        if (i < 0 || i >= queuedMessages.size()) return false;
-        queuedMessages.remove(i);
-        return true;
+        synchronized (queue()) {
+            if (i < 0 || i >= queue().size()) return false;
+            queue().remove(i); return true;
+        }
     }
 
     public synchronized int clearQueued() {
-        int count = queuedMessages.size();
-        queuedMessages.clear();
-        return count;
+        synchronized (queue()) { int count=queue().size(); queue().clear(); return count; }
+    }
+    public synchronized boolean editQueued(String id,long expectedRevision,String text) {
+        if(text==null||text.trim().isEmpty())throw new IllegalArgumentException("引导信息不能为空");
+        if(text.length()>120000)throw new IllegalArgumentException("引导信息超过120000字符，请分开处理");
+        synchronized(queue()) {
+            for(Session.QueuedTask t:queue())if(t.id.equals(id)) {
+                if(t.revision!=expectedRevision)return false;
+                t.text=text.trim();t.revision++;return true;
+            }
+        }return false;
+    }
+    public synchronized void rollbackQueuedEdit(String id,long savedRevision,String oldText){
+        synchronized(queue()){for(Session.QueuedTask t:queue())if(t.id.equals(id)&&t.revision==savedRevision){t.text=oldText;t.revision=savedRevision-1;return;}}
+        throw new IllegalStateException("队列条目在保存期间改变，无法撤回");
+    }
+    public synchronized boolean removeQueued(String id,long expectedRevision) {
+        synchronized(queue()){
+            for(int i=0;i<queue().size();i++){Session.QueuedTask t=queue().get(i);if(t.id.equals(id)&&t.revision==expectedRevision){queue().remove(i);return true;}}
+        }return false;
     }
 
     public static final class QueuedMessage {
+        public final String id;
+        public final long revision;
         public final String text;
         public final long createdAt;
-        QueuedMessage(String text, long createdAt) { this.text = text; this.createdAt = createdAt; }
+        public final boolean guidance;
+        public final List<com.minion.core.llm.ImagePart> images;
+        QueuedMessage(Session.QueuedTask t) {
+            id=t.id;revision=t.revision;
+            text=t.text; createdAt=t.createdAt; guidance=t.guidance;
+            images=t.images==null ? Collections.emptyList() : new ArrayList<com.minion.core.llm.ImagePart>(t.images);
+        }
     }
 
     public SessionHandle(String id, String workspaceName, Session session,
@@ -112,6 +190,7 @@ public class SessionHandle {
         this.id = id;
         this.workspaceName = workspaceName;
         this.session = session;
+        if(session.queuedTasks==null) session.queuedTasks=new ArrayList<Session.QueuedTask>();
         this.loop = loop;
         this.controller = controller;
         this.title = title;

@@ -1,0 +1,526 @@
+/* Native JavaFX 8 workbench. Quiet neutral surfaces and one restrained action color
+   keep the hierarchy close to Codex: separators first, color only for state. */
+.minion-workbench {
+    -wb-rail: #141518;
+    -wb-canvas: #1e1f22;
+    -wb-reader: #212225;
+    -wb-surface: #282a2e;
+    -wb-hover: #313438;
+    -wb-border: #34373b;
+    -wb-select: #2c2f33;
+    -wb-ink: #f2f2f0;
+    -wb-secondary: #c8c9c7;
+    -wb-muted: #95989c;
+    -wb-accent: #8ea9c4;
+    -wb-accent-strong: #c5d9eb;
+    -wb-on-accent: #111820;
+    -wb-link: #9eb9d5;
+    -wb-focus: #7798b7;
+    -wb-highlight: #385064;
+    -wb-pending: #506a80;
+    -wb-tool: #b9a6c8;
+    -wb-scroll: #414448;
+    -wb-scroll-hover: #565a60;
+    /* 首屏 CTA 与强操作：比 accent 更饱和一档，保持唯一强调源 */
+    -wb-cta: #4f86c2;
+    -wb-cta-hover: #679ad4;
+    -wb-on-cta: #f6fafd;
+    -fx-background-color: -wb-canvas;
+    -fx-font-size: 16px;
+    /* 全局关闭 Modena 焦点环：自绘控件用自己的 focus 边框表达焦点 */
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+}
+
+/* Theme variants. Graphite is the compatibility default; all four retain the same
+   information hierarchy and only change surfaces, text and action emphasis. */
+.minion-workbench.theme-obsidian {
+    -wb-rail: #0b0c0e;
+    -wb-canvas: #15161a;
+    -wb-reader: #191b1f;
+    -wb-surface: #1e2126;
+    -wb-hover: #272b31;
+    -wb-border: #2c3036;
+    -wb-select: #212831;
+    -wb-ink: #f1f2f2;
+    -wb-secondary: #c4c6c7;
+    -wb-muted: #909498;
+    -wb-accent: #89a6c2;
+    -wb-accent-strong: #bfd5e8;
+    -wb-on-accent: #0d141b;
+    -wb-link: #97b4cf;
+    -wb-focus: #718faa;
+    -wb-highlight: #31475a;
+    -wb-pending: #465f73;
+    -wb-tool: #b5a1c4;
+    -wb-scroll: #34373a;
+    -wb-scroll-hover: #484c51;
+    -wb-cta: #4c84c4;
+    -wb-cta-hover: #6499d9;
+    -wb-on-cta: #f6fafd;
+}
+
+.minion-workbench.theme-mist {
+    -wb-rail: #181d23;
+    -wb-canvas: #242a32;
+    -wb-reader: #282f38;
+    -wb-surface: #2f3741;
+    -wb-hover: #38424c;
+    -wb-border: #424b55;
+    -wb-select: #2e3944;
+    -wb-ink: #eef1f4;
+    -wb-secondary: #c5ccd3;
+    -wb-muted: #9aa5af;
+    -wb-accent: #91adc5;
+    -wb-accent-strong: #c3d8e8;
+    -wb-on-accent: #111b24;
+    -wb-link: #a1bed7;
+    -wb-focus: #7f9db5;
+    -wb-highlight: #344c5e;
+    -wb-pending: #4b6477;
+    -wb-tool: #bba7c9;
+    -wb-scroll: #4e5964;
+    -wb-scroll-hover: #65717c;
+    -wb-cta: #4f88c8;
+    -wb-cta-hover: #699dd8;
+    -wb-on-cta: #f7fafd;
+}
+
+.minion-workbench.theme-light {
+    -wb-rail: #ececea;
+    -wb-canvas: #f7f7f5;
+    -wb-reader: #fbfbfa;
+    -wb-surface: #ffffff;
+    -wb-hover: #e5e5e2;
+    -wb-border: #d9d9d4;
+    -wb-select: #e9e9e7;
+    -wb-ink: #222426;
+    -wb-secondary: #5f6266;
+    -wb-muted: #808387;
+    -wb-accent: #4f7396;
+    -wb-accent-strong: #385b7e;
+    -wb-on-accent: #ffffff;
+    -wb-link: #3f6d99;
+    -wb-focus: #6c8dab;
+    -wb-highlight: #d8e5f0;
+    -wb-pending: #9ab0c3;
+    -wb-tool: #71577f;
+    -wb-scroll: #d0d0cc;
+    -wb-scroll-hover: #b9b9b4;
+    -wb-cta: #3f6d99;
+    -wb-cta-hover: #2f5880;
+    -wb-on-cta: #ffffff;
+}
+
+/* Shared window chrome and thin but draggable dividers */
+.minion-workbench .topbar {
+    -fx-alignment: center-left; -fx-spacing: 7; -fx-padding: 6 9 6 13;
+    -fx-background-color: -wb-rail; -fx-border-color: transparent transparent -wb-border transparent;
+}
+.minion-workbench .topbar-title { -fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: -wb-ink; }
+.minion-workbench .topbar-mode {
+    -fx-text-fill: -wb-muted; -fx-font-size: 14px;
+    -fx-border-color: transparent transparent transparent -wb-border; -fx-padding: 0 0 0 9;
+}
+.minion-workbench .window-action {
+    -fx-min-width: 30; -fx-min-height: 28; -fx-padding: 4 7;
+    -fx-background-color: transparent; -fx-background-radius: 5; -fx-border-color: transparent;
+}
+.minion-workbench .window-action:hover { -fx-background-color: -wb-hover; }
+.minion-workbench .window-action:focused {
+    -fx-border-color: transparent; -fx-background-color: transparent;
+}
+.minion-workbench .window-action.btn-close:hover { -fx-background-color: #9d3e43; }
+.minion-workbench .panel { -fx-background-color: -wb-rail; -fx-border-width: 0; }
+.minion-workbench .panel-dark, .minion-workbench .conversation-column,
+.minion-workbench .workspace-split, .minion-workbench .chat-scroll,
+.minion-workbench .chat-scroll > .viewport, .minion-workbench .chat-scroll > .corner {
+    -fx-background-color: -wb-canvas;
+}
+.minion-workbench .sidebar-split > .split-pane-divider,
+.minion-workbench .workspace-split > .split-pane-divider {
+    -fx-background-color: transparent, -wb-border;
+    -fx-background-insets: 0, 0 1 0 1; -fx-border-width: 0; -fx-padding: 0 1.5;
+}
+.minion-workbench .sidebar-split > .split-pane-divider:hover,
+.minion-workbench .workspace-split > .split-pane-divider:hover { -fx-background-color: -wb-accent; }
+.minion-workbench .scroll-bar { -fx-background-color: transparent; }
+.minion-workbench .scroll-bar .thumb { -fx-background-color: -wb-scroll; -fx-background-radius: 5; }
+.minion-workbench .scroll-bar:hover .thumb { -fx-background-color: -wb-scroll-hover; }
+.minion-workbench .scroll-bar .increment-button,
+.minion-workbench .scroll-bar .decrement-button { -fx-padding: 2; -fx-background-color: transparent; }
+.minion-workbench .scroll-bar .increment-arrow,
+.minion-workbench .scroll-bar .decrement-arrow { -fx-padding: 0; }
+
+/* Workspace navigation: compact project tree, neutral actions, one selected row */
+.minion-workbench .project-sidebar { -fx-background-color: -wb-rail; -fx-padding: 13 9 8 9; -fx-spacing: 7; }
+.minion-workbench .project-sidebar .list-view,
+.minion-workbench .project-sidebar .list-view .virtual-flow,
+.minion-workbench .project-sidebar .list-view .clipped-container,
+.minion-workbench .project-sidebar .list-view .sheet { -fx-background-color: transparent; }
+.minion-workbench .project-sidebar .list-cell { -fx-background-color: transparent; }
+.minion-workbench .project-sidebar .sidebar-navigation { -fx-padding: 0 1 7 1; -fx-spacing: 4; }
+.minion-workbench .project-sidebar .sidebar-footer {
+    -fx-padding: 7 1 0 1;
+    -fx-border-color: -wb-border transparent transparent transparent;
+}
+.minion-workbench .project-sidebar .sidebar-nav {
+    -fx-background-color: transparent; -fx-text-fill: -wb-secondary;
+    -fx-font-size: 15px; -fx-padding: 7 9; -fx-background-radius: 6;
+}
+.minion-workbench .project-sidebar .sidebar-primary { -fx-background-color: -wb-surface; -fx-text-fill: -wb-ink; }
+.minion-workbench .project-sidebar .sidebar-primary .sidebar-glyph { -fx-stroke: -wb-accent; }
+.minion-workbench .project-sidebar .sidebar-section { -fx-border-color: -wb-border transparent transparent transparent; }
+.minion-workbench .project-sidebar .project-heading { -fx-text-fill: -wb-muted; -fx-font-size: 14px; }
+.minion-workbench .project-sidebar .sidebar-glyph, .minion-workbench .project-sidebar .sidebar-folder { -fx-stroke: -wb-muted; }
+.minion-workbench .project-sidebar .sidebar-settings-icon { -fx-fill: -wb-muted; }
+.minion-workbench .project-sidebar .sidebar-nav:hover .sidebar-settings-icon { -fx-fill: -wb-secondary; }
+.minion-workbench .project-sidebar .sidebar-chevron { -fx-fill: -wb-muted; }
+.minion-workbench .project-sidebar .sidebar-count, .minion-workbench .project-sidebar .cell-time,
+.minion-workbench .project-sidebar .sidebar-more, .minion-workbench .project-sidebar .sidebar-empty {
+    -fx-text-fill: -wb-muted; -fx-font-size: 13px;
+}
+.minion-workbench .project-sidebar .sidebar-row-label { -fx-text-fill: -wb-secondary; -fx-font-size: 14px; }
+.minion-workbench .project-sidebar .list-cell.project-row .sidebar-row-label { -fx-text-fill: -wb-ink; -fx-font-size: 15px; }
+.minion-workbench .project-sidebar .list-cell.conversation-row { -fx-padding: 6 4 6 24; -fx-background-radius: 6; }
+.minion-workbench .project-sidebar .list-cell:filled:hover,
+.minion-workbench .project-sidebar .sidebar-nav:hover,
+.minion-workbench .project-sidebar .sidebar-icon-button:hover,
+.minion-workbench .project-sidebar .sidebar-more:hover { -fx-background-color: -wb-hover; }
+.minion-workbench .project-sidebar .list-cell:filled:selected { -fx-background-color: -wb-surface; }
+.minion-workbench .project-sidebar .list-cell.active-conversation,
+.minion-workbench .project-sidebar .list-cell.active-conversation:filled {
+    -fx-background-color: -wb-select; -fx-border-color: transparent transparent transparent -wb-accent;
+    -fx-border-width: 0 0 0 2;
+}
+.minion-workbench .project-sidebar .list-cell.active-conversation .sidebar-row-label { -fx-text-fill: -wb-ink; }
+.minion-workbench .project-sidebar .list-cell.project-drop-before { -fx-border-color: -wb-accent transparent transparent transparent; }
+.minion-workbench .project-sidebar .list-cell.project-drop-after { -fx-border-color: transparent transparent -wb-accent transparent; }
+.minion-workbench .project-sidebar .list-cell.active-conversation.project-drop-before { -fx-border-color: -wb-accent transparent transparent -wb-accent; }
+.minion-workbench .project-sidebar .list-cell.active-conversation.project-drop-after { -fx-border-color: transparent transparent -wb-accent -wb-accent; }
+.minion-workbench .project-sidebar .text-field {
+    -fx-background-color: -wb-canvas; -fx-text-fill: -wb-ink; -fx-prompt-text-fill: -wb-muted; -fx-font-size: 15px;
+}
+.minion-workbench .project-sidebar .project-hint { -fx-background-color: -wb-surface; -fx-text-fill: -wb-secondary; -fx-font-size: 13px; }
+
+/* Tabs and actions */
+.minion-workbench .tabs-bar {
+    -fx-background-color: -wb-rail; -fx-padding: 0 10 0 7;
+    -fx-border-color: transparent transparent -wb-border transparent;
+}
+.minion-workbench .conversation-tabs > .tab-header-area { -fx-padding: 4 0 0 2; }
+.minion-workbench .conversation-tabs { -fx-tab-min-height: 30; -fx-tab-max-height: 32; }
+.minion-workbench .conversation-tabs .tab { -fx-background-color: transparent; -fx-background-radius: 6 6 0 0; -fx-padding: 4 12; }
+.minion-workbench .conversation-tabs .tab:hover { -fx-background-color: -wb-hover; }
+.minion-workbench .conversation-tabs .tab:selected {
+    -fx-background-color: -wb-canvas;
+    -fx-border-color: -wb-border -wb-border -wb-accent -wb-border;
+    -fx-border-width: 1 1 2 1; -fx-border-radius: 6 6 0 0;
+}
+.minion-workbench .conversation-tabs .tab-label { -fx-text-fill: -wb-muted; -fx-font-size: 15px; }
+.minion-workbench .conversation-tabs .tab:selected .tab-label { -fx-text-fill: -wb-ink; }
+.minion-workbench .conversation-tabs > .tab-header-area > .control-buttons-tab { visibility: visible; }
+.minion-workbench .conversation-tabs .control-buttons-tab .container,
+.minion-workbench .conversation-tabs .tab-down-button { -fx-background-color: transparent; }
+.minion-workbench .conversation-tabs .tab-down-button:hover { -fx-background-color: -wb-hover; }
+.minion-workbench .conversation-tabs .tab-down-button .arrow,
+.minion-workbench .conversation-tabs .tab-close-button { -fx-background-color: -wb-muted; }
+.minion-workbench .workspace-top-action {
+    -fx-background-color: transparent; -fx-text-fill: -wb-secondary; -fx-background-radius: 5;
+    -fx-padding: 5 8; -fx-min-width: -1; -fx-graphic-text-gap: 5; -fx-font-size: 14px;
+}
+.minion-workbench .workspace-top-action:hover { -fx-background-color: -wb-hover; }
+.minion-workbench .workspace-top-action.workspace-top-active { -fx-background-color: -wb-select; -fx-text-fill: -wb-ink; }
+.minion-workbench .workbench-outline-icon { -fx-fill: transparent; -fx-stroke: -wb-secondary; -fx-stroke-width: 1.2; -fx-stroke-line-join: round; }
+.minion-workbench .workspace-top-active .workbench-outline-icon { -fx-stroke: -wb-accent; }
+
+/* Conversation. Keep opaque TextArea content for FX8 LCD/subpixel rendering. */
+.minion-workbench .workbench-transcript { -fx-spacing: 6; -fx-padding: 18 20 18 20; }
+.minion-workbench .transcript-row {
+    -fx-alignment: top-left; -fx-spacing: 9; -fx-padding: 2 6 2 0;
+}
+.minion-workbench .transcript-user {
+    -fx-background-color: -wb-surface; -fx-background-radius: 8; -fx-padding: 8 10 8 7;
+}
+.minion-workbench .transcript-reply { -fx-padding: 6 6 7 0; }
+.minion-workbench .log-tag { -fx-padding: 2 0 0 0; -fx-font-size: 14px; -fx-opacity: 1; }
+.minion-workbench .log-input { -fx-text-fill: -wb-accent; }
+.minion-workbench .log-reply { -fx-text-fill: -wb-secondary; }
+.minion-workbench .log-tool { -fx-text-fill: -wb-tool; }
+.minion-workbench .log-think { -fx-text-fill: -wb-muted; }
+.minion-workbench .log-body { -fx-font-size: 17px; -fx-text-fill: -wb-ink; }
+.minion-workbench .log-body-tool { -fx-text-fill: -wb-secondary; }
+.minion-workbench .log-body-think, .minion-workbench .log-summary-text { -fx-text-fill: -wb-muted; }
+.minion-workbench .log-summary-text, .minion-workbench .running-indicator-text { -fx-font-size: 15px; }
+.minion-workbench .msg-textarea .content { -fx-background-color: -wb-canvas; }
+.minion-workbench .transcript-user .msg-textarea .content { -fx-background-color: -wb-surface; }
+.minion-workbench .msg-textarea:focused { -fx-highlight-fill: -wb-highlight; }
+.minion-workbench .transcript-hint { -fx-text-fill: -wb-muted; -fx-font-size: 16px; -fx-padding: 6 0; }
+.minion-workbench .history-navigation {
+    -fx-alignment: center-left; -fx-padding: 0 0 5 0;
+}
+.minion-workbench .history-navigation .button, .minion-workbench .btn-jump-latest {
+    -fx-min-width: -1; -fx-background-color: -wb-surface; -fx-text-fill: -wb-secondary;
+    -fx-padding: 4 7; -fx-background-radius: 5; -fx-border-color: transparent; -fx-font-size: 14px;
+}
+.minion-workbench .history-navigation .button:hover, .minion-workbench .btn-jump-latest:hover { -fx-background-color: -wb-hover; }
+.minion-workbench .history-info { -fx-text-fill: -wb-muted; -fx-font-size: 14px; }
+.minion-workbench .message-links .hyperlink { -fx-font-size: 16px; }
+.minion-workbench .message-links { -fx-padding: 5 0 0 0; }
+.minion-workbench .message-links.artifact-message-link { -fx-padding: 1 0 2 0; }
+.minion-workbench .message-link-items { -fx-padding: 4 0 5 10; -fx-border-color: transparent transparent transparent -wb-border; }
+.minion-workbench .related-links-toggle {
+    -fx-font-size: 14px; -fx-text-fill: -wb-secondary; -fx-background-color: -wb-surface;
+    -fx-background-radius: 5; -fx-padding: 3 8;
+}
+.minion-workbench .related-links-toggle:hover { -fx-background-color: -wb-hover; }
+
+/* Start page + composer */
+.minion-workbench .workbench-welcome { -fx-padding: 20; -fx-alignment: center; }
+.minion-workbench .welcome-mark {
+    -fx-min-width: 52; -fx-min-height: 52; -fx-background-color: -wb-surface; -fx-background-radius: 15;
+}
+.minion-workbench .welcome-mark .workbench-outline-icon { -fx-stroke: -wb-accent; }
+.minion-workbench .welcome-eyebrow { -fx-text-fill: -wb-accent; -fx-font-size: 13px; -fx-font-weight: bold; -fx-padding: 6 0 0 0; }
+.minion-workbench .welcome-title { -fx-text-fill: -wb-ink; -fx-font-size: 27px; -fx-font-weight: bold; }
+.minion-workbench .welcome-description { -fx-text-fill: -wb-muted; -fx-font-size: 15px; -fx-padding: 0 6 7 6; }
+.minion-workbench .welcome-start {
+    -fx-background-color: -wb-cta; -fx-background-radius: 8; -fx-border-color: transparent; -fx-border-radius: 8;
+    -fx-text-fill: -wb-on-cta; -fx-font-size: 15px; -fx-padding: 6 16;
+}
+.minion-workbench .welcome-start:hover { -fx-background-color: -wb-cta-hover; }
+.minion-workbench .workbench-composer { -fx-padding: 7 20 16 20; }
+.minion-workbench .input-frame {
+    -fx-background-color: -wb-surface; -fx-background-radius: 13; -fx-border-color: -wb-border;
+    -fx-border-radius: 13; -fx-padding: 9 10 7 10;
+}
+.minion-workbench .input-frame-focused { -fx-border-color: -wb-focus; }
+.minion-workbench .input-frame .input-textarea {
+    -fx-font-size: 17px; -fx-text-fill: -wb-ink; -fx-text-inner-color: -wb-ink;
+    -fx-prompt-text-fill: -wb-muted; -fx-highlight-fill: -wb-highlight;
+}
+.minion-workbench .input-frame .input-textarea .caret { -fx-stroke: -wb-accent; -fx-fill: -wb-accent; }
+.minion-workbench .input-frame .input-textarea .content { -fx-padding: 2 4 2 4; -fx-background-color: -wb-surface; }
+.minion-workbench .input-frame .input-textarea .scroll-pane > .viewport { -fx-background-color: -wb-surface; }
+.minion-workbench .composer-actions { -fx-padding: 7 2 0 2; }
+.minion-workbench .btn-upload:hover, .minion-workbench .model-picker:hover { -fx-background-color: -wb-hover; }
+.minion-workbench .model-picker {
+    -fx-background-radius: 5; -fx-background-color: transparent; -fx-border-color: transparent; -fx-padding: 0;
+}
+.minion-workbench .model-picker > .label { -fx-text-fill: -wb-secondary; -fx-font-size: 14px; -fx-padding: 3 4 3 7; }
+/* Modena 对 disabled 控件整体压 0.4 透明度会把模型名压到几乎不可读：
+   恢复不透明，用 label 颜色（muted→secondary）表达禁用即可 */
+.minion-workbench .model-picker:disabled { -fx-opacity: 1; }
+.minion-workbench .model-picker:disabled > .label { -fx-text-fill: -wb-secondary; }
+.minion-workbench .model-picker > .arrow-button { -fx-padding: 0 7 0 2; }
+.minion-workbench .model-picker > .arrow-button > .arrow { -fx-background-color: -wb-muted; }
+.minion-workbench .model-picker:disabled > .arrow-button > .arrow { -fx-background-color: -wb-muted; }
+.minion-workbench .btn-send-full { -fx-background-color: -wb-accent; -fx-background-radius: 8; }
+.minion-workbench .btn-send-full:hover { -fx-background-color: -wb-accent-strong; }
+.minion-workbench .btn-send-full .icon-send { -fx-fill: -wb-on-accent; }
+.minion-workbench .btn-send-empty, .minion-workbench .btn-send-empty:hover { -fx-background-color: -wb-scroll; }
+.minion-workbench .btn-send-empty .icon-send { -fx-fill: -wb-secondary; }
+.minion-workbench .pending-guide-row { -fx-background-color: -wb-select; -fx-border-color: -wb-pending; }
+.minion-workbench .pending-guide-label { -fx-text-fill: -wb-accent-strong; -fx-font-size: 14px; }
+.minion-workbench .btn-guide-now { -fx-background-color: -wb-cta; -fx-text-fill: -wb-on-cta; -fx-background-radius: 6; }
+.minion-workbench .btn-guide-now:hover { -fx-background-color: -wb-cta-hover; }
+
+/* File workspace: quiet chrome, slightly lighter reading surface, accessible actions */
+.minion-workbench .artifact-workspace { -fx-background-color: -wb-reader; -fx-border-width: 0; }
+.minion-workbench .artifact-workspace-bar {
+    -fx-background-color: -wb-rail; -fx-padding: 8 9 8 12; -fx-border-color: transparent transparent -wb-border transparent;
+}
+.minion-workbench .artifact-workspace-title { -fx-text-fill: -wb-ink; -fx-font-size: 16px; }
+.minion-workbench .artifact-file-header {
+    -fx-background-color: -wb-canvas; -fx-padding: 12 14 11 14; -fx-border-color: transparent transparent -wb-border transparent;
+}
+.minion-workbench .artifact-file-title { -fx-text-fill: -wb-ink; -fx-font-size: 20px; }
+.minion-workbench .artifact-meta, .minion-workbench .artifact-notice, .minion-workbench .artifact-hint {
+    -fx-text-fill: -wb-muted; -fx-font-size: 14px;
+}
+.minion-workbench .artifact-path { -fx-text-fill: -wb-link; -fx-font-size: 14px; }
+.minion-workbench .artifact-workspace .button, .minion-workbench .artifact-workspace .toggle-button,
+.minion-workbench .artifact-workspace .menu-button,
+.minion-workbench .artifact-workspace .menu-button > .label { -fx-text-fill: -wb-secondary; -fx-font-size: 14px; }
+.minion-workbench .artifact-workspace .button, .minion-workbench .artifact-workspace .toggle-button,
+.minion-workbench .artifact-workspace .menu-button { -fx-background-color: -wb-surface; }
+.minion-workbench .artifact-workspace .artifact-icon-button { -fx-background-color: transparent; }
+.minion-workbench .artifact-workspace .button:hover, .minion-workbench .artifact-workspace .toggle-button:hover,
+.minion-workbench .artifact-workspace .menu-button:hover { -fx-background-color: -wb-hover; }
+.minion-workbench .artifact-workspace .toggle-button:selected,
+.minion-workbench .artifact-workspace .workspace-browser-active { -fx-background-color: -wb-select; -fx-text-fill: -wb-accent-strong; }
+.minion-workbench .artifact-workspace .menu-button > .arrow-button > .arrow,
+.minion-workbench .artifact-workspace .artifact-tabs .tab-close-button,
+.minion-workbench .artifact-workspace .artifact-tabs > .tab-header-area .tab-down-button .arrow { -fx-background-color: -wb-muted; }
+.minion-workbench .artifact-workspace .artifact-tabs { -fx-background-color: -wb-rail; -fx-tab-min-height: 27; -fx-tab-max-height: 31; }
+.minion-workbench .artifact-workspace .artifact-tabs .tab-down-button { -fx-background-color: transparent; }
+.minion-workbench .artifact-workspace .artifact-tabs .tab { -fx-background-color: transparent; }
+.minion-workbench .artifact-workspace .artifact-tabs .tab:hover { -fx-background-color: -wb-surface; }
+.minion-workbench .artifact-workspace .artifact-tabs .tab:selected {
+    -fx-background-color: -wb-canvas; -fx-border-color: -wb-border -wb-border transparent -wb-border;
+    -fx-border-width: 1 1 0 1; -fx-border-radius: 5 5 0 0;
+}
+.minion-workbench .artifact-workspace .artifact-tabs .tab-label { -fx-text-fill: -wb-muted; -fx-font-size: 14px; }
+.minion-workbench .artifact-workspace .artifact-tabs .tab:selected .tab-label { -fx-text-fill: -wb-ink; }
+.minion-workbench .artifact-reader, .minion-workbench .artifact-reader > .viewport,
+.minion-workbench .artifact-reader > .corner, .minion-workbench .artifact-document,
+.minion-workbench .artifact-source, .minion-workbench .artifact-source .content,
+.minion-workbench .artifact-source .scroll-pane, .minion-workbench .artifact-source .scroll-pane > .viewport,
+.minion-workbench .artifact-source .scroll-pane > .corner { -fx-background: -wb-reader; -fx-background-color: -wb-reader; }
+.minion-workbench .artifact-source { -fx-text-fill: -wb-ink; -fx-highlight-fill: -wb-highlight; -fx-font-size: 17px; }
+.minion-workbench .artifact-document .artifact-code {
+    -fx-background-color: -wb-rail; -fx-border-color: -wb-border; -fx-font-size: 16px;
+}
+.minion-workbench .artifact-document .separator .line { -fx-border-color: -wb-border transparent transparent transparent; }
+.minion-workbench .artifact-document .hyperlink { -fx-text-fill: -wb-link; }
+.minion-workbench .artifact-document .msg-thinking {
+    -fx-background-color: transparent; -fx-text-fill: -wb-accent; -fx-font-size: 17px;
+}
+.minion-workbench .artifact-table-scroll, .minion-workbench .artifact-table-scroll > .viewport,
+.minion-workbench .artifact-table-scroll > .corner { -fx-background-color: -wb-reader; }
+.minion-workbench .artifact-table { -fx-background-color: -wb-border; }
+.minion-workbench .artifact-table .artifact-table-head { -fx-background-color: -wb-hover; }
+.minion-workbench .artifact-table .artifact-table-even { -fx-background-color: -wb-surface; }
+.minion-workbench .artifact-table .artifact-table-odd { -fx-background-color: -wb-reader; }
+.minion-workbench .artifact-overview-scroll, .minion-workbench .artifact-overview-scroll > .viewport,
+.minion-workbench .artifact-overview { -fx-background: -wb-reader; -fx-background-color: -wb-reader; }
+.minion-workbench .artifact-card { -fx-background-color: -wb-surface; -fx-border-color: -wb-border; }
+.minion-workbench .artifact-card-visual { -fx-background-color: -wb-reader; -fx-border-color: -wb-border; }
+.minion-workbench .artifact-card-type, .minion-workbench .artifact-card-name { -fx-text-fill: -wb-ink; }
+.minion-workbench .artifact-card-meta { -fx-text-fill: -wb-muted; }
+.minion-workbench .artifact-workspace .artifact-card-button,
+.minion-workbench .artifact-workspace .artifact-card-button:hover { -fx-background-color: transparent; }
+.minion-workbench .artifact-workspace .artifact-card-button:hover .artifact-card { -fx-border-color: -wb-accent; }
+.minion-workbench .artifact-workspace .artifact-gallery-item { -fx-background-color: -wb-surface; }
+.minion-workbench .artifact-workspace .artifact-gallery-item.selected { -fx-border-color: -wb-accent; -fx-background-color: -wb-select; }
+.minion-workbench .artifact-html { -fx-background-color: -wb-reader; }
+.minion-workbench .artifact-find .text-field {
+    -fx-background-color: -wb-surface; -fx-text-fill: -wb-ink; -fx-prompt-text-fill: -wb-muted; -fx-font-size: 14px;
+}
+.minion-workbench .workspace-files, .minion-workbench .workspace-files .list-view,
+.minion-workbench .workspace-files .list-cell { -fx-background-color: -wb-reader; }
+.minion-workbench .workspace-files .list-cell { -fx-text-fill: -wb-ink; -fx-font-size: 16px; }
+.minion-workbench .workspace-files .label { -fx-text-fill: -wb-secondary; -fx-font-size: 14px; }
+.minion-workbench .workspace-files .list-cell:filled:hover,
+.minion-workbench .workspace-files .list-cell:filled:selected { -fx-background-color: -wb-select; }
+
+/* Secondary windows use the same palette without hiding their functional controls.
+   Re-enable content and tab overflow: the base CSS also styles header-only tabs. */
+.minion-workbench.runtime-workbench .tab-pane > .tab-content-area {
+    -fx-min-height: 0; -fx-pref-height: -1; -fx-max-height: -1;
+}
+.minion-workbench.runtime-workbench .tab-pane > .tab-header-area > .control-buttons-tab { visibility: visible; }
+.minion-workbench.runtime-workbench .tab-pane .tab-down-button { -fx-background-color: transparent; }
+.minion-workbench.runtime-workbench .tab-pane .tab-down-button .arrow { -fx-background-color: -wb-muted; }
+.minion-workbench.runtime-workbench .tab-pane .tab { -fx-background-color: -wb-surface; -fx-background-radius: 6 6 0 0; }
+.minion-workbench.runtime-workbench .tab-pane .tab:selected { -fx-background-color: -wb-select; }
+.minion-workbench.runtime-workbench .tab-pane .tab:selected .tab-label { -fx-text-fill: -wb-ink; }
+.minion-workbench.runtime-workbench .tab-pane .tab-label { -fx-font-size: 14px; }
+.minion-workbench.runtime-workbench .button, .minion-workbench.automation-center .button,
+.minion-workbench.settings-workbench .button, .minion-workbench.automation-center .combo-box-base {
+    -fx-background-color: -wb-surface; -fx-text-fill: -wb-ink;
+}
+.minion-workbench.runtime-workbench .button:hover, .minion-workbench.automation-center .button:hover,
+.minion-workbench.settings-workbench .button:hover { -fx-background-color: -wb-hover; }
+.minion-workbench.automation-center .automation-primary,
+.minion-workbench.settings-workbench .button:default { -fx-background-color: -wb-accent; -fx-text-fill: -wb-on-accent; }
+.minion-workbench.automation-center .automation-muted { -fx-font-size: 14px; -fx-text-fill: -wb-muted; }
+.minion-workbench.automation-center .list-view, .minion-workbench.automation-center .split-pane,
+.minion-workbench.automation-center .list-cell, .minion-workbench.runtime-workbench .text-area .content,
+.minion-workbench.automation-center .text-area .content { -fx-background-color: -wb-reader; }
+.minion-workbench.automation-center .split-pane > .split-pane-divider { -fx-background-color: -wb-border; }
+.minion-workbench.runtime-workbench .text-area, .minion-workbench.automation-center .text-area {
+    -fx-text-fill: -wb-ink; -fx-prompt-text-fill: -wb-muted; -fx-control-inner-background: -wb-reader;
+}
+.minion-workbench.runtime-workbench .table-view {
+    -fx-background-color: -wb-reader; -fx-control-inner-background: -wb-reader;
+    -fx-control-inner-background-alt: -wb-surface; -fx-table-cell-border-color: -wb-border;
+    -fx-table-header-border-color: -wb-border; -fx-selection-bar: -wb-select;
+    -fx-selection-bar-non-focused: -wb-select;
+}
+.minion-workbench.runtime-workbench .table-view .column-header-background,
+.minion-workbench.runtime-workbench .table-view .column-header,
+.minion-workbench.runtime-workbench .table-view .filler { -fx-background-color: -wb-surface; }
+.minion-workbench.runtime-workbench .table-view .table-cell { -fx-text-fill: -wb-ink; }
+.minion-workbench.runtime-workbench .table-view .placeholder .label { -fx-text-fill: -wb-muted; }
+.minion-workbench.runtime-workbench .combo-box-base { -fx-background-color: -wb-surface; }
+.minion-workbench.runtime-workbench .combo-box > .list-cell { -fx-background-color: transparent; -fx-text-fill: -wb-ink; }
+.minion-workbench.runtime-workbench .combo-box > .arrow-button > .arrow { -fx-background-color: -wb-muted; }
+.minion-workbench.runtime-workbench .check-box { -fx-text-fill: -wb-ink; }
+.minion-workbench.runtime-workbench .check-box .box { -fx-background-color: -wb-surface; -fx-border-color: -wb-border; }
+.minion-workbench.runtime-workbench .check-box:selected .mark { -fx-background-color: -wb-accent; }
+.minion-workbench.settings-workbench { -fx-background-color: -wb-canvas; }
+.minion-workbench.settings-workbench #settings-nav { -fx-background-color: -wb-rail; }
+.minion-workbench.settings-workbench #settings-nav .list-cell:filled { -fx-background-color: transparent; }
+.minion-workbench.settings-workbench #settings-nav .list-cell:filled:hover { -fx-background-color: -wb-hover; }
+.minion-workbench.settings-workbench #settings-nav .list-cell:filled:selected,
+.minion-workbench.automation-center .list-cell:filled:selected { -fx-background-color: -wb-select; }
+
+/* Secondary surfaces share readable controls instead of inheriting the old dark-only defaults. */
+.minion-workbench.settings-workbench .label,
+.minion-workbench.runtime-workbench .label,
+.minion-workbench.automation-center .label,
+.minion-workbench.settings-workbench .check-box,
+.minion-workbench.runtime-workbench .check-box,
+.minion-workbench.automation-center .check-box { -fx-text-fill: -wb-ink; }
+.minion-workbench.settings-workbench .text-field,
+.minion-workbench.settings-workbench .text-area,
+.minion-workbench.settings-workbench .combo-box-base,
+.minion-workbench.runtime-workbench .text-field,
+.minion-workbench.runtime-workbench .text-area,
+.minion-workbench.runtime-workbench .combo-box-base,
+.minion-workbench.automation-center .text-field,
+.minion-workbench.automation-center .text-area,
+.minion-workbench.automation-center .combo-box-base {
+    -fx-background-color: -wb-surface;
+    -fx-text-fill: -wb-ink;
+    -fx-prompt-text-fill: -wb-muted;
+    -fx-border-color: -wb-border;
+    -fx-control-inner-background: -wb-surface;
+}
+.minion-workbench.settings-workbench .text-area .content,
+.minion-workbench.runtime-workbench .text-area .content,
+.minion-workbench.automation-center .text-area .content { -fx-background-color: -wb-surface; }
+.minion-workbench.settings-workbench #settings-nav .list-cell { -fx-text-fill: -wb-secondary; }
+.minion-workbench.settings-workbench #settings-nav .list-cell:filled:selected { -fx-text-fill: -wb-ink; }
+.minion-workbench.settings-workbench .combo-box > .list-cell,
+.minion-workbench.runtime-workbench .combo-box > .list-cell,
+.minion-workbench.automation-center .combo-box > .list-cell {
+    -fx-background-color: transparent; -fx-text-fill: -wb-ink;
+}
+.minion-workbench.settings-workbench .check-box .box,
+.minion-workbench.runtime-workbench .check-box .box,
+.minion-workbench.automation-center .check-box .box {
+    -fx-background-color: -wb-surface; -fx-border-color: -wb-border;
+}
+.minion-workbench.settings-workbench .check-box:selected .mark,
+.minion-workbench.runtime-workbench .check-box:selected .mark,
+.minion-workbench.automation-center .check-box:selected .mark { -fx-background-color: -wb-accent; }
+.minion-workbench.settings-workbench .separator .line,
+.minion-workbench.runtime-workbench .separator .line,
+.minion-workbench.automation-center .separator .line {
+    -fx-border-color: -wb-border transparent transparent transparent;
+}
+
+/* Light mode needs darker semantic text than the dark surfaces use. */
+.minion-workbench.theme-light .log-input, .minion-workbench.theme-light .welcome-eyebrow,
+.minion-workbench.theme-light .transcript-hint { -fx-text-fill: -wb-accent-strong; }
+.minion-workbench.theme-light .log-tool { -fx-text-fill: #6f4b83; }
+.minion-workbench.theme-light .log-error { -fx-text-fill: #b42318; }
+.minion-workbench.theme-light .log-warn { -fx-text-fill: #8a5a00; }
+.minion-workbench.theme-light .status-dot-running { -fx-fill: #b77900; }
+.minion-workbench.theme-light .status-dot-completed,
+.minion-workbench.theme-light .status-dot-paused { -fx-fill: #238636; }
+.minion-workbench.theme-light .btn-send-empty,
+.minion-workbench.theme-light .btn-send-empty:hover { -fx-background-color: #b8b2a8; }
+.minion-workbench.theme-light .window-action.btn-close:hover { -fx-background-color: #b42318; }
+
+.minion-workbench .workspace-top-action:focused, .minion-workbench .welcome-start:focused,
+.minion-workbench .window-action:focused, .minion-workbench .model-picker:focused,
+.minion-workbench .history-navigation .button:focused, .minion-workbench .project-sidebar .sidebar-nav:focused,
+.minion-workbench .related-links-toggle:focused,
+.minion-workbench .project-sidebar .sidebar-icon-button:focused, .minion-workbench .project-sidebar .sidebar-more:focused,
+.minion-workbench .artifact-workspace .button:focused, .minion-workbench .artifact-workspace .menu-button:focused,
+.minion-workbench .artifact-workspace .toggle-button:focused {
+    -fx-border-color: -wb-focus; -fx-border-radius: 5; -fx-border-insets: 0;
+}

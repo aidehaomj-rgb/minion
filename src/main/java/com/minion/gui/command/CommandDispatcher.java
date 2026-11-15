@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.minion.core.skills.Skill;
 import com.minion.core.tools.Tool;
 import com.minion.core.tools.ToolResult;
+import com.minion.core.agent.ExecutionMode;
 import com.minion.gui.session.SessionHandle;
 
 import java.util.ArrayList;
@@ -31,6 +32,11 @@ public class CommandDispatcher {
         if ("/update".equals(cmd) || "/更新".equals(cmd)) return dispatchLocalTool(h, "Update", updateArgs(parts));
         if ("/checkpoints".equals(cmd) || "/检查点".equals(cmd)) return dispatchLocalTool(h, "Checkpoint", checkpointArgs(parts));
         if ("/queue".equals(cmd) || "/队列".equals(cmd)) return dispatchQueue(h, parts);
+        if ("/plan".equals(cmd) || "/计划".equals(cmd)) return armMode(h,ExecutionMode.PLAN);
+        if ("/goal".equals(cmd) || "/目标".equals(cmd)) return armMode(h,ExecutionMode.GOAL);
+        if ("/review".equals(cmd) || "/审查".equals(cmd)) return armMode(h,ExecutionMode.REVIEW);
+        if ("/normal".equals(cmd) || "/普通".equals(cmd)) return armMode(h,ExecutionMode.NORMAL);
+        if ("/task".equals(cmd) || "/agents".equals(cmd)) return h.session.taskState.render(h.session.todos);
         if ("/context".equals(cmd) || "/上下文".equals(cmd)) return dispatchLocalTool(h, "Context", simpleAction(parts,"status"));
         if ("/memory".equals(cmd) || "/记忆".equals(cmd)) return dispatchLocalTool(h, "Memory", simpleAction(parts,"status"));
         if ("/permissions".equals(cmd) || "/权限".equals(cmd)) return dispatchLocalTool(h, "Permission", permissionArgs(parts));
@@ -49,6 +55,11 @@ public class CommandDispatcher {
                 + "/update          检查离线更新包与备份\n"
                 + "/checkpoints     查看文件修改检查点\n"
                 + "/queue add <任务>  排队到当前任务结束后执行\n"
+                + "/plan            下一条消息使用只读计划模式\n"
+                + "/goal            下一条消息使用持续目标模式\n"
+                + "/review          下一条消息使用独立只读审查模式\n"
+                + "/normal          下一条消息恢复普通模式\n"
+                + "/task /agents    查看当前目标、断点、子Agent分工与记录\n"
                 + "/sessions [关键词]  搜索会话；/session fork|pin|archive|export\n"
                 + "/context         查看上下文组成与占用\n"
                 + "/memory [status|read]  查看项目长期记忆\n"
@@ -58,13 +69,18 @@ public class CommandDispatcher {
                 + "/tokens          显示 token 用量统计";
     }
 
+    private String armMode(SessionHandle h,ExecutionMode mode) {
+        h.loop.requestExecutionMode(mode);
+        return "执行模式已切换为「"+mode.label+"」，对下一条任务生效。";
+    }
+
     private String capabilitiesText() {
         return "本机能力：\n"
                 + "- Python/Anaconda：Python 工具（status/run_code/run_file）\n"
                 + "- Excel/CSV：Excel 工具（inspect/read/write/append/merge/pivot/chart/export）\n"
                 + "- SQLite：SQLite 工具（schema/query/execute）\n"
                 + "- 本地知识库：Knowledge 工具（add/search/list/read/delete）\n"
-                + "- 浏览器：Browser/BrowserEval/BrowserScreenshot/BrowserDebug\n"
+                + "- 浏览器：Browser/BrowserAction/BrowserEval/BrowserScreenshot/BrowserDebug；仅打开 URL 用 OpenUrl\n"
                 + "- 稳定性：Diagnostics、Logs、Checkpoint、Update、任务队列\n"
                 + "- 开发构建：Read/Write/Edit/Glob/Grep/Bash、Git、后台进程与构建工具\n"
                 + "- 扩展：Skills、MCP、子 Agent\n"
@@ -160,14 +176,15 @@ public class CommandDispatcher {
         if ("add".equalsIgnoreCase(parts[1])) {
             String text = joinTail(parts, 2);
             if (text.isEmpty()) return "用法: /queue add <任务内容>";
-            return "已加入任务队列，当前位置 " + h.enqueue(text);
+            int position=h.enqueue(text); h.loop.persistQueue();
+            return "已加入任务队列，当前位置 " + position;
         }
         if ("remove".equalsIgnoreCase(parts[1])) {
             if (parts.length < 3) return "用法: /queue remove <序号>";
-            try { return h.removeQueued(Integer.parseInt(parts[2])) ? "已移除队列任务" : "队列序号不存在"; }
+            try { boolean removed=h.removeQueued(Integer.parseInt(parts[2])); h.loop.persistQueue(); return removed ? "已移除队列任务" : "队列序号不存在"; }
             catch (NumberFormatException e) { return "队列序号必须是数字"; }
         }
-        if ("clear".equalsIgnoreCase(parts[1])) return "已清空队列任务 " + h.clearQueued() + " 条";
+        if ("clear".equalsIgnoreCase(parts[1])) { int count=h.clearQueued(); h.loop.persistQueue(); return "已清空队列任务 " + count + " 条"; }
         return "用法: /queue [list|add <任务>|remove <序号>|clear]";
     }
 

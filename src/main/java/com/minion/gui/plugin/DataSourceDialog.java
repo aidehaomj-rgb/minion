@@ -142,6 +142,9 @@ public class DataSourceDialog {
         final TextField user = new TextField(original == null ? "" : original.user);
         // 密码明文显示（与 model.json 的 apiKey 一致，便于核对），不做遮罩
         final TextField password = new TextField(original == null ? "" : original.password);
+        final TextField queryTimeout = new TextField(String.valueOf(original == null
+                ? DataSourceConfig.DEFAULT_QUERY_TIMEOUT_SECONDS : original.effectiveQueryTimeoutSeconds()));
+        queryTimeout.setPromptText("1–86400 秒；空白保留旧值，新建默认300");
         final Label error = PluginUi.errorLabel();
 
         VBox rows = new VBox(10);
@@ -150,7 +153,8 @@ public class DataSourceDialog {
                 PluginUi.row("标识名:", name),
                 PluginUi.row("URL:", url),
                 PluginUi.row("用户名:", user),
-                PluginUi.row("密码:", password));
+                PluginUi.row("密码:", password),
+                PluginUi.row("查询超时(秒):", queryTimeout));
         d.getDialogPane().setContent(rows);
         d.getDialogPane().setPrefWidth(600);
 
@@ -158,6 +162,11 @@ public class DataSourceDialog {
         // 校验失败必须 consume 掉 OK 事件，否则 DialogPane 会直接关窗（resultConverter 返回 null 也关窗）
         Button ok = (Button) d.getDialogPane().lookupButton(ButtonType.OK);
         ok.addEventFilter(ActionEvent.ACTION, ev -> {
+            final int timeout;
+            try { timeout = parseQueryTimeout(queryTimeout.getText(), original); }
+            catch (IllegalArgumentException ex) {
+                error.setText(ex.getMessage()); error.setVisible(true); ev.consume(); return;
+            }
             String why = DataSourceValidator.validate(name.getText(), url.getText(),
                     user.getText(), password.getText(), all,
                     original == null ? null : original.name);
@@ -172,13 +181,26 @@ public class DataSourceDialog {
             ds.url = url.getText().trim();
             ds.user = user.getText().trim();
             ds.password = password.getText();   // 密码不 trim：首尾空格可能是密码的一部分
+            ds.queryTimeoutSeconds = timeout;
             out[0] = ds;
         });
         name.textProperty().addListener((obs, o, n) -> hide(error));
         url.textProperty().addListener((obs, o, n) -> hide(error));
+        queryTimeout.textProperty().addListener((obs, o, n) -> hide(error));
 
         d.showAndWait();
         return out[0];
+    }
+
+    /** 空白表示保留旧值，避免仅改名字/口令时把用户的慢查询上限重置为默认值。 */
+    static int parseQueryTimeout(String text, DataSourceConfig original) {
+        if (text == null || text.trim().isEmpty()) return original == null
+                ? DataSourceConfig.DEFAULT_QUERY_TIMEOUT_SECONDS : original.effectiveQueryTimeoutSeconds();
+        try {
+            int seconds = Integer.parseInt(text.trim());
+            if (seconds >= 1 && seconds <= DataSourceConfig.MAX_QUERY_TIMEOUT_SECONDS) return seconds;
+        } catch (NumberFormatException ignored) { }
+        throw new IllegalArgumentException("查询超时必须为 1–86400 的整数秒");
     }
 
     private static void hide(Label error) {
@@ -211,6 +233,7 @@ public class DataSourceDialog {
         String sel = list.getSelectionModel().getSelectedItem();
         DataSourceConfig ds = sel == null ? null : db.find(sel);
         detail.setText(ds == null ? "（无数据源，点「新建」添加）"
-                : "URL: " + ds.url + "     用户名: " + (ds.user == null || ds.user.isEmpty() ? "（空）" : ds.user));
+                : "URL: " + ds.url + "     用户名: " + (ds.user == null || ds.user.isEmpty() ? "（空）" : ds.user)
+                + "     查询超时: " + ds.effectiveQueryTimeoutSeconds() + " 秒");
     }
 }

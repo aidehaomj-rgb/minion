@@ -143,6 +143,7 @@ public class WorkspaceListView extends ListView<String> {
     }
 
     /** 修改工作空间：表单与新建共用，名称可改（重命名会迁移会话目录） */
+    public void editWorkspace(String name) { doEdit(name); }
     private void doEdit(String name) {
         WorkspaceConfig w = workspaces.get(name);
         java.util.List<String> existing = new java.util.ArrayList<String>();

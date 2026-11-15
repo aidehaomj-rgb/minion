@@ -39,6 +39,8 @@ public final class IconFactory {
     public static final String EDIT_PATH = "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z";
     /** delete（垃圾桶） */
     public static final String DELETE_PATH = "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z";
+    /** push_pin（置顶） */
+    public static final String PIN_PATH = "M16 9V4l1-1V2H7v1l1 1v5l-2 2v2h5v7l1 1 1-1v-7h5v-2z";
     /** lens（实心圆点） */
     public static final String DOT_PATH = "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z";
     /** help_outline（问号圈） */
@@ -83,6 +85,7 @@ public final class IconFactory {
     public static SVGPath close() { return create(CLOSE_PATH, "icon-close"); }
     public static SVGPath edit() { return create(EDIT_PATH, "icon-edit"); }
     public static SVGPath delete() { return create(DELETE_PATH, "icon-delete"); }
+    public static SVGPath pin() { return create(PIN_PATH, "icon-edit"); }
     public static SVGPath dot() { return create(DOT_PATH, "icon-dot"); }
     public static SVGPath help() { return create(HELP_PATH, "icon-help"); }
     public static SVGPath success() { return create(SUCCESS_PATH, "icon-success"); }
