@@ -1,5 +1,7 @@
 package com.minion.core.tools.data;
 
+import com.minion.core.tools.ToolArguments;
+
 import com.google.gson.JsonObject;
 import com.minion.core.checkpoint.CheckpointStore;
 import com.minion.core.tools.PathsGuard;
@@ -88,5 +90,5 @@ public final class TextProcessTool implements Tool {
     private static String sample(Set<String>s){StringBuilder b=new StringBuilder();int n=0;for(String x:s){if(n++>=20){b.append("...\n");break;}b.append(x).append('\n');}return b.toString();}
     private static String join(Iterable<String> xs,String sep){StringBuilder b=new StringBuilder();for(String x:xs){if(b.length()>0)b.append(sep);b.append(x);}return b.toString();}
     private static String text(JsonObject o,String k){return o.has(k)&&!o.get(k).isJsonNull()?o.get(k).getAsString():"";}
-    private static int integer(JsonObject o,String k,int d){try{return o.has(k)?o.get(k).getAsInt():d;}catch(Exception e){return d;}}
+    private static int integer(JsonObject o,String k,int d){return ToolArguments.integer(o,k,d);}
 }

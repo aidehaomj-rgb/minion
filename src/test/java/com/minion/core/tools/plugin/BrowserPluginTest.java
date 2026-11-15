@@ -54,22 +54,22 @@ public class BrowserPluginTest {
     }
 
     @Test
-    public void createsFourBrowserToolsInOrder() {
+    public void createsFiveBrowserToolsIncludingSemanticActions() {
         BrowserConfig c = new BrowserConfig();
         c.path = "C:\\chrome.exe";
         ToolContext ctx = new ToolContext(new Workspace("."), "./skills", null, null);
         List<Tool> tools = plugin(c, new CountingSaver()).createTools(ctx);
-        assertEquals(4, tools.size());
+        assertEquals(5, tools.size());
         List<String> names = new ArrayList<String>();
         for (Tool t : tools) names.add(t.name());
-        assertEquals("[Browser, BrowserEval, BrowserScreenshot, BrowserDebug]", names.toString());
+        assertEquals("[Browser, BrowserEval, BrowserScreenshot, BrowserDebug, BrowserAction]", names.toString());
     }
 
     @Test
     public void toolsCreatedEvenWhenDisabledOrPathBlank() {
         // 工具无条件创建，启停由 ToolRegistry 的 gate 过滤（拉模式）
         ToolContext ctx = new ToolContext(new Workspace("."), "./skills", null, null);
-        assertEquals(4, plugin(new BrowserConfig(), new CountingSaver()).createTools(ctx).size());
+        assertEquals(5, plugin(new BrowserConfig(), new CountingSaver()).createTools(ctx).size());
     }
 
     @Test

@@ -14,6 +14,8 @@ import java.util.Map;
  * 经 PluginGate 按当前启用状态过滤——不启用的工具其 name/description/parameters 完全不进请求，
  * 改开关无需通知任何会话，AgentLoop 下一轮 registry.schemas() 自动生效。
  * gate 为 null 或工具无插件标签（内置工具）时不过滤，行为与改造前一致。
+ * 注册（会话构建 + MCP 连接线程补注册）与读取（会话线程每轮 schemas）跨线程：
+ * 写时复制发布快照，读侧无锁迭代不可变 Map，顺序保持注册序（请求 payload 稳定）。
  */
 public class ToolRegistry {
 
@@ -22,22 +24,37 @@ public class ToolRegistry {
         boolean enabled(String pluginId);
     }
 
-    private final Map<String, Tool> tools = new LinkedHashMap<String, Tool>();
+    private volatile Map<String, Tool> tools = new LinkedHashMap<String, Tool>();
     /** 工具名（小写）→ 插件 id；null 表示内置工具（永不过滤） */
-    private final Map<String, String> ownerOf = new HashMap<String, String>();
-    private PluginGate gate;
+    private volatile Map<String, String> ownerOf = new HashMap<String, String>();
+    private volatile PluginGate gate;
 
     /** 内置工具注册（无插件归属，不受 gate 影响） */
     public void register(Tool tool) { register(null, tool); }
 
     /** 可插拔工具注册：pluginId 用于 gate 过滤 */
-    public void register(String pluginId, Tool tool) {
+    public synchronized void register(String pluginId, Tool tool) {
         String key = tool.name().toLowerCase();
-        tools.put(key, tool);
-        ownerOf.put(key, pluginId);   // 同名覆盖时归属一并更新
+        Map<String, Tool> nextTools = new LinkedHashMap<String, Tool>(tools);
+        nextTools.put(key, tool);
+        tools = nextTools;
+        Map<String, String> nextOwners = new HashMap<String, String>(ownerOf);
+        nextOwners.put(key, pluginId);   // 同名覆盖时归属一并更新
+        ownerOf = nextOwners;
     }
 
     public void setGate(PluginGate gate) { this.gate = gate; }
+
+    /** Replace session-local state without dropping its existing plugin/permission ownership. */
+    public synchronized boolean replaceInstance(Tool expected, Tool replacement) {
+        if(expected==null||replacement==null||!expected.name().equalsIgnoreCase(replacement.name()))return false;
+        String key=expected.name().toLowerCase();
+        if(tools.get(key)!=expected)return false;
+        Map<String, Tool> nextTools = new LinkedHashMap<String, Tool>(tools);
+        nextTools.put(key,replacement);
+        tools=nextTools;
+        return true;
+    }
 
     /** 按名取工具；属于已禁用插件的工具返回 null（AgentLoop 回「工具不存在或已停用」） */
     public Tool get(String name) {

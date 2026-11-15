@@ -7,6 +7,13 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class ToolRegistryTest {
+    @Test public void replacingRuntimeInstanceDoesNotEnableDisabledPlugin() {
+        ToolRegistry reg=new ToolRegistry();Tool original=new ExampleTool(),replacement=new ExampleTool();
+        reg.register("disabled",original);reg.setGate(plugin->false);
+        assertTrue(reg.replaceInstance(original,replacement));assertNull(reg.get(original.name()));assertTrue(reg.schemas().isEmpty());
+        reg.setGate(plugin->true);assertSame(replacement,reg.get(original.name()));
+        assertFalse(reg.replaceInstance(original,new ExampleTool()));
+    }
 
     @Test
     public void registerAndGet() {

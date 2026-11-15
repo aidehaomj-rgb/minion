@@ -1,5 +1,7 @@
 package com.minion.core.tools.system;
 
+import com.minion.core.tools.ToolArguments;
+
 import com.google.gson.JsonObject;
 import com.minion.core.diagnostics.DiagnosticLog;
 import com.minion.core.tools.SchemaGenerator;
@@ -40,5 +42,5 @@ public final class LogsTool implements Tool {
         return ToolResult.error("未知 action: " + action + "（支持 status/tail/export/clear）");
     }
     private static String str(JsonObject o, String k) { return o.has(k) && !o.get(k).isJsonNull() ? o.get(k).getAsString() : ""; }
-    private static int integer(JsonObject o, String k, int d) { try { return o.has(k) ? o.get(k).getAsInt() : d; } catch (Exception e) { return d; } }
+    private static int integer(JsonObject o, String k, int d) { return ToolArguments.integer(o, k, d); }
 }

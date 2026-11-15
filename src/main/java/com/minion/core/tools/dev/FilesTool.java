@@ -1,5 +1,7 @@
 package com.minion.core.tools.dev;
 
+import com.minion.core.tools.ToolArguments;
+
 import com.google.gson.JsonObject;
 import com.minion.core.tools.PathsGuard;
 import com.minion.core.tools.SchemaGenerator;
@@ -62,7 +64,7 @@ public final class FilesTool implements Tool {
     private static boolean binary(byte[]b){int bad=0;for(byte x:b){int v=x&0xff;if(v==0)return true;if(v<9||(v>13&&v<32))bad++;}return b.length>0&&bad>b.length/20;}
     private static int lineOf(String s,int at){int line=1;for(int i=0;i<at;i++)if(s.charAt(i)=='\n')line++;return line;}
     private static String text(JsonObject o,String k){return o.has(k)&&!o.get(k).isJsonNull()?o.get(k).getAsString():"";}
-    private static int integer(JsonObject o,String k,int d){try{return o.has(k)?o.get(k).getAsInt():d;}catch(Exception e){return d;}}
-    private static long longVal(JsonObject o,String k,long d){try{return o.has(k)?o.get(k).getAsLong():d;}catch(Exception e){return d;}}
+    private static int integer(JsonObject o,String k,int d){return ToolArguments.integer(o,k,d);}
+    private static long longVal(JsonObject o,String k,long d){return ToolArguments.longVal(o,k,d);}
     private static boolean bool(JsonObject o,String k){return o.has(k)&&o.get(k).getAsBoolean();}
 }

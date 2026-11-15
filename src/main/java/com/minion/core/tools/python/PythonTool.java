@@ -1,5 +1,7 @@
 package com.minion.core.tools.python;
 
+import com.minion.core.tools.ToolArguments;
+
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -65,5 +67,5 @@ public class PythonTool implements Tool {
         return out;
     }
     private static String str(JsonObject o, String k) { return o.has(k) && !o.get(k).isJsonNull() ? o.get(k).getAsString() : ""; }
-    private static int integer(JsonObject o, String k, int def) { try { return o.has(k) ? Integer.parseInt(o.get(k).getAsString()) : def; } catch (Exception e) { return def; } }
+    private static int integer(JsonObject o, String k, int def) { return ToolArguments.integer(o, k, def); }
 }

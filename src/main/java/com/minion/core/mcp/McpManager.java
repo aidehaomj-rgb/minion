@@ -19,7 +19,8 @@ public class McpManager {
     }
 
     private final McpStore store;
-    private final List<Listener> listeners = new ArrayList<Listener>();
+    /** 连接线程触发通知、FX 线程增删；COW 迭代器天然支持回调中 removeListener 自注销 */
+    private final List<Listener> listeners = new java.util.concurrent.CopyOnWriteArrayList<Listener>();
     /** name → 已建立的客户端（连接成功后放入，disconnect/shutdown 移除） */
     private final Map<String, McpHandle> clients = new HashMap<String, McpHandle>();
 
@@ -183,7 +184,6 @@ public class McpManager {
     }
 
     private void notifyListeners(McpServer s) {
-        // 快照遍历：回调中可能 removeListener（GUI 自注销），直接遍历会 ConcurrentModificationException
-        for (Listener l : new ArrayList<Listener>(listeners)) l.onStateChanged(s);
+        for (Listener l : listeners) l.onStateChanged(s);
     }
 }

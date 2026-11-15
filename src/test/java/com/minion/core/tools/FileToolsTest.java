@@ -324,6 +324,19 @@ public class FileToolsTest {
         assertTrue(r.output.contains("A.java"));
     }
 
+    @Test public void glob_acceptsWorkspaceRelativeAndAbsolutePatternsWithSearchPath() throws Exception {
+        Path file=p("src/A.java");
+        Files.createDirectories(file.getParent());
+        Files.write(file,"x".getBytes(StandardCharsets.UTF_8));
+        JsonObject relative=new JsonObject();
+        relative.addProperty("pattern","src/*.java");
+        relative.addProperty("path","src");
+        assertTrue(glob.execute(relative).output.contains("src/A.java"));
+        JsonObject absolute=new JsonObject();
+        absolute.addProperty("pattern",file.toAbsolutePath().toString());
+        assertTrue(glob.execute(absolute).output.contains("src/A.java"));
+    }
+
     @Test
     public void glob_pathParam_outside_confirmApprove_allows() throws Exception {
         Path outside = java.nio.file.Files.createTempDirectory("minion-glob-outside");

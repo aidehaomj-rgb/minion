@@ -30,6 +30,21 @@ public class BashTool implements Tool {
     // 纯 cd 命令识别：整命令只有 cd [dir]，不含 && / | 等复合语法
     private static final Pattern CD_PATTERN =
             Pattern.compile("^cd(?:[ \\t]+(\\S+))?[ \\t]*$");
+    // Only a single, unquoted command without shell expansions, redirects or
+    // separators qualifies. Python, rg (--pre), find (-exec), scripts and pipes
+    // remain potentially mutating even when they look like a query.
+    private static final Pattern SIMPLE_READ_ARGS =
+            Pattern.compile("[\\p{L}\\p{N}_./:\\-+,= \\t]+");
+    private static final List<String> SIMPLE_READ_COMMANDS = Arrays.asList(
+            "pwd", "ls", "dir", "cat", "head", "tail", "wc", "stat", "grep", "echo", "true", "false");
+
+    public static boolean provablyReadOnly(String command) {
+        if (command == null) return false;
+        String trimmed = command.trim();
+        if (trimmed.isEmpty() || !SIMPLE_READ_ARGS.matcher(trimmed).matches()) return false;
+        String name = trimmed.split("[ \\t]+", 2)[0];
+        return SIMPLE_READ_COMMANDS.contains(name);
+    }
 
     private final Workspace workspace;
     /** 会话临时目录（jarDir/.session/tmp/<sessionId>；null = 落盘降级为纯内存截断） */
@@ -46,7 +61,11 @@ public class BashTool implements Tool {
     public String name() { return "Bash"; }
 
     @Override
-    public String description() { return "在工作目录执行 shell 命令（默认超时120秒，危险命令需确认）"; }
+    public String description() {
+        return "在工作目录执行 shell 命令（默认超时120秒，危险命令需确认）。"
+                + "打开网页不得用 start、Start-Process、chrome.exe 等重复拉起；"
+                + "有 Browser 工具时用 Browser(open)，否则用 OpenUrl 且每个 URL 只执行一次。";
+    }
 
     @Override
     public JsonObject schema() {
@@ -62,14 +81,14 @@ public class BashTool implements Tool {
     @Override
     public ToolResult execute(JsonObject args) throws Exception {
         String command = args.has("command") ? args.get("command").getAsString() : "";
-        if (command.isEmpty()) return ToolResult.error("缺少 command 参数");
+        if (command.isEmpty()) return ToolResult.errorWithoutSideEffects("缺少 command 参数");
         final int timeout;
         try {
             timeout = args.has("timeoutSeconds") ? args.get("timeoutSeconds").getAsInt() : DEFAULT_TIMEOUT;
         } catch (NumberFormatException e) {
-            return ToolResult.error("参数 timeoutSeconds 格式错误: " + e.getMessage());
+            return ToolResult.errorWithoutSideEffects("参数 timeoutSeconds 格式错误: " + e.getMessage());
         }
-        if (timeout < 1) return ToolResult.error("timeoutSeconds 非法: " + timeout);
+        if (timeout < 1) return ToolResult.errorWithoutSideEffects("timeoutSeconds 非法: " + timeout);
 
         // 纯 cd 命令直接改会话级 cwd（跨命令持久化）；复合命令（含 && 等）走 shell 原样执行
         String trimmed = command.trim();
@@ -77,7 +96,7 @@ public class BashTool implements Tool {
         if (cdM.matches()) {
             Path target = workspace.cd(cdM.group(1));
             if (target == null) {
-                return ToolResult.error("cd 失败: 目录不存在或在工作路径之外(cd 仅限工作区内),当前目录: " + workspace.cwd());
+                return ToolResult.errorWithoutSideEffects("cd 失败: 目录不存在或在工作路径之外(cd 仅限工作区内),当前目录: " + workspace.cwd());
             }
             return ToolResult.success("当前目录: " + target);
         }
@@ -109,17 +128,21 @@ public class BashTool implements Tool {
                     out.append(line);
                     out.append("\n");
                 }
-            } catch (IOException ignored) { } finally {
+            } catch (IOException ignored) {
+            } catch (RuntimeException unexpected) {
+                // append/落盘意外异常不静默吞掉：留一行 stderr 便于排查截断文件
+                System.err.println("[minion] bash 输出读取线程异常退出: " + unexpected);
+            } finally {
                 out.close();   // 确保 join 后落盘文件内容完整可见
             }
-        });
+        }, "minion-bash-reader");
         reader.setDaemon(true); // 双保险：子进程万一杀不掉（管道不 EOF），也不拖住 JVM 退出（关窗残留根因之一）
         reader.start();
 
         // bash 启动后立即把 pid 读入内存（轮询等探针写入，一般毫秒级完成）：
         // killTree 依赖探针文件在 e2e 关闭场景会被提前删除（实测 join 等待期间文件
         // 丢失 → readPid=-1 → 组杀跳过 → 孤儿逃逸），必须用内存 pid 兜底组杀
-        final int bashPid = awaitPid(pidFile);
+        final int bashPid = isWindows() && findGitBash() == null ? -1 : awaitPid(pidFile);
 
         // 超时判定：单线程 waitFor(timeout) 权威判定，返回 false 即截止时进程仍存活，
         // 保证"命令超时"报告必然对应真实超时。旧实现用 killer 线程 isAlive() + 共享
@@ -223,7 +246,7 @@ public class BashTool implements Tool {
                 String bash = findGitBash();
                 if (bash != null) cmd = new String[]{bash, "-c", "kill -9 -" + pid};
             } else {
-                cmd = new String[]{"kill", "-9", "-" + pid};
+                cmd = new String[]{"kill", "-9", "--", "-" + pid};
             }
             if (cmd != null) {
                 try {
@@ -232,7 +255,7 @@ public class BashTool implements Tool {
                 } catch (Exception ignored) { }
             }
         }
-        process.destroyForcibly(); // 兜底：组杀失败或 pid 不可得时至少杀直接子进程
+        ProcessCleanup.terminate(process); // Windows cmd 分支也清理整棵进程树。
     }
 
     /** 轮询读探针文件里的 shell pid（bash 启动后毫秒级写入）；3 秒内读不到返回 -1。
@@ -326,7 +349,11 @@ public class BashTool implements Tool {
                     if (idx >= 0) out = line.substring(idx + "REG_SZ".length()).trim();
                 }
             }
-            p.waitFor();
+            // reg query 正常毫秒级完成；waitFor 带超时防极端卡死阻塞工具线程
+            if (!p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return null;
+            }
             return out;
         } catch (Exception e) {
             return null;

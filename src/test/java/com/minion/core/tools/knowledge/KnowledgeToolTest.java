@@ -1,11 +1,15 @@
 package com.minion.core.tools.knowledge;
 
 import com.google.gson.JsonObject;
+import com.minion.core.config.Config;
 import com.minion.core.tools.ToolResult;
 import com.minion.core.tools.Workspace;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import static org.junit.Assert.*;
 
 public class KnowledgeToolTest {
@@ -25,6 +29,51 @@ public class KnowledgeToolTest {
     @Test public void refusesTraversalName() throws Exception {
         KnowledgeTool tool=new KnowledgeTool(new Workspace(tmp.getRoot().getPath()));JsonObject read=args("read");read.addProperty("name","../secret.md");
         assertFalse(tool.execute(read).ok);
+    }
+    @Test public void sharedMarkdownIsLiveAcrossProjectsWithoutCopying() throws Exception {
+        Path shared=tmp.newFolder("shared").toPath();
+        Path nested=Files.createDirectories(shared.resolve("海关政策"));
+        Path note=nested.resolve("税则.md");
+        Files.write(note,"进口税则第一版".getBytes(StandardCharsets.UTF_8));
+        Config config=Config.load(tmp.newFolder("config").toPath());
+        KnowledgeTool first=new KnowledgeTool(new Workspace(tmp.newFolder("project-a").getPath()),config);
+        KnowledgeTool second=new KnowledgeTool(new Workspace(tmp.newFolder("project-b").getPath()),config);
+        JsonObject connect=args("connect");connect.addProperty("path",shared.toString());
+        assertTrue(first.isHighRisk(connect));
+        assertTrue(first.execute(connect).ok);
+        assertEquals(shared.toRealPath().toString(),config.sharedKnowledgeDir());
+        JsonObject search=args("search");search.addProperty("query","进口税则");
+        assertTrue(first.execute(search).output.contains("shared/海关政策/税则.md"));
+        assertTrue(second.execute(search).output.contains("第一版"));
+        Files.write(note,"进口税则第二版".getBytes(StandardCharsets.UTF_8));
+        assertTrue(second.execute(search).output.contains("第二版"));
+        JsonObject read=args("read");read.addProperty("name","shared/海关政策/税则.md");
+        assertTrue(first.execute(read).output.contains("第二版"));
+        JsonObject delete=args("delete");delete.addProperty("name","shared/海关政策/税则.md");
+        assertFalse(first.execute(delete).ok);
+        assertTrue(Files.exists(note));
+        assertTrue(second.execute(args("disconnect")).ok);
+        assertEquals("",config.sharedKnowledgeDir());
+        assertFalse(second.execute(search).output.contains("第二版"));
+    }
+
+    @Test public void connectRejectsMissingOrRelativeDirectory() throws Exception {
+        Config config=Config.load(tmp.newFolder("config-invalid").toPath());
+        KnowledgeTool tool=new KnowledgeTool(new Workspace(tmp.newFolder("project-invalid").getPath()),config);
+        JsonObject relative=args("connect");relative.addProperty("path","somewhere");
+        assertFalse(tool.execute(relative).ok);
+        JsonObject missing=args("connect");missing.addProperty("path",tmp.getRoot().toPath().resolve("missing").toString());
+        assertFalse(tool.execute(missing).ok);
+        assertEquals("",config.sharedKnowledgeDir());
+    }
+
+    @Test public void missingSharedDirectoryDoesNotCreateIt() throws Exception {
+        Path missing=tmp.getRoot().toPath().resolve("not-there");
+        Config config=Config.load(tmp.newFolder("config-missing").toPath());
+        config.set("knowledge.shared.dir",missing.toString());
+        KnowledgeTool tool=new KnowledgeTool(new Workspace(tmp.newFolder("project").getPath()),config);
+        assertTrue(tool.execute(args("list")).output.contains("共享知识库目录不可用"));
+        assertFalse(Files.exists(missing));
     }
     private static JsonObject args(String action){JsonObject o=new JsonObject();o.addProperty("action",action);return o;}
 }

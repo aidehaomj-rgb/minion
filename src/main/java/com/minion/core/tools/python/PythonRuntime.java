@@ -45,7 +45,7 @@ public final class PythonRuntime {
 
     public RunResult status(Path cwd) throws IOException {
         Path python = require();
-        String code = "import sys\nmods=['pandas','numpy','openpyxl','xlrd','matplotlib','sqlite3','PyPDF2','pdfminer','flask','requests','PyInstaller']\n"
+        String code = "import sys\nmods=['pandas','numpy','openpyxl','xlrd','matplotlib','sqlite3','PyPDF2','pdfminer','docx','pptx','PIL','flask','requests','PyInstaller']\n"
                 + "print('executable='+sys.executable)\nprint('version='+sys.version.replace('\\n',' '))\n"
                 + "results=[]\n"
                 + "for m in mods:\n"
@@ -97,13 +97,15 @@ public final class PythonRuntime {
                     }
                 }
             } catch (IOException ignored) { }
-        });
+        }, "minion-python-reader");
         reader.setDaemon(true); reader.start();
         boolean finished;
         try { finished = process.waitFor(Math.max(1, timeoutSeconds), TimeUnit.SECONDS); }
         catch (InterruptedException e) { Thread.currentThread().interrupt(); finished = false; }
         if (!finished) {
             killTree(process);
+            // kill 后确认死亡（有界等待），防 taskkill 尚未生效即返回造成进程句柄滞留
+            try { process.waitFor(5, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             return new RunResult(-1, text(out) + "\n[Python 执行超时，已终止]", true);
         }
         try { reader.join(3000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
@@ -118,38 +120,23 @@ public final class PythonRuntime {
     }
 
     private static void killTree(Process process) {
-        try {
-            long pid = pidOf(process);
-            if (pid > 0 && System.getProperty("os.name", "").toLowerCase().contains("win")) {
-                new ProcessBuilder("taskkill", "/PID", String.valueOf(pid), "/T", "/F").start().waitFor(5, TimeUnit.SECONDS);
-            }
-        } catch (Exception ignored) { }
-        process.destroy();
-        try { process.destroyForcibly(); } catch (Throwable ignored) { }
-    }
-
-    /** Java 8 无 Process.pid()；Windows JDK8 ProcessImpl 保存 long handle，取不到时仍可 destroy。 */
-    private static long pidOf(Process p) {
-        try {
-            java.lang.reflect.Field f = p.getClass().getDeclaredField("handle");
-            f.setAccessible(true);
-            long handle = f.getLong(p);
-            Class<?> kernel = Class.forName("java.lang.ProcessImpl");
-            java.lang.reflect.Method m = kernel.getDeclaredMethod("getProcessId", long.class);
-            m.setAccessible(true);
-            return ((Number) m.invoke(null, handle)).longValue();
-        } catch (Exception ignored) { return -1; }
+        com.minion.core.tools.ProcessCleanup.terminate(process);
     }
 
     private static Path findOnPath() {
         for (String name : new String[]{"python.exe", "python3.exe"}) {
+            Process p = null;
             try {
-                Process p = new ProcessBuilder("where", name).redirectErrorStream(true).start();
+                p = new ProcessBuilder("where", name).redirectErrorStream(true).start();
+                String first = null;
                 try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-                    String line = br.readLine();
-                    if (line != null && Files.isRegularFile(Paths.get(line.trim()))) return Paths.get(line.trim()).toAbsolutePath();
+                    first = br.readLine();
                 }
-            } catch (Exception ignored) { }
+                if (!p.waitFor(10, TimeUnit.SECONDS)) { p.destroyForcibly(); continue; }
+                if (first != null && Files.isRegularFile(Paths.get(first.trim()))) return Paths.get(first.trim()).toAbsolutePath();
+            } catch (Exception ignored) {
+                if (p != null) p.destroyForcibly();
+            }
         }
         return null;
     }
