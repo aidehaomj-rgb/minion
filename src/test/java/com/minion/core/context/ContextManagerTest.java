@@ -1,6 +1,7 @@
 package com.minion.core.context;
 
 import com.minion.core.llm.FakeLlmClient;
+import com.minion.core.llm.ImagePart;
 import com.minion.core.llm.Message;
 import com.minion.core.llm.ToolCall;
 import org.junit.Test;
@@ -13,6 +14,248 @@ import java.util.List;
 import static org.junit.Assert.*;
 
 public class ContextManagerTest {
+    @Test public void millionTokenWindowCompressesAtPracticalSoftLimit() {
+        ContextManager cm=new ContextManager(1000000,0.9,50,new FakeLlmClient(),0);
+        assertEquals(150000,cm.autoCompressAtTokens());
+        List<Message> messages=Collections.singletonList(Message.user("当前任务"));
+        cm.observeInputTokens(messages,60000); assertFalse(cm.shouldCompress(messages));
+        cm.observeInputTokens(messages,119999); assertFalse(cm.shouldCompress(messages));
+        cm.observeInputTokens(messages,120000); assertFalse(cm.shouldCompress(messages));
+        cm.observeInputTokens(messages,149999); assertFalse(cm.shouldCompress(messages));
+        cm.observeInputTokens(messages,150000); assertTrue(cm.shouldCompress(messages));
+        cm.update(1000000,0.95,50); assertEquals(150000,cm.autoCompressAtTokens());
+        cm.update(1048576,0.9,50); assertEquals(150000,cm.autoCompressAtTokens());
+    }
+    @Test public void selectedModelStableWorksetIsIndependentAndFailureStillShrinksIt() {
+        ContextManager cm=new ContextManager(1000000,0.9,50,new FakeLlmClient(),0);
+        cm.setStableContextTokens(180000);
+        assertEquals(180000,cm.autoCompressAtTokens());
+        cm.learnFromContextFailure(170000);
+        assertEquals(137700,cm.autoCompressAtTokens());
+        cm.update(1000000,0.9,50);
+        cm.setStableContextTokens(80000);
+        assertEquals(80000,cm.autoCompressAtTokens());
+        cm.setStableContextTokens(0);
+        assertEquals(150000,cm.autoCompressAtTokens());
+    }
+    @Test public void twoHundredKHistoryIsSplitBeforeSummarizerRequests() {
+        FakeLlmClient llm=new FakeLlmClient();
+        ContextManager cm=new ContextManager(1000000,0.9,2,llm,0);
+        List<Message> history=new ArrayList<Message>();
+        char[] payload=new char[16000];Arrays.fill(payload,'历');
+        for(int i=0;i<16;i++) {history.add(Message.user("阶段"+i+new String(payload)));history.add(Message.assistant("已记录"));}
+        assertTrue(cm.estimate(history)>120000);
+        List<Message> compacted=cm.compressForRecovery(history,"清单","当前目标不变");
+        assertNotSame(history,compacted);
+        assertTrue(llm.completeChatRequests.size()>1);
+        for(String request:llm.completeChatRequests)
+            assertTrue("summary batch too large: "+TokenCounter.estimate(request),TokenCounter.estimate(request)<40000);
+    }
+    @Test public void hugeOriginalTaskRemainsDurableButIsBoundedInSummaryRequests() {
+        FakeLlmClient llm=new FakeLlmClient();
+        ContextManager cm=new ContextManager(1000000,0.9,2,llm,0);
+        char[] chars=new char[240000];Arrays.fill(chars,'甲');
+        String original="最初要求"+new String(chars)+"最终约束：保留所有编号";
+        List<Message> history=new ArrayList<Message>();
+        for(int i=0;i<8;i++){history.add(Message.user("历史阶段"+i));history.add(Message.assistant("结果"+i));}
+        List<Message> after=cm.compressForRecovery(history,"任务清单",original);
+        assertNotSame(history,after);
+        assertTrue(after.get(0).content.length()<40000);
+        assertTrue(after.get(0).content.contains("最终约束：保留所有编号"));
+        for(String request:llm.completeChatRequests)
+            assertTrue("oversized compaction control",request.length()<60000);
+        assertEquals(240000+"最初要求".length()+"最终约束：保留所有编号".length(),original.length());
+    }
+    @Test public void longToolOutputDedupUsesCompactKeysWithoutHashCollisionDataLoss() {
+        ContextManager cm=new ContextManager(1000000,0.9,12,new FakeLlmClient(),0);
+        String a=String.join("",Collections.nCopies(600,"Aa"));
+        String b=String.join("",Collections.nCopies(600,"BB"));
+        assertEquals(a.hashCode(),b.hashCode());
+        List<Message> distinct=Arrays.asList(Message.toolResult("a","Read",a),Message.toolResult("b","Read",b));
+        assertEquals(a,cm.prepareForRequest(distinct).get(0).content);
+        List<Message> repeated=Arrays.asList(Message.toolResult("a","Read",a),Message.toolResult("b","Read",a));
+        assertTrue(cm.prepareForRequest(repeated).get(0).content.contains("重复工具输出已去重"));
+    }
+
+    @Test public void requestProjectionDropsInternalControlPairsButKeepsOperationalTools() {
+        ContextManager cm=new ContextManager(1000000,0.9,12,new FakeLlmClient(),0);
+        ToolCall control=new ToolCall();control.id="control-1";control.name="AgentControl";
+        control.type="function";control.arguments="{\"action\":\"plan_steps\"}";
+        Message controlCall=Message.assistant(null);controlCall.toolCalls=new ArrayList<ToolCall>();
+        controlCall.toolCalls.add(control);
+        ToolCall active=new ToolCall();active.id="read-1";active.name="Read";
+        active.type="function";active.arguments="{\"path\":\"a.txt\"}";
+        Message activeCall=Message.assistant(null);activeCall.toolCalls=new ArrayList<ToolCall>();
+        activeCall.toolCalls.add(active);
+        List<Message> prepared=cm.prepareForRequest(Arrays.asList(
+                Message.user("检查文件"),
+                controlCall,Message.toolResult("control-1","AgentControl","ok"),
+                activeCall,Message.toolResult("read-1","Read","content")));
+        assertEquals(3,prepared.size());
+        assertEquals("Read",prepared.get(1).toolCalls.get(0).name);
+        assertEquals("Read",prepared.get(2).name);
+        assertTrue(prepared.stream().noneMatch(m->"AgentControl".equals(m.name)));
+    }
+
+    @Test public void requestProjectionBoundsLargeCurrentToolOutput() {
+        ContextManager cm=new ContextManager(1000000,0.9,12,new FakeLlmClient(),0);
+        char[] chars=new char[20000];Arrays.fill(chars,'输');
+        List<Message> prepared=cm.prepareForRequest(Collections.singletonList(
+                Message.toolResult("tool-1","Read",new String(chars))));
+        assertTrue(prepared.get(0).content.length()<14000);
+        assertTrue(prepared.get(0).content.contains("中间已省略"));
+    }
+    @Test public void configuredOutputBudgetCapsTriggerOnlyNearWindowEnd() {
+        ContextManager cm=new ContextManager(1000000,1,50,new FakeLlmClient(),0);
+        cm.setOutputReserveTokens(65536); assertEquals(150000,cm.autoCompressAtTokens());
+        cm.update(1000000,0.9,50); assertEquals(150000,cm.autoCompressAtTokens());
+        cm.setOutputReserveTokens(8192); cm.update(1000000,1,50); assertEquals(150000,cm.autoCompressAtTokens());
+        cm.setInitialSafeMax(60000); assertEquals(51808,cm.autoCompressAtTokens());
+    }
+    @Test public void legacyEightyPercentAndInvalidRatioFallbackRemainSafe() {
+        assertEquals(48000,new ContextManager(60000,0.8,50,new FakeLlmClient(),0).autoCompressAtTokens());
+        for(double invalid:new double[]{0,-1,2,Double.NaN,Double.POSITIVE_INFINITY}) {
+            assertEquals(150000,new ContextManager(1000000,invalid,50,new FakeLlmClient(),0).autoCompressAtTokens());
+        }
+    }
+
+    @Test public void explicitTaskAnchorOverridesOldTaskAndSurvivesFailedCompaction() {
+        FakeLlmClient llm=new FakeLlmClient(); ContextManager cm=new ContextManager(100,0.8,1,llm,0);
+        List<Message> messages=new ArrayList<Message>(Arrays.asList(Message.user("旧任务"),Message.assistant("旧任务已完成"),
+                Message.user("继续执行"),Message.assistant("准备")));
+        List<Message> compacted=cm.compressForRecovery(messages,"主目标+子Agent分工","新任务仅处理B表");
+        assertTrue(compacted.get(0).content.contains("【当前任务原文】\n新任务仅处理B表"));
+        assertTrue(llm.completeChatRequests.get(0).contains("主目标+子Agent分工"));
+        llm.throwOnCompleteChat=true;
+        assertSame(messages,cm.compressForRecovery(messages,"控制记录","主目标"));
+        cm.setTaskAnchorTokens(1000);
+        assertTrue(cm.estimate(messages)>=1000);
+    }
+
+    @Test
+    public void repeatedCompressionMergesPriorSummaryAndKeepsCurrentTaskVerbatim() {
+        FakeLlmClient firstLlm = new FakeLlmClient();
+        firstLlm.compressResult = "第一阶段已完成；下一步生成最终文件";
+        ContextManager first = new ContextManager(100, 0.8, 2, firstLlm, 0);
+        List<Message> history = new ArrayList<Message>();
+        history.add(Message.user("分析A表并生成最终Excel，不能漏行"));
+        history.add(assistantWithTools("Read"));
+        for (int i = 0; i < 5; i++) {
+            history.add(Message.toolResult("c_Read", "Read", "阶段结果" + i));
+            history.add(assistantWithTools("Read"));
+        }
+        List<Message> once = first.compressForRecovery(history, "- [x] 读取A表\n- [ ] 生成最终Excel");
+        assertTrue(once.get(0).content.contains("【当前任务原文】\n分析A表并生成最终Excel，不能漏行"));
+        assertTrue(once.get(0).content.contains("[ ] 生成最终Excel"));
+
+        once.add(Message.user("继续执行"));
+        once.add(Message.assistant("正在生成"));
+        once.add(Message.user("为什么又停止了"));
+        once.add(Message.assistant("恢复中"));
+        FakeLlmClient secondLlm = new FakeLlmClient();
+        secondLlm.compressResult = "第一阶段完成；最终Excel仍待生成";
+        ContextManager second = new ContextManager(100, 0.8, 1, secondLlm, 0);
+        List<Message> twice = second.compressForRecovery(once, "- [x] 读取A表\n- [ ] 生成最终Excel");
+
+        assertTrue(secondLlm.completeChatRequests.get(0).contains("第一阶段已完成；下一步生成最终文件"));
+        assertTrue(secondLlm.completeChatRequests.get(0).contains("【当前有效任务，以此为准】"));
+        assertTrue(twice.get(0).content.contains("【当前任务原文】\n分析A表并生成最终Excel，不能漏行"));
+        assertFalse(twice.get(0).content.contains("【当前任务原文】\n为什么又停止了"));
+        assertTrue(twice.get(0).content.contains("最终Excel仍待生成"));
+        assertTrue(twice.get(0).content.contains("[ ] 生成最终Excel"));
+    }
+
+    @Test
+    public void compressionFailureKeepsPriorSummaryAndTaskAnchor() {
+        FakeLlmClient llm = new FakeLlmClient();
+        llm.compressResult = "";
+        ContextManager cm = new ContextManager(100, 0.8, 1, llm, 0);
+        Message old = Message.user("【历史对话摘要】\n【当前任务原文】\n核查全部数据\n【历史背景】\n已检查前10行");
+        old.summary = true;
+        List<Message> messages = new ArrayList<Message>();
+        messages.add(old);
+        messages.add(Message.user("继续执行"));
+        messages.add(Message.assistant("处理中"));
+        List<Message> result = cm.compressForRecovery(messages, "- [ ] 检查剩余数据");
+        assertNotSame(messages, result);
+        assertTrue(result.get(0).summary);
+        assertTrue(result.get(0).content.contains("核查全部数据"));
+        assertTrue(result.get(0).content.contains("已检查前10行"));
+        assertTrue(result.get(0).content.contains("检查剩余数据"));
+    }
+
+    @Test
+    public void serverUsage_calibratesEstimateAndResetsOnModelChange() {
+        ContextManager cm = new ContextManager(131072, 0.8, 10, new FakeLlmClient(), 10);
+        List<Message> messages = Collections.singletonList(Message.user("测试内容"));
+        int original = cm.estimate(messages);
+        cm.observeInputTokens(messages, 110000);
+        assertEquals(110000, cm.estimate(messages));
+        assertTrue(cm.shouldCompress(messages));
+        cm.setLlm(new FakeLlmClient());
+        assertEquals(original, cm.estimate(messages));
+    }
+
+    @Test
+    public void safeWindowCanBeLoweredAndLearnsFromRealFailure() {
+        ContextManager cm = new ContextManager(131072, 0.8, 10, new FakeLlmClient(), 0);
+        cm.setInitialSafeMax(60000);
+        assertEquals(60000, cm.maxTokens());
+        assertEquals(48000, cm.autoCompressAtTokens());
+        assertEquals(49500, cm.learnFromContextFailure(55000));
+        assertEquals(49500, cm.maxTokens());
+        cm.update(131072, 0.8, 10);
+        assertEquals(131072, cm.maxTokens());
+    }
+
+    @Test
+    public void prepareForRequestShrinksOldHeavyDataButKeepsCurrentTaskAndOriginal() {
+        ContextManager cm = new ContextManager(131072, 0.8, 10, new FakeLlmClient(), 0);
+        List<Message> messages = new ArrayList<Message>();
+        Message oldUser = Message.userWithImages("旧问题", Collections.singletonList(image("old.png")));
+        messages.add(oldUser);
+        Message oldCall = assistantWithTools("Write");
+        oldCall.reasoningContent = repeat('思', 10000);
+        oldCall.toolCalls.get(0).arguments = "{\"text\":\"" + repeat('a', 10000) + "\"}";
+        messages.add(oldCall);
+        Message oldTool = Message.toolResult("c_Write", "Write", repeat('x', 30000));
+        messages.add(oldTool);
+        messages.add(Message.assistant("旧任务完成"));
+        messages.add(Message.user("当前任务必须完整保留"));
+        Message currentCall = assistantWithTools("Read");
+        currentCall.reasoningContent = repeat('现', 15000);
+        currentCall.toolCalls.get(0).arguments = "{\"path\":\"" + repeat('p', 17000) + "\"}";
+        messages.add(currentCall);
+        Message currentTool = Message.toolResult("c_Read", "Read", repeat('z', 30000));
+        messages.add(currentTool);
+
+        List<Message> prepared = cm.prepareForRequest(messages);
+        assertNull(prepared.get(0).images);
+        assertNotNull(oldUser.images); // 本地历史未改
+        assertTrue(prepared.get(1).reasoningContent.length() < oldCall.reasoningContent.length());
+        assertEquals("{\"_minion_compacted\":true,\"_original_chars\":10011}",
+                prepared.get(1).toolCalls.get(0).arguments);
+        assertTrue(prepared.get(2).content.length() < oldTool.content.length());
+        assertEquals("当前任务必须完整保留", prepared.get(4).content);
+        assertTrue(prepared.get(5).reasoningContent.length() < currentCall.reasoningContent.length());
+        assertEquals(currentCall.toolCalls.get(0).arguments, prepared.get(5).toolCalls.get(0).arguments);
+        assertTrue(prepared.get(6).content.length() < currentTool.content.length());
+        assertEquals(30000, currentTool.content.length());
+    }
+
+    private static ImagePart image(String name) {
+        ImagePart p = new ImagePart();
+        p.name = name;
+        p.mime = "image/png";
+        p.base64 = "AAAA";
+        return p;
+    }
+
+    private static String repeat(char c, int count) {
+        char[] chars = new char[count];
+        Arrays.fill(chars, c);
+        return new String(chars);
+    }
 
     private static Message assistantWithTools(String... names) {
         Message m = Message.assistant(null);

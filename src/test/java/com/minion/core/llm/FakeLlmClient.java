@@ -9,6 +9,8 @@ import java.util.List;
 public class FakeLlmClient implements LlmClient {
 
     public String compressResult = "【摘要】历史对话要点";
+    /** When true, return the raw fixture to test fail-closed checkpoint validation. */
+    public boolean rawCompressResult;
     /** 置 true 时 completeChat 抛 LlmException，模拟压缩请求异常（T16 Round1） */
     public boolean throwOnCompleteChat = false;
     /** 置入序号（1 起）的调用返回空串模拟压缩失败；其余返回 compressResult */
@@ -24,6 +26,30 @@ public class FakeLlmClient implements LlmClient {
     /** 每次 streamChat 请求的完整记录（消息 + 工具 schema），供测试断言请求序列 */
     public final List<RequestRecord> requests = new ArrayList<RequestRecord>();
     public int withoutThinkingCalls = 0;
+    public int actionRecoveryCalls = 0;
+    public final List<String> stopReviewRequests=new ArrayList<String>();
+    public final java.util.Queue<String> stopStatuses=new java.util.ArrayDeque<String>();
+    public String stopReviewRaw;
+    public String stopKind;
+    public java.util.function.Consumer<String> onStopReview;
+
+    @Override public StopReviewResponse reviewStop(String input,String systemPrompt) {
+        stopReviewRequests.add(input);if(onStopReview!=null)onStopReview.accept(input);
+        if(stopReviewRaw!=null)return new StopReviewResponse(stopReviewRaw,Usage.estimate(java.util.Collections.singletonList(Message.user(input)),stopReviewRaw));
+        com.google.gson.JsonObject data=com.google.gson.JsonParser.parseString(input).getAsJsonObject();
+        String candidate=data.get("candidate").getAsString();JsonObject facts=data.getAsJsonObject("facts");
+        boolean tools=facts.has("toolsUsed")&&facts.get("toolsUsed").getAsBoolean();
+        boolean structured=facts.has("structured")&&facts.get("structured").getAsBoolean();
+        String status=stopStatuses.isEmpty()?(facts.has("child")?"completed":com.minion.core.agent.LegacyStopFixtures.status(candidate,tools,structured)):stopStatuses.remove();
+        JsonObject answer=new JsonObject();for(String key:new String[]{"taskId","ticket","version"})answer.add(key,data.get(key));
+        String kind=stopKind==null?("continue".equals(status)&&(tools||structured)?"task":"answer"):stopKind;
+        answer.addProperty("status",status);answer.addProperty("kind",kind);answer.addProperty("reason","脚本核验："+status);
+        answer.addProperty("nextStep","task".equals(kind)?"立即调用工具核对并交付":"补足当前回答");com.google.gson.JsonArray refs=new com.google.gson.JsonArray();refs.add("reply");answer.add("evidence",refs);
+        if("task".equals(kind))for(com.google.gson.JsonElement item:data.getAsJsonArray("receipts")){
+            JsonObject r=item.getAsJsonObject();if(r.get("ok").getAsBoolean()){refs.add(r.get("ref"));break;}
+        }
+        return new StopReviewResponse(answer.toString(),new Usage());
+    }
 
     public static class ScriptedTurn {
         public final List<ToolCall> toolCalls;
@@ -75,6 +101,10 @@ public class FakeLlmClient implements LlmClient {
     }
 
     public void addTurn(String content) { turns.add(new ScriptedTurn(null, content)); }
+
+    public void addTurnWithFinish(List<ToolCall> calls, String content, String reason) {
+        turns.add(new ScriptedTurn(calls, content, null, null, false, null, reason));
+    }
 
     public void addTurnWithTools(List<ToolCall> toolCalls, String content) {
         turns.add(new ScriptedTurn(toolCalls, content));
@@ -140,7 +170,15 @@ public class FakeLlmClient implements LlmClient {
     }
 
     @Override
+    public void streamChatForAction(List<Message> messages, List<JsonObject> tools,
+                                    StreamHandler handler) throws LlmException {
+        actionRecoveryCalls++;
+        streamChatWithoutThinking(messages, tools, handler);
+    }
+
+    @Override
     public String completeChat(List<Message> messages, String systemPrompt) throws LlmException {
+        if(systemPrompt.startsWith(com.minion.core.agent.StopGate.SYSTEM))return reviewStop(messages.get(0).content,systemPrompt).text;
         if (throwOnCompleteChat) {
             throw new LlmException(LlmException.Type.OTHER, "模拟压缩请求失败", false);
         }
@@ -154,7 +192,17 @@ public class FakeLlmClient implements LlmClient {
                 : (messages.get(messages.size() - 1).content == null ? "" : messages.get(messages.size() - 1).content);
         completeChatRequests.add(batch);
         if (failAtCompleteChat.contains(completeChatCalls)) return "";
-        return compressResult;
+        if (rawCompressResult || compressResult == null || compressResult.trim().isEmpty()
+                || !systemPrompt.contains("上下文压缩器") || compressResult.contains("【最新用户要求】"))
+            return compressResult;
+        return compressResult + "\n【最新用户要求】按本轮最新要求执行"
+                + "\n【已完成及证据】待核验"
+                + "\n【未完成】待核验"
+                + "\n【关键决定及原因】无"
+                + "\n【证据位置】无"
+                + "\n【失败尝试】无"
+                + "\n【下一步】继续核对"
+                + "\n【不确定事项】无";
     }
 
     /** close() 被调用次数（会话删除/退出时资源释放断言） */

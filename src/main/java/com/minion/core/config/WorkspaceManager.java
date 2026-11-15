@@ -59,6 +59,7 @@ public class WorkspaceManager {
     /** 名称合法性：非空、无非法字符、不重名（大小写不敏感，Windows 目录安全） */
     public static boolean isValidName(String name, List<String> existing) {
         if (name == null || name.trim().isEmpty()) return false;
+        if (".".equals(name.trim()) || "..".equals(name.trim())) return false;
         if (name.matches(".*" + ILLEGAL_CHARS + ".*")) return false;
         for (String e : existing) {
             if (e != null && e.equalsIgnoreCase(name)) return false;
@@ -155,7 +156,9 @@ public class WorkspaceManager {
         workspaces.remove(get(name));
         if (currentName.equals(name)) currentName = workspaces.get(0).workSpaceName;
         try {
-            deleteRecursively(sessionDirFor(file.getParent(), name));
+            Path sessionRoot = file.getParent().resolve("session").toAbsolutePath().normalize();
+            Path dir = sessionDirFor(file.getParent(), name).toAbsolutePath().normalize();
+            if (dir.startsWith(sessionRoot) && !dir.equals(sessionRoot)) deleteRecursively(dir);
         } catch (IOException ignored) {
             // 目录删除失败不阻断配置删除
         }
@@ -178,7 +181,7 @@ public class WorkspaceManager {
         if (from == newIndex) return true;
         workspaces.remove(from);
         workspaces.add(newIndex, w);
-        save();
+        if(!save()){workspaces.remove(newIndex);workspaces.add(from,w);return false;}
         return true;
     }
 
@@ -201,7 +204,7 @@ public class WorkspaceManager {
         return n;
     }
 
-    private void save() {
+    private boolean save() {
         // 原子写：先写 *.tmp 再 move 覆盖，避免半截文件；失败清理 tmp
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
         try {
@@ -211,11 +214,13 @@ public class WorkspaceManager {
             Files.createDirectories(file.getParent());
             Files.write(tmp, new Gson().toJson(h).getBytes(StandardCharsets.UTF_8));
             Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            return true;
         } catch (IOException e) {
             try {
                 Files.deleteIfExists(tmp);
             } catch (IOException ignored) { }
             System.err.println("[minion] 写入 workspace.json 失败: " + e.getMessage());
+            return false;
         }
     }
 

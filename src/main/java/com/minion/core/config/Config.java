@@ -92,8 +92,13 @@ public class Config {
     }
 
     public String skillsDir()    { return get("skills.dir", "./skills"); }
+    /** 所有工作空间共用的只读 Markdown 知识库目录；留空则只使用项目知识库。 */
+    public String sharedKnowledgeDir() { return get("knowledge.shared.dir", ""); }
     /** Python/Anaconda 解释器；留空时自动探测 MINION_PYTHON、Conda 和常见安装目录。 */
     public String pythonPath()   { return get("python.path", ""); }
+    public String ocrPath() { return get("ocr.path", "tesseract"); }
+    public String ocrLanguage() { return get("ocr.language", "chi_sim+eng"); }
+    public String officePath() { return get("office.path", "soffice"); }
 
     /** 空间外读：true 时 Read/Grep/Glob 可读取工作区外文件（写入类工具不受影响，仍受限） */
     public boolean readAllowOutside() { return Boolean.parseBoolean(get("paths.read.allowOutside", "false")); }
@@ -108,6 +113,8 @@ public class Config {
     public String contextReadMode() { return get("context.readMode", "chunked"); }
     /** 输入框发送键：true=Enter 发送（Ctrl+Enter 换行）；false=Ctrl+Enter 发送（Enter 换行）；无键（空/旧配置）默认 true */
     public boolean enterSends() { return Boolean.parseBoolean(get("input.enterSends", "true")); }
+    /** 工作台主题 id；未知值由 Theme 统一回落深夜黑。 */
+    public String uiTheme() { return get("ui.theme", "obsidian"); }
     public Set<String> whitelistTools()    { return csv(get("confirm.whitelist.tools", "")); }
     public Set<String> whitelistCommands() { return csv(get("confirm.whitelist.commands", "")); }
     private static Set<String> csv(String s) {
@@ -119,6 +126,13 @@ public class Config {
     }
 
     public Path externalFile() { return externalFile; }
+
+    /** Host-owned budgets, never adjustable by a model tool call. */
+    public int taskContinuationWindows() { return positiveBudget("agent.task.continuationWindows", 96, 10000); }
+    private int positiveBudget(String key, int fallback, int maximum) {
+        try { int n = Integer.parseInt(get(key, String.valueOf(fallback))); return n > 0 && n <= maximum ? n : fallback; }
+        catch (RuntimeException invalid) { return fallback; }
+    }
 
     /**
      * 运行时写回配置：更新内存 + 重写外部 config.properties（保留注释行，替换/追加 key 行）。

@@ -20,6 +20,40 @@ import static org.junit.Assert.*;
 
 public class DeepSeekClientTest {
 
+    @Test
+    public void eofWithoutTermination_isIncomplete() throws Exception {
+        server.enqueue(new MockResponse().setBody("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"));
+        final String[] reason = new String[1];
+        newClient().streamChat(Collections.singletonList(Message.user("hi")), null, new StreamHandler() {
+            @Override public void onFinish(String r, Usage usage, List<ToolCall> calls) {
+                reason[0] = r;
+                assertTrue(usage.estimated);
+            }
+        });
+        assertEquals("incomplete", reason[0]);
+    }
+
+    @Test
+    public void doneWithoutFinishReason_isAccepted() throws Exception {
+        server.enqueue(new MockResponse().setBody("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"));
+        final String[] reason = new String[1];
+        newClient().streamChat(Collections.singletonList(Message.user("hi")), null, new StreamHandler() {
+            @Override public void onFinish(String r, Usage usage, List<ToolCall> calls) { reason[0] = r; }
+        });
+        assertEquals("stop", reason[0]);
+    }
+
+    @Test
+    public void incompleteSummary_isRejected() throws Exception {
+        server.enqueue(new MockResponse().setBody("data: {\"choices\":[{\"delta\":{\"content\":\"partial summary\"}}]}\n\n"));
+        try {
+            newClient().completeChat(Collections.singletonList(Message.user("hi")), "summarize");
+            fail("Partial summary must not replace history");
+        } catch (LlmException expected) {
+            assertTrue(expected.getMessage().contains("保留原始上下文"));
+        }
+    }
+
     private MockWebServer server;
 
     @Before
@@ -244,6 +278,23 @@ public class DeepSeekClientTest {
                 .setChunkedBody("data: {\"choices\":[{\"delta\":{\"content\":\"摘要结果\"}}]}\n\ndata: [DONE]\n\n", 1));
         String r = newClient().completeChat(Collections.<Message>singletonList(Message.user("压缩")), "你是一个压缩器");
         assertEquals("摘要结果", r);
+    }
+
+    @Test
+    public void completeChat_triesWithoutThinkingThenFallsBackWhenGatewayReturnsNoText() throws Exception {
+        server.enqueue(new MockResponse().setBody(
+                "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"只返回思考\"},\"finish_reason\":\"stop\"}]}\n\n"
+                        + "data: [DONE]\n\n"));
+        server.enqueue(new MockResponse().setBody(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"摘要正文\"},\"finish_reason\":\"stop\"}]}\n\n"
+                        + "data: [DONE]\n\n"));
+        String result = newClient("qwen", true, "xhigh").completeChat(
+                Collections.singletonList(Message.user("待压缩历史")), "摘要指令");
+        assertEquals("摘要正文", result);
+        JsonObject first = JsonParser.parseString(server.takeRequest().getBody().readUtf8()).getAsJsonObject();
+        JsonObject second = JsonParser.parseString(server.takeRequest().getBody().readUtf8()).getAsJsonObject();
+        assertFalse(first.get("enable_thinking").getAsBoolean());
+        assertTrue(second.get("enable_thinking").getAsBoolean());
     }
 
     @Test

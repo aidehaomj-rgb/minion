@@ -22,12 +22,17 @@ import java.util.List;
 public class Main {
 
     public static void main(String[] args) throws Exception {
+        com.minion.core.tools.WindowsAppIdentity.initialize();
         Config config = Config.load();
         java.nio.file.Path jarDir = Config.jarDir();
         WorkspaceManager workspaces = WorkspaceManager.load(jarDir);
 
-        // 工具输出落盘目录清理：仅删修改超 3 天的旧文件（最近的可供回溯 Read）
-        OutputDump.cleanup(jarDir.resolve(".session").resolve("tmp"), OutputDump.RETENTION_MS);
+        // 过期输出清理不挡在窗口出现前；交给低优先级后台线程。
+        Thread cleanup = new Thread(() -> OutputDump.cleanup(
+                jarDir.resolve(".session").resolve("tmp"), OutputDump.RETENTION_MS), "minion-temp-cleanup");
+        cleanup.setDaemon(true);
+        cleanup.setPriority(Thread.MIN_PRIORITY);
+        cleanup.start();
         ModelManager models = ModelManager.load(jarDir);
 
         // 全局技能目录（所有工作空间/模型共用）

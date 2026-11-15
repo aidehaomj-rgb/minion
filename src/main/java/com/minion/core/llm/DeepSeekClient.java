@@ -45,10 +45,21 @@ public class DeepSeekClient implements LlmClient {
     private final int maxOutputTokens;
     /** SFM Agent Gateway 会话标识；同一个 Minion 会话内保持不变。 */
     private final String gatewaySessionId;
-    private final OkHttpClient http;
+    private volatile OkHttpClient http;
+    private final RequestTelemetry telemetry = new RequestTelemetry();
+    /** 仅阻止本实例完全相同图片请求的永久性拒绝；不推断整个模型的视觉能力。 */
+    private final java.util.LinkedHashSet<String> rejectedImageRequests = new java.util.LinkedHashSet<String>();
+    public RequestTelemetry telemetry() { return telemetry; }
+    public synchronized void clearRejectedImageRequests() { rejectedImageRequests.clear(); }
     /** 看门狗调度池（实例级，随 close 释放）：单线程 daemon，取消即出队、空闲可回收 */
     private final ScheduledExecutorService watchdogScheduler = newWatchdogScheduler();
     private volatile boolean closed;
+    /** 仅实例内记忆网关能力；不修改用户模型配置。 */
+    private volatile boolean requiredToolChoiceUnsupported;
+    private final Map<Thread,okhttp3.Call> stopReviews=new ConcurrentHashMap<Thread,okhttp3.Call>();
+    private static final int STOP_REVIEW_MAX_OUTPUT_TOKENS=1024;
+    private static final int STOP_REVIEW_MAX_BODY_BYTES=65536;
+    long stopReviewTimeoutMs=30000;
 
     private static ScheduledExecutorService newWatchdogScheduler() {
         ScheduledThreadPoolExecutor ex = new ScheduledThreadPoolExecutor(1, r -> {
@@ -84,21 +95,49 @@ public class DeepSeekClient implements LlmClient {
         this.provider = provider;
         this.maxOutputTokens = Math.max(256, Math.min(maxOutputTokens <= 0 ? 8192 : maxOutputTokens, 65536));
         this.gatewaySessionId = sessionId == null ? "" : sessionId.trim();
-        this.http = new OkHttpClient.Builder()
-                .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
-                .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
-                .build();
+        // HTTP/SSL initialization is deferred until the first request.
     }
+
+    private synchronized OkHttpClient http() {
+        if (closed) throw new IllegalStateException("LLM client is closed");
+        if (http == null) http = new OkHttpClient.Builder()
+                .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
+                .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS).build();
+        return http;
+    }
+
+    boolean httpInitialized() { return http != null; }
 
     private Request buildRequest(List<Message> messages, List<JsonObject> tools,
                                  boolean disableThinking) {
+        return buildRequest(messages, tools, disableThinking, false);
+    }
+
+    private Request buildRequest(List<Message> messages, List<JsonObject> tools,
+                                 boolean disableThinking, boolean requireAction) {
+        return buildRequest(messages, tools, disableThinking, requireAction, false);
+    }
+
+    private Request buildRequest(List<Message> messages, List<JsonObject> tools,
+                                 boolean disableThinking, boolean requireAction, boolean structuredProbe) {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("stream", true);
         body.addProperty("max_tokens", maxOutputTokens);
+        if (structuredProbe) {
+            JsonObject format = new JsonObject(); format.addProperty("type", "json_object");
+            body.add("response_format", format);
+        }
         // 按供应商生成思考参数（deepseek: thinking/reasoning_effort；qwen: enable_thinking）
         String effectiveProvider = effectiveProvider();
         JsonObject tp = thinkingParams(effectiveProvider, thinking && !disableThinking, reasoningEffort);
+        // DeepSeek 默认可开启思考；恢复时省略 thinking 并不等于关闭。
+        // required 在思考模式下不受支持，必须显式 disabled 后才发送。
+        if (disableThinking && "deepseek".equalsIgnoreCase(effectiveProvider)) {
+            tp = new JsonObject();
+            JsonObject disabled = new JsonObject(); disabled.addProperty("type", "disabled");
+            tp.add("thinking", disabled);
+        }
         if (tp != null) {
             for (Map.Entry<String, JsonElement> e : tp.entrySet()) body.add(e.getKey(), e.getValue());
         }
@@ -122,6 +161,10 @@ public class DeepSeekClient implements LlmClient {
             JsonArray arr = new JsonArray();
             for (JsonObject t : tools) arr.add(t);
             body.add("tools", arr);
+            if (requireAction) {
+                body.addProperty("tool_choice", "required");
+                body.addProperty("parallel_tool_calls", false);
+            }
         }
         Request.Builder rb = new Request.Builder()
                 .url(url)
@@ -165,21 +208,31 @@ public class DeepSeekClient implements LlmClient {
         for (okhttp3.Call c : inFlightCalls) {
             c.cancel();
         }
+        for(okhttp3.Call c:stopReviews.values()) c.cancel();
+    }
+
+    @Override public void cancelStopReview(Thread owner) {
+        if(owner!=null) {okhttp3.Call c=stopReviews.get(owner);if(c!=null)c.cancel();}
     }
 
     /**
-     * 释放底层资源：取消 in-flight 请求、关 dispatcher 线程、清空连接池。
-     * 幂等；okhttp 3.14 无 OkHttpClient.close()，连接池的 keep-alive 清理线程
-     * 是非 daemon 的（空闲 5 分钟才退出）——close 后连接池线程立即终止，
-     * JVM 不再被拖住（关窗约 5 分钟残留的根因）。
+     * 释放底层资源：取消 in-flight 请求、关 dispatcher 线程、清空连接池、关看门狗调度线程。
+     * 幂等；okhttp 4.x 已有 OkHttpClient.close()，但当前手动序列（dispatcher shutdown +
+     * evictAll）在 4.12 下同样等价收敛；连接池的 keep-alive 清理线程是非 daemon 的
+     * （空闲 5 分钟才退出）——close 后连接池线程立即终止，JVM 不再被拖住（关窗约
+     * 5 分钟残留的根因）。看门狗线程虽可 60s 空闲回收，频繁换模型时显式关闭更干净。
      */
     @Override
-    public void close() {
+    public synchronized void close() {
         if (closed) return;
         closed = true;
         cancel();
-        http.dispatcher().executorService().shutdown();
-        http.connectionPool().evictAll();
+        if (watchdogScheduler != null) watchdogScheduler.shutdownNow();
+        OkHttpClient h = http;
+        if (h != null) {
+            h.dispatcher().executorService().shutdown();
+            h.connectionPool().evictAll();
+        }
     }
 
     @Override
@@ -202,6 +255,39 @@ public class DeepSeekClient implements LlmClient {
         streamChatInternal(messages, tools, handler, true);
     }
 
+    @Override
+    public void streamChatForAction(List<Message> messages, List<JsonObject> tools,
+                                    StreamHandler handler) throws LlmException {
+        if ("sfm-agent".equalsIgnoreCase(provider) || tools == null || tools.isEmpty()) {
+            streamChatWithoutThinking(messages, tools, handler);
+            return;
+        }
+        if (requiredToolChoiceUnsupported) {
+            streamChatInternal(messages, tools, handler, true);
+            return;
+        }
+        try {
+            streamChatInternal(messages, tools, handler, true, true);
+        } catch (LlmException e) {
+            if (!isToolChoiceUnsupported(e)) throw e;
+            // HTTP 参数拒绝发生在收到模型内容前；仅这种明确能力错误允许一次协议回退。
+            requiredToolChoiceUnsupported = true;
+            com.minion.core.diagnostics.DiagnosticLog.info("llm-action-recovery",
+                    "required_tool_choice=unsupported fallback=auto");
+            streamChatInternal(messages, tools, handler, true);
+        }
+    }
+
+    private static boolean isToolChoiceUnsupported(LlmException e) {
+        if (LlmRecovery.classify(e) == LlmRecovery.Category.IMAGE_REJECTED) return false;
+        if (e.httpCode != 400 && e.httpCode != 422) return false;
+        String s = (String.valueOf(e.body) + " " + e.getMessage()).toLowerCase(java.util.Locale.ROOT);
+        return (s.contains("tool_choice") || s.contains("tool choice"))
+                && (s.contains("not supported") || s.contains("unsupported") || s.contains("unknown")
+                || s.contains("unrecognized") || s.contains("unrecognised") || s.contains("invalid value")
+                || s.contains("不支持"));
+    }
+
     /**
      * SFM Agent Studio Gateway 协议：
      * POST {stream:true, delta:true, sessionId, message:{text,metadata,attachments}}
@@ -209,6 +295,16 @@ public class DeepSeekClient implements LlmClient {
      * 网关自身负责 agent/tool 执行，因此不发送 Minion 的 tools schema。
      */
     private void streamSfmAgent(List<Message> messages, StreamHandler handler) throws LlmException {
+        RequestTelemetry.Attempt metric = new RequestTelemetry.Attempt("sfm_stream", messages, null);
+        try { streamSfmAgentAttempt(messages, handler, metric); }
+        catch (LlmException e) { metric.failure = LlmRecovery.classify(e); metric.recovery = LlmRecovery.action(e); throw e; }
+        finally { telemetry.record(metric); }
+    }
+
+    private void streamSfmAgentAttempt(List<Message> messages, StreamHandler handler,
+                                       RequestTelemetry.Attempt metric) throws LlmException {
+        // 网关可能已在远端执行动作，本地不知道工具边界；禁用本地工具承诺循环截停。
+        handler.onToolCallDelta();
         if (gatewaySessionId.isEmpty()) {
             throw new LlmException(LlmException.Type.BAD_REQUEST,
                     "SFM Agent 配置缺少 sessionId，请在 设置 → 模型 中填写服务端提供的 sessionId", false);
@@ -239,7 +335,7 @@ public class DeepSeekClient implements LlmClient {
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
                 .post(RequestBody.create(JSON, body.toString()));
-        okhttp3.Call call = http.newCall(rb.build());
+        okhttp3.Call call = http().newCall(rb.build());
         inFlightCalls.add(call);
         final boolean[] watchdogFired = new boolean[1];
         final ScheduledFuture<?> watchdog = watchdogScheduler.schedule(() -> {
@@ -247,7 +343,9 @@ public class DeepSeekClient implements LlmClient {
         }, firstTokenTimeoutMs, TimeUnit.MILLISECONDS);
         Usage usage = null;
         StringBuilder out = new StringBuilder();
+        metric.networkStart();
         try (Response response = call.execute()) {
+            metric.headers();
             if (!response.isSuccessful()) throw LlmException.of(response.code(), responseBody(response));
             if (response.body() == null) throw new LlmException(LlmException.Type.OTHER, "空响应", false);
             BufferedSource source = response.body().source();
@@ -259,8 +357,9 @@ public class DeepSeekClient implements LlmClient {
                 JsonObject chunk;
                 try { chunk = JsonParser.parseString(data).getAsJsonObject(); }
                 catch (RuntimeException ignored) { continue; }
+                metric.sse = true;
                 if (chunk.has("usage") && chunk.get("usage").isJsonObject())
-                    usage = Usage.fromJson(chunk.getAsJsonObject("usage"));
+                    metric.observedUsage(chunk.getAsJsonObject("usage"));
                 JsonArray content = chunk.has("content") && chunk.get("content").isJsonArray()
                         ? chunk.getAsJsonArray("content") : null;
                 if (content == null) continue;
@@ -271,11 +370,11 @@ public class DeepSeekClient implements LlmClient {
                     JsonElement textElement = item.get("text");
                     if (textElement.isJsonArray()) {
                         for (JsonElement part : textElement.getAsJsonArray()) {
-                            if (part.isJsonObject()) appendSfmText(part.getAsJsonObject(), out, handler, watchdog);
+                            if (part.isJsonObject()) appendSfmText(part.getAsJsonObject(), out, handler, watchdog, metric);
                         }
                     } else if (textElement.isJsonObject()) {
                         // 兼容部分网关版本返回 text:{value:...} 的旧格式。
-                        appendSfmText(textElement.getAsJsonObject(), out, handler, watchdog);
+                        appendSfmText(textElement.getAsJsonObject(), out, handler, watchdog, metric);
                     }
                 }
             }
@@ -287,19 +386,22 @@ public class DeepSeekClient implements LlmClient {
                     "网络错误: " + e.getMessage() + "（域名无法解析，请检查设置中的 API 地址）", false);
             throw new LlmException(LlmException.Type.NETWORK, "网络错误: " + e.getMessage(), true);
         } finally {
+            metric.networkEnd();
             watchdog.cancel(false); inFlightCalls.remove(call);
         }
-        if (usage == null) usage = Usage.estimate(messages, out.toString());
+        usage = metric.resolve(messages, out.toString());
+        metric.finish = "stop";
         handler.onUsage(usage);
         handler.onFinish("stop", usage, new ArrayList<ToolCall>());
     }
 
     private void appendSfmText(JsonObject text, StringBuilder out, StreamHandler handler,
-                               ScheduledFuture<?> watchdog) {
+                               ScheduledFuture<?> watchdog, RequestTelemetry.Attempt metric) {
         if (!text.has("value") || text.get("value").isJsonNull()) return;
         String delta = text.get("value").getAsString();
         if (delta.isEmpty()) return;
         watchdog.cancel(false);
+        metric.delta();
         out.append(delta);
         handler.onContent(delta);
     }
@@ -307,12 +409,71 @@ public class DeepSeekClient implements LlmClient {
     private void streamChatInternal(List<Message> messages, List<JsonObject> tools,
                                     StreamHandler handler, boolean disableThinking)
             throws LlmException {
+        streamChatInternal(messages, tools, handler, disableThinking, false);
+    }
+
+    private void streamChatInternal(List<Message> messages, List<JsonObject> tools,
+                                    StreamHandler handler, boolean disableThinking, boolean requireAction)
+            throws LlmException {
+        trackedStream(messages, tools, handler, disableThinking, requireAction, false);
+    }
+
+    /** 只供用户显式合成探测使用；不改变普通聊天或模型配置。仅测 json_object，非 JSON Schema。 */
+    public void probeStructuredOutput(List<Message> messages, StreamHandler handler) throws LlmException {
+        if ("sfm-agent".equalsIgnoreCase(provider))
+            throw new LlmException(LlmException.Type.BAD_REQUEST, "远端有状态Agent不支持隔离能力探测", false);
+        trackedStream(messages, null, handler, true, false, true);
+    }
+
+    private void trackedStream(List<Message> messages, List<JsonObject> tools, StreamHandler handler,
+                               boolean disableThinking, boolean requireAction, boolean structuredProbe) throws LlmException {
+        RequestTelemetry.Attempt metric = new RequestTelemetry.Attempt(structuredProbe ? "structured_probe" : "chat_stream", messages, tools);
+        String imageSignature = null;
+        try {
+            if (closed) throw new LlmException(LlmException.Type.OTHER, "客户端已关闭", false);
+            Request request = buildRequest(messages, tools, disableThinking, requireAction, structuredProbe);
+            boolean hasImages = false;
+            for (Message m : messages) if (m.images != null && !m.images.isEmpty()) { hasImages = true; break; }
+            if (hasImages) {
+                imageSignature = requestSignature(request);
+                synchronized (this) {
+                    if (rejectedImageRequests.contains(imageSignature)) {
+                        metric.cachedRejection = true;
+                        throw new LlmRecovery.Failure(LlmRecovery.Category.IMAGE_REJECTED, LlmException.Type.BAD_REQUEST,
+                                "同一图片请求已被接口明确拒绝，未重复发送；请改变请求/接口，或手动清除拒绝记录后重试", false, 400, null);
+                    }
+                }
+            }
+            streamChatAttempt(messages, tools, handler, request, metric);
+        } catch (LlmException e) {
+            metric.failure = LlmRecovery.classify(e);
+            metric.recovery = LlmRecovery.action(e);
+            if (imageSignature != null && metric.failure == LlmRecovery.Category.IMAGE_REJECTED) {
+                synchronized (this) {
+                    rejectedImageRequests.add(imageSignature);
+                    while (rejectedImageRequests.size() > 16) rejectedImageRequests.remove(rejectedImageRequests.iterator().next());
+                }
+            }
+            throw e;
+        } finally { telemetry.record(metric); }
+    }
+
+    private String requestSignature(Request request) throws LlmException {
+        try {
+            okio.Buffer bytes = new okio.Buffer(); request.body().writeTo(bytes);
+            return bytes.sha256().hex();
+        } catch (IOException e) { throw new LlmException(LlmException.Type.OTHER, "无法计算图片请求指纹", false); }
+    }
+
+    private void streamChatAttempt(List<Message> messages, List<JsonObject> tools, StreamHandler handler,
+                                   Request request, RequestTelemetry.Attempt metric) throws LlmException {
         List<ToolCall> acc = new ArrayList<ToolCall>();
         StringBuilder content = new StringBuilder();
         StringBuilder thinkingSb = new StringBuilder();
         Usage usage = null;
-        String finish = "stop";
-        final okhttp3.Call call = http.newCall(buildRequest(messages, tools, disableThinking));
+        String finish = null;
+        boolean sawDone = false;
+        final okhttp3.Call call = http().newCall(request);
         inFlightCalls.add(call);
         // 首增量看门狗：READ_TIMEOUT 管的是"两个 SSE chunk 之间的间隔"（300s），
         // 治不了"连上了但模型迟迟不产出"。此处独立计时，到点 cancel 解除阻塞并归为 TIMEOUT。
@@ -322,7 +483,9 @@ public class DeepSeekClient implements LlmClient {
             watchdogFired[0] = true;
             call.cancel();
         }, firstTokenTimeoutMs, TimeUnit.MILLISECONDS);
+        metric.networkStart();
         try (Response response = call.execute()) {
+            metric.headers();
             if (!response.isSuccessful()) throw LlmException.of(response.code(), responseBody(response));
             if (response.body() == null) throw new LlmException(LlmException.Type.OTHER, "空响应", false);
             BufferedSource source = response.body().source();
@@ -330,55 +493,78 @@ public class DeepSeekClient implements LlmClient {
             while ((line = source.readUtf8Line()) != null) {
                 if (!line.startsWith("data:")) continue;
                 String data = line.substring(5).trim();
-                if (data.isEmpty() || data.equals("[DONE]")) continue;
-                JsonObject chunk = JsonParser.parseString(data).getAsJsonObject();
+                if (data.isEmpty()) continue;
+                if (data.equals("[DONE]")) { sawDone = true; break; }
+                JsonObject chunk;
+                try { chunk = JsonParser.parseString(data).getAsJsonObject(); }
+                catch (RuntimeException malformed) { throw LlmRecovery.format(); }
+                metric.sse = true;
                 JsonArray choices = chunk.has("choices") && chunk.get("choices").isJsonArray()
                         ? chunk.getAsJsonArray("choices") : null;
                 if (choices != null && choices.size() > 0) {
+                    if (!choices.get(0).isJsonObject()) throw LlmRecovery.format();
                     JsonObject choice = choices.get(0).getAsJsonObject();
                     JsonObject delta = choice.has("delta") && choice.get("delta").isJsonObject()
                             ? choice.getAsJsonObject("delta") : null;
                     if (delta != null) {
+                        // 同一SSE帧含工具参数和正文时，先通知工具存在，避免误截有效动作。
+                        if (delta.has("tool_calls") && delta.get("tool_calls").isJsonArray()
+                                && delta.getAsJsonArray("tool_calls").size() > 0) handler.onToolCallDelta();
                         // 空字符串增量不转发：qwen 流式每 chunk 的 delta 同时携带 content 与
                         // reasoning_content 字段（另一个为空字符串，非 null）——若空串也回调，
                         // ChatView 每正文 chunk 追加一段，界面表现为"同一段回复不停重复"
                         if (delta.has("reasoning_content") && !delta.get("reasoning_content").isJsonNull()) {
-                            String d = delta.get("reasoning_content").getAsString();
+                            String d = deltaText(delta, "reasoning_content");
                             if (!d.isEmpty()) {
+                                metric.delta();
                                 watchdog.cancel(false); // 首个有效增量到达：计时职责交回 READ_TIMEOUT
                                 thinkingSb.append(d);
                                 handler.onThinking(d);
                             }
                         }
                         if (delta.has("content") && !delta.get("content").isJsonNull()) {
-                            String d = delta.get("content").getAsString();
+                            String d = deltaText(delta, "content");
                             if (!d.isEmpty()) {
+                                metric.delta();
                                 watchdog.cancel(false);
                                 content.append(d);
                                 handler.onContent(d);
                             }
                         }
-                        if (delta.has("tool_calls") && delta.get("tool_calls").isJsonArray()) {
+                        if (delta.has("tool_calls") && delta.get("tool_calls").isJsonArray()
+                                && delta.getAsJsonArray("tool_calls").size() > 0) {
+                            metric.delta();
                             watchdog.cancel(false); // 工具调用增量同样是"模型已产出"的信号
-                            accumulateToolCalls(delta.getAsJsonArray("tool_calls"), acc);
+                            try { accumulateToolCalls(delta.getAsJsonArray("tool_calls"), acc); }
+                            catch (RuntimeException malformed) { throw LlmRecovery.format(); }
                         }
                     }
+                    if (handler.shouldStopResponse() && acc.isEmpty()) {
+                        finish = RepetitionGuard.FINISH;
+                        call.cancel(); // 只关闭本次请求，其他并发子Agent不受影响。
+                        break;
+                    }
                     if (choice.has("finish_reason") && !choice.get("finish_reason").isJsonNull()) {
-                        finish = choice.get("finish_reason").getAsString();
+                        finish = deltaText(choice, "finish_reason");
                     }
                 }
                 if (chunk.has("usage") && chunk.get("usage").isJsonObject()
                         && !chunk.get("usage").isJsonNull()) {
-                    usage = Usage.fromJson(chunk.getAsJsonObject("usage"));
+                    metric.observedUsage(chunk.getAsJsonObject("usage"));
                 }
             }
         } catch (IOException e) {
+            if (!call.isCanceled() && (content.length() > 0 || thinkingSb.length() > 0 || !acc.isEmpty())) {
+                finish = "incomplete";
+            } else {
             // 顺序敏感：okhttp 被 cancel 抛的是 IOException("canceled")，既不 instanceof SocketTimeout，
             // 也分不清是看门狗还是用户中断——故必须最先查 watchdogFired 标志
             if (watchdogFired[0]) {
                 throw new LlmException(LlmException.Type.TIMEOUT,
                         "请求超时：" + thresholdText() + "内未收到模型输出", true);
             }
+            if (call.isCanceled()) throw new LlmRecovery.Failure(LlmRecovery.Category.CANCELLED,
+                    LlmException.Type.NETWORK, "请求已取消", false, 0, null);
             if (isTimeout(e)) {
                 throw new LlmException(LlmException.Type.TIMEOUT, "请求超时: " + e.getMessage(), true);
             }
@@ -387,19 +573,36 @@ public class DeepSeekClient implements LlmClient {
                         "网络错误: " + e.getMessage() + "（域名无法解析，请检查设置中的 API 地址）", false);
             }
             throw new LlmException(LlmException.Type.NETWORK, "网络错误: " + e.getMessage(), true);
+            }
         } finally {
+            metric.networkEnd();
             watchdog.cancel(false); // 幂等兜底（正常完成/异常路径都要摘掉定时任务）
             inFlightCalls.remove(call);
         }
-        if (usage == null) {
-            usage = Usage.estimate(messages, content.toString());
-        }
+        StringBuilder estimatedOutput = new StringBuilder(content).append(thinkingSb);
+        for (ToolCall tc : acc) estimatedOutput.append(tc.name == null ? "" : tc.name).append(tc.arguments == null ? "" : tc.arguments);
+        usage = metric.resolve(messages, estimatedOutput.toString());
+        // EOF 本身不是模型完成信号：网关可能以 HTTP 200 提前结束 SSE。
+        if (finish == null) finish = sawDone ? (acc.isEmpty() ? "stop" : "tool_calls") : "incomplete";
+        metric.finish = finish;
+        if ("incomplete".equals(finish) || "length".equals(finish)) metric.failure = LlmRecovery.Category.TRUNCATED;
+        com.minion.core.diagnostics.DiagnosticLog.info("llm-finish",
+                "reason=" + finish + " done=" + sawDone + " promptTokens=" + usage.inputTokens
+                + " usageEstimated=" + usage.estimated + " completionTokens=" + usage.outputTokens
+                + " contentChars=" + content.length() + " thinkingChars=" + thinkingSb.length()
+                + " toolCalls=" + acc.size());
         if (finish.equals("tool_calls") && acc.isEmpty()) {
             throw new LlmException(LlmException.Type.BAD_REQUEST,
                     "模型声明工具调用但未返回工具参数", false);
         }
         handler.onUsage(usage);
         handler.onFinish(finish, usage, acc);
+    }
+
+    private static String deltaText(JsonObject object, String name) throws LlmException {
+        if (!object.get(name).isJsonPrimitive() || !object.getAsJsonPrimitive(name).isString())
+            throw LlmRecovery.format();
+        return object.get(name).getAsString();
     }
 
     private void accumulateToolCalls(JsonArray deltas, List<ToolCall> acc) {
@@ -428,19 +631,80 @@ public class DeepSeekClient implements LlmClient {
 
     @Override
     public String completeChat(List<Message> messages, String systemPrompt) throws LlmException {
+        // 摘要必须有正文。普通思考模式可能把单次输出预算耗在 reasoning_content，
+        // 导致上下文越长越无法压缩；先请求无思考正文，网关不支持时再回退原模式。
+        String summary = completeChatOnce(messages, systemPrompt, true);
+        if (!summary.trim().isEmpty() || !thinking) return summary;
+        return completeChatOnce(messages, systemPrompt, false);
+    }
+
+    /** 结束检查不进入执行会话，不带工具，超时仅取消当前Call。 */
+    @Override public StopReviewResponse reviewStop(String input,String systemPrompt) throws LlmException {
+        if(closed)throw new LlmException(LlmException.Type.OTHER,"客户端已关闭",false);
+        if("sfm-agent".equalsIgnoreCase(provider))throw new LlmException(LlmException.Type.BAD_REQUEST,"SFM远程Agent不支持隔离结束检查，不能向远端执行会话注入核验请求",false);
+        List<Message> request=new ArrayList<Message>();request.add(Message.system(systemPrompt));request.add(Message.user(input));
+        Request base=buildRequest(request,null,true);okio.Buffer buffer=new okio.Buffer();
+        try {base.body().writeTo(buffer);}catch(IOException e){throw new LlmException(LlmException.Type.OTHER,"无法构建结束核验请求",false);}
+        JsonObject body=JsonParser.parseString(buffer.readUtf8()).getAsJsonObject();
+        body.addProperty("stream",false);body.addProperty("max_tokens",STOP_REVIEW_MAX_OUTPUT_TOKENS);body.remove("stream_options");
+        Request isolated=base.newBuilder().post(RequestBody.create(JSON,body.toString())).build();
+        okhttp3.Call call=http().newCall(isolated);call.timeout().timeout(stopReviewTimeoutMs,TimeUnit.MILLISECONDS);
+        Thread owner=Thread.currentThread();stopReviews.put(owner,call);
+        RequestTelemetry.Attempt metric=new RequestTelemetry.Attempt("stop_review_nonstream",request,null);
+        metric.networkStart();
+        try(Response response=call.execute()) {
+            metric.headers();
+            if(response.body()==null) {
+                if(!response.isSuccessful())throw LlmException.of(response.code(),"");
+                throw new LlmException(LlmException.Type.OTHER,"结束核验空响应",false);
+            }
+            BufferedSource source=response.body().source();source.request(STOP_REVIEW_MAX_BODY_BYTES+1);
+            if(source.buffer().size()>STOP_REVIEW_MAX_BODY_BYTES)throw new LlmException(LlmException.Type.OTHER,"结束核验响应过长",false);
+            String raw=source.readUtf8();
+            metric.networkEnd();
+            if(!response.isSuccessful())throw LlmException.of(response.code(),raw);
+            JsonObject json=JsonParser.parseString(raw).getAsJsonObject();JsonObject choice=json.getAsJsonArray("choices").get(0).getAsJsonObject();
+            String finish=choice.get("finish_reason").getAsString();JsonObject message=choice.getAsJsonObject("message");
+            JsonElement proposedTools=message.get("tool_calls");
+            boolean hasTools=proposedTools!=null&&!proposedTools.isJsonNull()
+                    &&(!proposedTools.isJsonArray()||proposedTools.getAsJsonArray().size()>0);
+            if(!"stop".equals(finish)||hasTools)throw new LlmRecovery.Failure(LlmRecovery.Category.TRUNCATED,
+                    LlmException.Type.OTHER,"结束核验响应未正常完整结束",false,0,null);
+            String text=message.get("content").getAsString();
+            if(json.has("usage")&&json.get("usage").isJsonObject())metric.observedUsage(json.getAsJsonObject("usage"));
+            Usage usage=metric.resolve(request,text);metric.finish=finish;
+            return new StopReviewResponse(text,usage);
+        } catch(IOException e) {
+            LlmException failure=new LlmException(isTimeout(e)?LlmException.Type.TIMEOUT:LlmException.Type.NETWORK,"结束核验请求失败: "+e.getMessage(),false);
+            metric.failure=LlmRecovery.classify(failure);metric.recovery=LlmRecovery.action(failure);throw failure;
+        } catch(LlmException e) {metric.failure=LlmRecovery.classify(e);metric.recovery=LlmRecovery.action(e);throw e;}
+        catch(RuntimeException e){metric.failure=LlmRecovery.Category.FORMAT;throw new LlmRecovery.Failure(
+                LlmRecovery.Category.FORMAT,LlmException.Type.OTHER,"结束核验返回协议不合法",false,0,null);}
+        finally {metric.networkEnd();stopReviews.remove(owner,call);telemetry.record(metric);}
+    }
+
+    private String completeChatOnce(List<Message> messages, String systemPrompt,
+                                    boolean disableThinking) throws LlmException {
         final StringBuilder out = new StringBuilder();
         final LlmException[] err = new LlmException[1];
         List<Message> all = new ArrayList<Message>();
         all.add(Message.system(systemPrompt));
         all.addAll(messages);
-        streamChat(all, null, new StreamHandler() {
+        StreamHandler handler = new StreamHandler() {
             @Override
             public void onContent(String delta) { out.append(delta); }
             @Override
-            public void onFinish(String finishReason, Usage usage, List<ToolCall> toolCalls) { }
+            public void onFinish(String finishReason, Usage usage, List<ToolCall> toolCalls) {
+                if ("incomplete".equals(finishReason) || "length".equals(finishReason)) {
+                    err[0] = new LlmException(LlmException.Type.OTHER,
+                            "摘要响应未完整结束，保留原始上下文", false);
+                }
+            }
             @Override
             public void onError(LlmException e) { err[0] = e; }
-        });
+        };
+        if (disableThinking) streamChatWithoutThinking(all, null, handler);
+        else streamChat(all, null, handler);
         if (err[0] != null) throw err[0];
         return out.toString();
     }

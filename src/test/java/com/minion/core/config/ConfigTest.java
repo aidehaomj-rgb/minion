@@ -46,6 +46,16 @@ public class ConfigTest {
         assertTrue(c2.confirmSkip());
     }
 
+    /** 共享知识库目录写入后，所有新旧会话使用同一配置，重启后仍保留。 */
+    @Test
+    public void sharedKnowledgeDir_persists() throws IOException {
+        Path root = tmp.newFolder("shared-config").toPath();
+        Config config = Config.load(root, TEST_DEFAULTS);
+        config.set("knowledge.shared.dir", "D:\\zmj\\海关知识库");
+        assertEquals("D:\\zmj\\海关知识库", config.sharedKnowledgeDir());
+        assertEquals("D:\\zmj\\海关知识库", Config.load(root, TEST_DEFAULTS).sharedKnowledgeDir());
+    }
+
     /** 白名单追加：去重、写入外部文件 */
     @Test
     public void appendWhitelist_deduplicatesAndPersists() throws IOException {
@@ -77,6 +87,16 @@ public class ConfigTest {
     public void enterSends_defaultsTrueWhenKeyMissing() throws IOException {
         Config c = Config.load(tmp.getRoot().toPath(), TEST_DEFAULTS);
         assertTrue(c.enterSends());
+    }
+
+    /** 旧配置没有外观字段时回落石墨暖铜；显式选择持久化后重启保持。 */
+    @Test
+    public void uiTheme_defaultsObsidianAndPersists() throws IOException {
+        Path root = tmp.getRoot().toPath();
+        Config c = Config.load(root, TEST_DEFAULTS);
+        assertEquals("obsidian", c.uiTheme());
+        c.set("ui.theme", "light");
+        assertEquals("light", Config.load(root, TEST_DEFAULTS).uiTheme());
     }
 
     /** 工具空输出占位：无该配置（含旧配置）默认 false；外部文件可覆盖为 true */

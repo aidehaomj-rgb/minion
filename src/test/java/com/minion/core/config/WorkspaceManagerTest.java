@@ -358,4 +358,22 @@ public class WorkspaceManagerTest {
     private Path jarDir2() throws IOException {
         return tmp.newFolder("jar2").toPath();
     }
+
+    @Test public void rejectsDotNamesAndRename() throws IOException {
+        WorkspaceManager m = WorkspaceManager.load(jarDir());
+        assertFalse(m.add(".", dir("dot"), "", null));
+        assertFalse(m.add(" .. ", dir("dot"), "", null));
+        assertFalse(m.rename("default", ".."));
+    }
+    @Test public void legacyDotRemovalKeepsSiblingSessions() throws IOException {
+        Path jar = jarDir();
+        WorkspaceManager m = WorkspaceManager.load(jar);
+        assertTrue(m.add("legacy", dir("legacy"), "", null));
+        m.get("legacy").workSpaceName = "..";
+        Path keep = jar.resolve("session/default/keep.json");
+        Files.createDirectories(keep.getParent()); Files.write(keep, new byte[]{1});
+        assertTrue(m.remove(".."));
+        assertTrue(Files.exists(keep));
+        assertTrue(Files.exists(jar.resolve("workspace.json")));
+    }
 }

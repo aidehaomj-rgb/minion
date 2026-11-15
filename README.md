@@ -1,5 +1,41 @@
 # minion
 
+V48 本地开发完成：[成果预览、文件交付与引导回执](docs/V48-成果预览与文件交付-开发说明.md)、[验收结果](docs/V48-开发验收结果.md)。MD/DOCX离线内容预览、多成果切换、可点击文件链接及定位/复制/另存为；立即引导提供未读/已读及发送阶段，已读仅表示特定主请求收到有效响应。完整回归2070项，0失败、3跳过；尚未制作V48更新包或进行真实Win7验收，原V47交付ZIP未变。
+
+已打包：[V47任务运行与上下文优化小更新](docs/releases/V47-任务运行与上下文优化小更新.md)，支持V40–V46直接更新；保留配置、会话、项目及Java/Python环境。包约6.8MiB，包含更新程序与安装说明，七种基线、回退和最终ZIP解压更新已验证。
+
+V47 开发记录：[ZCode参考优化与验收边界](docs/V47-ZCode参考优化-开发与验收.md)、[最终验收记录](docs/V47-开发验收结果.md)。本轮完善进程/JDBC外部作业事件等待、进展续接账本、压缩后当前工作集、技能退场、能力驱动工具调度、资源锁与中文多查询召回；保持150K完整摘要目标。后续已按用户请求打包上述小更新；MaxCompute专用适配和真实Win7/内网模型验收尚未完成。
+
+V44 小更新：[压缩断点续接与本地绘图](docs/releases/V44-压缩续接与本地绘图小更新.md)。同一包适配 V40/V41/V42/V43，自动识别基线并备份，只替换 JAR 差异，保留配置、会话、项目与运行环境；默认150K阈值不变。
+
+已打包：[V45小更新说明](docs/releases/V45-任务记忆与多Agent小更新.md)，支持已核验V40–V44；5.22MiB，保留配置/会话/项目，自动备份。安装目录名不要以`!`结尾。新增版本化步骤、进展续跑、真实测试、来源失效记忆、能力探测、按需工具、异步子任务及成果核验；回答提问支持图文/仅图。8批计划仍有未收尾项，见[任务清单](docs/superpowers/plans/2026-11-04-agent-gap-roadmap.md)与[验收状态](docs/superpowers/plans/2026-11-05-eight-batch-integration-status.md)；本机通过不等于真实Win7/内网模型已验收。
+
+V44 包含[压缩后当前断点续接](docs/superpowers/specs/2026-11-04-task-scoped-compaction-design.md)和[本地绘图 Artwork](docs/本地绘图与模型能力.md)。执行中压缩不再自动回读历史；直接交接当前任务、最新修改、清单和最近工具回执。本地绘图无需新服务/依赖，输出可编辑 JSON、SVG 与高清 PNG；聊天模型仍不是专用照片生图模型。
+
+V43 完整离线整合：[Win7 环境与兼容修复](docs/releases/V43-完整离线环境整合版.md)。包含 V42 功能，保留 R2 的包内 Java/Python 和进程清理兼容修复，移除界面个人联系方式。完整包无需逐个安装旧版小更新。
+
+V42 启动性能优化：[按需加载与事件尾部恢复](docs/releases/V42-启动按需加载与事件尾部恢复.md)。启动只加载轻量会话索引，打开会话才恢复正文/工具/客户端；不再每次全量读取和校验所有旧事件。首次建立索引后复用缓存，原始记录不删除。V42 可直接从 V40 更新，已包含 V41 结束绿灯修改。
+
+最新离线更新：[V30 统一结束门禁](docs/releases/V30-统一结束门禁更新.md)。正常回复结束不直接算任务完成，独立只读核验当前目标与实际证据；未完成则有界续接，未知/等待用户明确暂停并保留队列。旧关键词、字数和完成标记不再拥有完成放行权；包含V29及此前改动，保留压缩配置。
+
+上一版离线更新：[V29 完成收尾与完成时间](docs/releases/V29-完成收尾与时间更新.md)。包含V28全部内容，修复旧断点哈希与状态查询造成的反复收尾，完成回复自动附北京时间；保留未完成任务保护和已有配置。
+
+开发中：主任务通过完成校验后，程序自动在回复附“完成时间：yyyy-MM-dd HH:mm:ss（北京时间）”，历史与报告保留；阶段回复、中断及被阻塞的完成声明不添加。暂不打包。
+
+开发中：修复完成声明因旧断点哈希阻塞而反复续跑。AgentControl status显示实时差异；refresh_checkpoint需复核说明并重新采集完整文件快照。收尾恢复独立计数，不因状态查询清零；缺失文件、待办和子任务保护保留。本次尚未打包。
+
+已发布：[V28：V27之后的合并更新](docs/releases/V28-V27后合并更新.md)，包含下述流式保护、默认模型、历史分页及选择性迁移。
+
+开发中：已加入主/子Agent单次流式工具承诺循环检测，提前结束当前请求并有界恢复，避免等待输出上限后继续重复；不改输出预算、压缩阈值和权限。暂未发布更新包。
+
+开发中：设置→模型新增“新会话默认模型”选择，选择后立即保存，仅影响新建会话。重新打开旧会话仍使用该会话保存的模型；输入框模型按钮继续只影响当前会话。
+
+开发中：历史页增加至每页150条可见内容，连续子任务输出合并折叠展示，轮次结束标记不占分页预算；修复执行中历史页仅有导航栏的问题。完整记录保留，暂未打包。
+
+开发中：选择性迁移 aacw1/minion e052ea1 的并发文件保护（Write/Edit 路径锁与临时文件替换）、子Agent独立消息通道、Read full及数据库大字段原样导出。保留检查点、append、越界确认、历史分页和本地压缩配置；不整仓库覆盖，暂未打包。
+
+最新离线修复：[V27 中断误触与工具动作恢复](docs/releases/V27-中断误触与工具动作恢复.md)。发送键不再误触停止；连续只说工具执行计划时明确关闭思考并升级工具动作请求，保留协议兼容回退与原权限确认。长文本完整分页和复制全文，思考结束自动收起；数字选项回答附带对应含义。包含 V23～V26，保留现有模型、压缩配置和历史。
+
 win7&jdk8 本地 Agent，使用 Java 8 开发，面向 Qwen 等 OpenAI Chat Completions 兼容模型。含子 agent、MCP 工具扩展（stdio/SSE/Streamable HTTP）、代码开发、浏览器自动化、Anaconda/Python、Excel/Office、SQL 数据库、本地知识库、项目记忆、上下文压缩、会话管理、离线更新、风险审计和 Skills。
 
 ## 启动（GUI）
@@ -55,7 +91,12 @@ jar 自举行为（启动器内置，双击 / 命令行同样生效）：
 - `/queue add <任务>`：当前任务完成后按 FIFO 自动执行；`/queue list|remove|clear` 管理队列
 - `/sessions [关键词]`：搜索会话；`/session pin|archive|fork|export|import` 管理会话
 - `/context`、`/memory`、`/permissions`、`/secrets`：上下文、项目记忆、权限策略和加密密钥库入口
-- 设置（右上角齿轮图标）：左列导航（基础设置 / 模型 / MCP / 工具 / 关于）；模型页单击仅选中模型（查看配置用「修改」），选中后点「激活」按钮切换，选中已激活模型时按钮置灰；切换/修改参数即时生效（运行中会话下一轮生效）；基础设置页底部按钮栏「应用」（保存不关窗）与「关闭」
+- 设置（左侧栏底部齿轮）：左列导航（基础设置 / 文档/OCR / 模型 / MCP / 工具 / 关于）；模型页单击仅选中模型（查看配置用「修改」），选中后点「激活」按钮切换，选中已激活模型时按钮置灰；切换/修改参数即时生效（运行中会话下一轮生效）；基础设置页底部按钮栏「应用」（保存不关窗）与「关闭」
+- 右侧工作区只展示本会话的用户成果，不提供项目文件浏览器；执行记录、引用文件、源代码、配置和临时文件不进入成果列表。默认用紧凑成果卡片展示，图片提供缩略图画廊，同一文件保留最多 20 个内部历史快照。Markdown、DOCX、TXT、CSV、PDF 首页、图片可直接预览；PPTX 优先经 LibreOffice 显示前 6 页，缺少转换器时回退文字；HTML 使用禁用脚本和外部资源的离线静态视图
+- 界面主题：基础设置顶部可选择「深夜黑 / 石墨灰 / 雾蓝灰 / 明亮浅色」，切换立即生效并写入 `ui.theme`；新安装和旧配置缺省使用深夜黑，所有主题均仅使用 Java 8 + JavaFX 8 样式能力
+- 默认执行方式（主流 Agent 对齐）：用户直接提问或下达任务，Minion 自行决定直接回答、调用工具或多步执行；普通模式下，模型给出实质答复即回合结束——本回合已有成功工具结果时，产出型任务同样直接交付，不再二次盘问文件证据。防懒网只拦“整轮零工具+纯计划承诺”的回复（无进展预算 4 次后显式暂停）；副作用未知（安全）、未核对子任务、明确缺少用户资料仍会优先阻断。目标/审查模式仍交给独立核验。`/plan`、`/goal`、`/review` 是可选高级命令，分别用于只读计划、持续目标和独立审查，系统不会主动要求用户选择模式。聊天区隐藏 `AgentControl`、`TodoWrite`、`DiscoverTools`、`Context`、`Skill` 等内部登记，只显示用户需要的结论、错误、审批、真实工具动作和交付
+- 连续重复 `checkpoint` / `refresh_checkpoint` 时，若当前断点内已有稳定、未变化的用户成果，系统会停止重复登记，直接生成成果链接并完成交付；没有可核验成果时才暂停为控制循环错误
+- 打开网页时，已配置 Browser 工具优先用 `Browser(action=open,url)` 一次完成导航，后续读取和点击继续使用 BrowserAction；只需要交给系统浏览器时使用 `OpenUrl(url)`。同一轮对同一 URL 的重复 `OpenUrl/Browser open` 或 Bash `start/Start-Process/chrome.exe` 启动会被直接阻止，避免重复弹窗和重复标签页
 - 无会话时直接发送自动新建会话；发送后输入框自动清空
 - 消息区发送消息强制置底；新内容增长时贴底自动跟随，向上翻过半屏暂停、翻回底半屏恢复
 - 每轮回复结束显示 token 统计行（计时器图标 · 耗时 · in/out/thinking 会话累计 · ctx 上下文占比）
@@ -110,10 +151,11 @@ jar 同目录 `session/<workSpaceName>/`，每会话一个 JSON 文件（每轮�
 
 - `Python`：`status` 自动发现并诊断 Anaconda/Python；`run_code` 执行分析代码；`run_file` 执行工作区脚本。发现顺序为设置中的 `python.path`、`MINION_PYTHON`、当前 Conda、常见 Anaconda/Miniconda 目录、PATH
 - `Excel`：`inspect/read/profile/filter/write/append/merge/pivot/chart/export`，基于内网 Anaconda 的 pandas/openpyxl；写操作默认输出新文件并建立检查点
-- `Document`：提取 DOCX/PPTX/PDF/XLSX，创建/替换 DOCX、创建 PPTX、PDF 合并拆分并诊断 OCR/Tesseract
+- `Document`：提取 DOCX/PPTX/PDF/OFD/XLSX，创建/替换 DOCX、创建 PPTX、PDF 合并拆分并诊断 OCR/Tesseract。OFD 支持添加/拖入附件、`Read` 文字预览和知识库导入；`inspect` 查页数、`ofd_read` 按页读。扫描型 OFD 可用 `ofd_view` / `ofd_ocr` 读取所选页的内嵌图（OCR 沿用本地 Tesseract）；不渲染完整版式，也不验签。
+- 书生 GD：添加/拖入附件时按内容识别 PDF/OFD。原生 GD 可经书生阅读器导出 TXT/PDF/OFD，再添加副本或用 `Document gd_read(path=原件, exportPath=副本)` 读取。若单位已有可批量转换 GD 的离线命令行程序，可在设置「文档/OCR」配置可信 EXE、JSON 参数和输出格式，之后可让 `gd_read` 或 `Knowledge import` 转换再读；不会猜测书生桌面版的命令行参数、自动联网或分发第三方解码器。
 - `Database`：除 SQLite 外支持 ODBC/SQL Server、MySQL、PostgreSQL；`query` 默认只读，`execute` 需确认，`export` 可输出 CSV/XLSX
 - `SQLite`：`schema` 查看结构、`query` 只读查询、`execute` 建表及增删改；使用 Python 标准库 sqlite3，不需要额外数据库驱动
-- `Knowledge`：项目级离线知识库，保存在 `<工作区>/.minion/knowledge/`；支持 add/import/sync/search/list/read/delete，文件夹增量同步和来源引用，不依赖云端向量服务
+- `Knowledge`：项目知识库保存在 `<工作区>/.minion/knowledge/`；可在基础设置中指定共享目录，或让 Minion 用 `Knowledge.connect` 连接用户指定的绝对目录（需确认）。所有项目的 search/list 都会直接读取共享目录及子目录中的 `.md` 文件，修改后下次查询即生效，无需逐项目导入。共享条目以 `shared/相对路径` 显示，可用此名称 read；add/import/sync/delete 仍只修改当前项目知识库。`disconnect` 可取消共享连接，不删除文件。目录不存在时会提示，不会自动新建或清空它。不依赖云端向量服务。
 - 设置 → 基础设置 → `Python/Anaconda` 可选择内网解释器，例如 `C:\ProgramData\Anaconda3\python.exe`
 
 内置技能包含：`data-analysis`、`sql-database`、`knowledge-base`、`browser-automation`、`web-development`、`windows-packaging`、`app-development`。外部技能同名时覆盖内置技能。
@@ -206,3 +248,8 @@ Playwright 示例（需要 Node.js 18+，可在 [nodejs.org](https://nodejs.org)
 - `provider` 为未知值时回退 deepseek 行为
 - `model.json` 缺失/为空/损坏时自动生成 deepseek + 千问两套配置（除 key 外按各自调用参数预填，key 留空待填）
 - 模板参考：源码目录 `src/resource/config_deepseek.properties` / `config_qwen.properties`（仅记录，实际生效仍为 jar 同目录的配置）
+# 本地图片上下文（V31）
+
+新增开发：PDF按页视觉读取、实际OCR、Excel分页/文本ID/合并审查/保留工作簿回填，以及Word模板/证据清单/结构检查/可选LibreOffice预览。详见[数据分析与材料工作流](docs/数据分析与材料工作流.md)。设置新增「文档/OCR」页，依赖缺失不自动安装；生成文件与实际核验严格区分。
+
+Read 读取 PNG/JPEG/GIF/BMP 时会附上真实图片像素；ViewImage 支持原图坐标裁剪和顺时针旋转（0/90/180/270）。主/子 Agent 均支持，保留现有目录授权。图片仅发送当前配置的模型接口，要求服务具备视觉能力；不保证纯文本服务能看图。原图不改写，GIF仅首帧，WebP需先转PNG/JPEG。单图输入20MB/2400万像素、传输5MB上限，超限请先裁剪。图像资料不作为用户新任务。

@@ -2,6 +2,12 @@ package com.minion.core.llm;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.annotations.SerializedName;
+import com.google.gson.annotations.JsonAdapter;
+import com.google.gson.TypeAdapter;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonWriter;
+import com.google.gson.stream.JsonToken;
 
 import java.util.List;
 
@@ -10,6 +16,31 @@ public class Message {
 
     public enum Role { SYSTEM, USER, ASSISTANT, TOOL }
 
+    @JsonAdapter(OriginAdapter.class)
+    public enum Origin {
+        @SerializedName("real_user") REAL_USER,
+        @SerializedName("task_control") TASK_CONTROL,
+        @SerializedName("compact_summary") COMPACT_SUMMARY,
+        @SerializedName("tool_evidence") TOOL_EVIDENCE,
+        @SerializedName("skill") SKILL,
+        @SerializedName("history_recall") HISTORY_RECALL
+    }
+
+    /** Unknown explicit origins must not deserialize to null and enter the legacy USER fallback. */
+    public static final class OriginAdapter extends TypeAdapter<Origin> {
+        @Override public void write(JsonWriter out, Origin value) throws java.io.IOException {
+            if (value == null) out.nullValue();
+            else out.value(value.name().toLowerCase(java.util.Locale.ROOT));
+        }
+        @Override public Origin read(JsonReader in) throws java.io.IOException {
+            if (in.peek() == JsonToken.NULL) { in.nextNull(); return null; }
+            String value = in.nextString();
+            for (Origin origin : Origin.values())
+                if (origin.name().toLowerCase(java.util.Locale.ROOT).equals(value)) return origin;
+            throw new com.google.gson.JsonParseException("Unknown message origin: " + value);
+        }
+    }
+
     public Role role;
     public String content;
     public String reasoningContent;   // 仅 assistant
@@ -17,21 +48,69 @@ public class Message {
     public String toolCallId;         // 仅 tool
     public String name;               // 仅 tool（工具名）
     public boolean summary;           // true = 压缩摘要消息，不再参与压缩
-    /** true = 技能加载消息（<skill> 正文），上下文压缩豁免（常驻）。本地标记，toApiJson 不输出 */
+    /** 技能正文候选；是否常驻由当前任务/修订及有界技能投影决定。 */
     public boolean pinned;
     /** 图片 parts（仅 user 消息使用，其他角色忽略）；null = 无图 */
     public List<ImagePart> images;
     /** true = 运行中用户补充消息（仅 user 角色使用）。标识只在本地历史与 UI 层，
      *  toApiJson 不输出——API content 原样发送，模型输入零污染 */
     public boolean supplement;
+    /** True only for actual UI user input/supplements; synthetic USER messages cannot authorize memory sharing. */
+    public boolean userAuthored;
+    /** 工具产生的图像资料，不是用户新任务。 */
+    public boolean toolImage;
+    /** 用户回答图片关联的提问调用；null 兼容旧事件，不输出到 API，也不作为新任务。 */
+    public String replyToToolCallId;
+    /** Local steering receipt association; null on legacy events, never serialized to model API. */
+    public String steeringId;
     /** 消息创建时间戳（毫秒；0 = 旧数据未打点） */
     public long ts;
+    /** 本地不可变历史事件 ID；仅随会话持久化，不发送给模型 API。旧会话在首次归档时补齐。 */
+    public String eventId;
+    /** Durable local task scope for history retrieval; never sent to the model API. */
+    public String taskId;
+    /** 本地指令修订号；摘要仅对生成时的任务/修订有效，不输出到 API。 */
+    public Long taskRevision; // null 时 Gson 不增加字段，旧不可变事件的哈希仍保持一致。
+    // All new persisted fields MUST default to null: old journal hashes depend on exact Gson JSON.
+    public Origin origin;
+    public String sourceEventId;
+    public String skillName;
+    public String sourcePath;
+    public String sourceVersion;
+    /** false = unresolved failure; null = legacy/unknown, not an invented success. */
+    public Boolean toolSucceeded;
+    public long revision() { return taskRevision == null ? 0 : taskRevision; }
+
+    /** 兼容旧会话没有 userAuthored 的记录，但排除系统续接/修复/检索及技能资料。 */
+    public boolean isUserInstruction() {
+        return role == Role.USER && !summary && !pinned && !toolImage
+                && content != null && !content.trim().isEmpty()
+                && (origin == Origin.REAL_USER || (origin == null
+                && (userAuthored || !(content.startsWith("[系统") || content.startsWith("【系统")
+                || content.startsWith("<minion_")))));
+    }
+
+    /** Legacy text fallback can identify context, NEVER confer authorization. */
+    public boolean hasUserAuthorization() {
+        return isUserInstruction() && userAuthored && (origin == null || origin == Origin.REAL_USER);
+    }
+
+    /** Only unambiguous legacy flags are interpreted; do not stamp/rewrite stored events. */
+    public Origin contextOrigin() {
+        if (origin != null) return origin;
+        if (summary) return Origin.COMPACT_SUMMARY;
+        if (pinned) return Origin.SKILL;
+        if (toolImage || role == Role.TOOL) return Origin.TOOL_EVIDENCE;
+        if (role == Role.USER && userAuthored) return Origin.REAL_USER;
+        return role == Role.SYSTEM ? Origin.TASK_CONTROL : null;
+    }
 
     public static Message system(String content) {
         Message m = new Message();
         m.role = Role.SYSTEM;
         m.content = content;
         m.ts = System.currentTimeMillis();
+        m.eventId = java.util.UUID.randomUUID().toString();
         return m;
     }
 
@@ -40,6 +119,27 @@ public class Message {
         m.role = Role.USER;
         m.content = content;
         m.ts = System.currentTimeMillis();
+        m.eventId = java.util.UUID.randomUUID().toString();
+        return m;
+    }
+
+    /** Use only at the actual human-input boundary, not for synthetic USER material. */
+    public static Message realUser(String content) {
+        Message m = user(content);
+        m.origin = Origin.REAL_USER;
+        m.userAuthored = true;
+        return m;
+    }
+
+    public static Message taskControl(String content) {
+        Message m = user(content);
+        m.origin = Origin.TASK_CONTROL;
+        return m;
+    }
+
+    public static Message historyRecall(String content) {
+        Message m = user(content);
+        m.origin = Origin.HISTORY_RECALL;
         return m;
     }
 
@@ -68,6 +168,15 @@ public class Message {
     public static Message skill(String content) {
         Message m = user(content);
         m.pinned = true;
+        m.origin = Origin.SKILL;
+        return m;
+    }
+
+    public static Message skill(String content, String name, String path, String version) {
+        Message m = skill(content);
+        m.skillName = name;
+        m.sourcePath = path;
+        m.sourceVersion = version;
         return m;
     }
 
@@ -76,6 +185,7 @@ public class Message {
         m.role = Role.ASSISTANT;
         m.content = content;
         m.ts = System.currentTimeMillis();
+        m.eventId = java.util.UUID.randomUUID().toString();
         return m;
     }
 
@@ -84,8 +194,16 @@ public class Message {
         m.role = Role.TOOL;
         m.toolCallId = toolCallId;
         m.name = name;
+        m.origin = Origin.TOOL_EVIDENCE;
         m.content = content;
         m.ts = System.currentTimeMillis();
+        m.eventId = java.util.UUID.randomUUID().toString();
+        return m;
+    }
+
+    public static Message toolResult(String id, String name, String content, boolean succeeded) {
+        Message m = toolResult(id, name, content);
+        m.toolSucceeded = succeeded;
         return m;
     }
 
