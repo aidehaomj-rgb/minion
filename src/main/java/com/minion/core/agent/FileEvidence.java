@@ -11,7 +11,7 @@ public final class FileEvidence {
     public static FileEvidence capture(Path path) throws Exception {
         FileEvidence e=new FileEvidence(); e.path=path.toAbsolutePath().normalize().toString();
         if(!Files.isRegularFile(path)) { e.status="missing"; return e; }
-        e.path=path.toRealPath().toString(); e.size=Files.size(path);
+        e.size=Files.size(path);
         e.modified=Files.getLastModifiedTime(path).toMillis(); e.sha256=digest(path); e.status="present";
         return e;
     }

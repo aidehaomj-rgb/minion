@@ -7,8 +7,8 @@ import java.util.regex.Pattern;
 /** Conservative, deterministic minimum evidence for clearly operational user requests. */
 final class CompletionContract {
     private static final Pattern QUESTION = Pattern.compile("^(?:如何|怎么|为什么|能否|是否|可否|是不是|介绍|解释|说明|比较|对比|什么是|有哪些|what|how|why|can |is |explain|compare).*");
-    private static final Pattern OPERATION = Pattern.compile("(?:开发|修改|修复|修好|改好|解决(?!方案)|落实|落地|补全|完善|生成|制作|构建|创建|搭建|写入|导出|下载|安装|克隆|运行|执行|删除|更新|交付|核对|验证|补齐|补上|实现|处理|读取|检查|比对|匹配|交叉验证|汇总|整理|完成(?:任务|整表|工作|报告|文件|全部|这些|当前|后续|交付)|分析.{0,20}(?:文件|表格|excel|数据|数据库)|build|create|implement|fix|modify|generate|export|install|clone|run )",Pattern.CASE_INSENSITIVE);
-    private static final Pattern MUTATION = Pattern.compile("(?:开发|修改|修复|修好|改好|解决(?!方案)|落实|落地|补全|完善|生成|制作|构建|创建|搭建|写入|导出|下载|安装|克隆|删除|更新|补齐|补上|实现|交付(?:文件|代码|程序|网页|报告|表格|excel|项目)|build|create|implement|fix|modify|generate|export|install|clone)",Pattern.CASE_INSENSITIVE);
+    private static final Pattern OPERATION = Pattern.compile("(?:开发|修改|修复|修好|改好|解决(?!方案)|落实|落地|补全|完善|生成|制作|构建|创建|搭建|写入|导出|下载|安装|克隆|运行|执行|删除|更新|交付|核对|验证|补齐|补上|实现|处理|读取|检查|比对|匹配|交叉验证|汇总|整理|完成(?:任务|整表|工作|报告|文件|全部|这些|当前|后续|交付)|完成.{0,12}(?:报告|方案|文件|表格|数据|结果)|分析.{0,20}(?:文件|表格|excel|数据|数据库)|build|create|implement|fix|modify|generate|export|install|clone|run )",Pattern.CASE_INSENSITIVE);
+    private static final Pattern MUTATION = Pattern.compile("(?:开发|修改|修复|修好|改好|解决(?!方案)|落实|落地|补全|完善|生成|制作|构建|创建|搭建|写入|导出|下载|安装|克隆|删除|更新|补齐|补上|实现|交付(?:文件|代码|程序|网页|报告|表格|excel|项目)|完成.{0,12}(?:报告|文件|整表|结果文件)|build|create|implement|fix|modify|generate|export|install|clone)",Pattern.CASE_INSENSITIVE);
     final boolean action;
     final boolean mutation;
 

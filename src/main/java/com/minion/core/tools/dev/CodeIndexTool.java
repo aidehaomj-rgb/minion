@@ -96,11 +96,15 @@ public final class CodeIndexTool implements Tool {
         boolean allowed(Path p) {
             if (!PathsGuard.inside(boundary,p) || Files.isSymbolicLink(p)) return false;
             Path absolute=p.toAbsolutePath().normalize();
-            Path anchor = absolute.startsWith(logicalBase) ? logicalBase : (absolute.startsWith(base) ? base : null);
+            Path anchor = anchor(absolute);
             if (anchor == null) return false;
             for (Path part: anchor.relativize(absolute))
                 if (SKIP.contains(part.toString().toLowerCase(Locale.ROOT))) return false;
             return true;
+        }
+        Path anchor(Path absolute) {
+            return absolute.startsWith(logicalBase) ? logicalBase
+                    : (absolute.startsWith(base) ? base : null);
         }
         FileVisitResult enter(Path p) {
             if (stop()) return FileVisitResult.TERMINATE;
@@ -159,7 +163,9 @@ public final class CodeIndexTool implements Tool {
                 int end=source.indexOf('\n',tokens.start());if(end<0)end=source.length();
                 // Snippet around occurrence, not an unbounded source line.
                 int from=Math.max(start,tokens.start()-100), to=Math.min(end,tokens.end()+160);
-                JsonObject hit=new JsonObject();hit.addProperty("file",base.relativize(p.toAbsolutePath().normalize()).toString().replace('\\','/'));
+                Path absolute=p.toAbsolutePath().normalize();
+                JsonObject hit=new JsonObject();
+                hit.addProperty("file",anchor(absolute).relativize(absolute).toString().replace('\\','/'));
                 hit.addProperty("line",line);hit.addProperty("column",tokens.start()-start+1);
                 hit.addProperty("symbol",value);hit.addProperty("kind",definition?"definition":"reference");
                 hit.addProperty("sha256",hash);hit.addProperty("snippet",source.substring(from,to));hits.add(hit);

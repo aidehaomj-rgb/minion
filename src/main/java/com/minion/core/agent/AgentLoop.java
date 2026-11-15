@@ -1606,6 +1606,7 @@ public class AgentLoop {
                     } else if (e.retryable && retries < 1 && noOutputYet(content, thinking)) {
                         retries++;
                         // 退避：429 限流 2s，其余（网络/超时）0.5s；立即重试 429 几乎必然再 429
+                        ui.onWarning("请求失败（" + e.getMessage() + "），自动重试 1 次");
                         Thread.sleep(e.type == LlmException.Type.RATE_LIMIT ? 2000 : 500);
                         continue; // 消息未变，直接重发本轮
                     } else {
@@ -1790,6 +1791,8 @@ public class AgentLoop {
                     lengthContinuationHint = truncatedToolCall
                             ? "[系统续接] 上一次输出因长度上限在工具调用生成过程中被截断，该工具没有执行。请从头重新生成一个完整、合法的工具调用，然后继续原任务；不要重复已经完成的工作。"
                             : "[系统续接] 上一次输出因达到单次输出长度上限而被截断。请紧接已完成的内容继续原任务，不要重复，不要提前总结；需要调用工具时请生成完整合法的工具调用。";
+                    ui.onWarning("上一次模型输出达到长度上限，正在自动续接当前任务（第 "
+                            + lengthContinuationAttempts + " 次）");
                     // 长度用尽常由思考耗光输出预算引起；恢复轮直接要求动作。
                     nextRequestWithoutThinking = true;
                     persistSession();
@@ -1805,6 +1808,8 @@ public class AgentLoop {
                     boolean hadThinking = hasVisibleText(thinking);
                     lengthContinuationHint = buildNoActionRecoveryHint(
                             prematureStopRecoveries, hadThinking);
+                    ui.onWarning("模型未产生可执行动作，正在自动继续（第 "
+                            + prematureStopRecoveries + " 次）");
                     // 只有思考 -> 下一轮关思考；关思考后返回空包 -> 恢复思考。
                     // 某些 Qwen 网关在 enable_thinking=false 时无法生成任何 token，不能持续强关。
                     nextRequestWithoutThinking = hadThinking;
@@ -1850,10 +1855,15 @@ public class AgentLoop {
                             && !ReliabilityService.hasUnobservedOutcome(uncertainSteps);
                     String visibleCandidate=StopGate.visibleCandidate(candidate);
                     boolean pureAnswer=!snapshot.contract.action;
+                    boolean turnHasWork=!stopReceipts.isEmpty();
+                    boolean actionAlreadyEvidenced=turnHasWork||!snapshot.localProof.isEmpty()
+                            ||snapshot.hasSuccessfulMutation();
                     boolean directModeAnswer="stop".equalsIgnoreCase(finish[0])
-                            && (pureAnswer||!looksLikeInterimAnswer(visibleCandidate))
+                            && !looksLikeInterimAnswer(visibleCandidate)
+                            && !looksLikeInterruptedReply(visibleCandidate)
+                            && !ReplyHeuristics.looksLikeUnconfirmedOutcome(visibleCandidate)
                             && snapshot.blocking.isEmpty()
-                            && snapshot.outputArtifactProblem.isEmpty()
+                            && (snapshot.outputArtifactProblem.isEmpty()||turnHasWork)
                             && !ReliabilityService.hasUnobservedOutcome(uncertainSteps)
                             && (snapshot.reviewedChildren==0||hasTaskCompleteMarker(candidate))
                             && !hasConcreteHumanDependency(visibleCandidate,snapshot.blocking);
@@ -1862,16 +1872,21 @@ public class AgentLoop {
                     // 产出型合同——真实工作后的交付答复不再被完成门禁二次盘问（此前“没有可核验的文件
                     // 证据”会无限拦截，是“停不下来”的根因）。只看本轮回执：历史回合旧证据不能替新任务
                     // 完成判定；回复仍需通过 directModeAnswer（非阶段性计划、无未决用户依赖、副作用已知）。
-                    boolean turnHasWork=!stopReceipts.isEmpty();
                     if((executionMode==ExecutionMode.PLAN
-                            || executionMode==ExecutionMode.NORMAL && (!snapshot.contract.mutation||turnHasWork))
+                            || executionMode==ExecutionMode.NORMAL && (!snapshot.contract.mutation||actionAlreadyEvidenced))
                             && directModeAnswer) {
                         decision=StopGate.Decision.unknown(snapshot,
                                 executionMode==ExecutionMode.PLAN?"计划模式已提交可评审计划"
-                                        :snapshot.contract.mutation&&turnHasWork?"本轮已有成功工具结果，最终答复直接交付":"普通回合已形成直接回答");
+                                        :snapshot.contract.mutation&&turnHasWork?"本轮已有成功工具结果，最终答复直接交付":"普通问答已形成直接回答");
                         decision.status="completed";decision.kind="answer";
                         decision.source=executionMode==ExecutionMode.PLAN?"plan_mode":"normal_answer";decision.valid=true;
                         decision.evidence.add("reply");
+                        if(snapshot.contract.mutation&&snapshot.localProof.isEmpty()) {
+                            remoteReview=true;
+                            // Direct terminal replies are locally complete; keep the reviewer as
+                            // an audit signal, not a second mandatory model turn.
+                            evaluateStop(snapshot);
+                        }
                     }
                     if(decision==null && (looksLikeUserBlock(visibleCandidate)
                             ||hasConcreteHumanDependency(visibleCandidate,snapshot.blocking))) {
@@ -1913,7 +1928,12 @@ public class AgentLoop {
                         if(decision==null && uncertainSteps.size()==0 && "stop".equalsIgnoreCase(finish[0]))
                             decision=StopGate.locallyCompleted(snapshot,snapshot.localProof);
                         if(decision==null)decision=stopMemo.reuse(snapshot);
-                        if(decision==null && executionMode.requiresCompletionReview()) {
+                        boolean suspiciousReply=looksLikeInterimAnswer(visibleCandidate)
+                                ||looksLikeInterruptedReply(visibleCandidate)
+                                ||ReplyHeuristics.looksLikeUnconfirmedOutcome(visibleCandidate);
+                        boolean reviewSuspicious= suspiciousReply
+                                && (snapshot.contract.mutation||!turnHasWork);
+                        if(decision==null && (executionMode.requiresCompletionReview()||reviewSuspicious)) {
                             remoteReview=true;
                             decision=evaluateStop(snapshot);
                         }
@@ -2493,6 +2513,7 @@ public class AgentLoop {
         if (text == null) return false;
         String s = text.trim();
         if (s.isEmpty() || hasTaskCompleteMarker(s)) return false;
+        if (s.length() > 600 && !s.matches("(?s).*[。！？.!?\\]}>）)]$")) return true;
         if (s.matches("(?s).*(?:但|但是|因为|由于|并且|以及|不过|然而|而|所以|因此|:|：|,|，|;|；)$")
                 || s.matches("(?is).*\\b(?:then|but|because|and|however)$")) return true;
         if (countChar(s, '（') > countChar(s, '）')

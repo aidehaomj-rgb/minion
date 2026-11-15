@@ -2,6 +2,7 @@ package com.minion.core.checkpoint;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.minion.core.tools.PathIdentity;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -29,8 +30,12 @@ public final class CheckpointStore {
     public static void endGroup(boolean success){try{if(success&&SEALS.get()!=null)for(Runnable r:SEALS.get())r.run();}finally{GROUP.remove();SEALS.remove();}}
 
     public CheckpointStore(Path workspaceRoot, Path root) {
-        this.workspaceRoot = workspaceRoot.toAbsolutePath().normalize();
-        this.root = root.toAbsolutePath().normalize();
+        try {
+            this.workspaceRoot = PathIdentity.canonical(workspaceRoot);
+            this.root = PathIdentity.canonical(root);
+        } catch (IOException invalid) {
+            throw new IllegalArgumentException("检查点目录无法解析: " + invalid.getMessage(), invalid);
+        }
     }
 
     public synchronized Entry create(Path target, String action) throws IOException {
@@ -163,11 +168,8 @@ public final class CheckpointStore {
 
     private Path safeTarget(Path target) throws IOException {
         Path normalized = target.toAbsolutePath().normalize();
-        if (!normalized.startsWith(workspaceRoot)) throw new IOException("检查点路径越出工作区: " + normalized);
-        Path probe = Files.exists(normalized) ? normalized : normalized.getParent();
-        while (probe != null && !Files.exists(probe)) probe = probe.getParent();
-        if (probe != null && Files.exists(workspaceRoot)
-                && !probe.toRealPath().startsWith(workspaceRoot.toRealPath())) {
+        Path canonical = PathIdentity.canonical(normalized);
+        if (!canonical.startsWith(workspaceRoot)) {
             throw new IOException("检查点路径经链接越出工作区: " + normalized);
         }
         return normalized;

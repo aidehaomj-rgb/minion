@@ -218,7 +218,7 @@ final class DbAsyncJobs {
     private Path newDirectory() throws IOException {
         if (tmpDir == null) throw new IOException("异步结果需要现有授权 tmp 目录；不回退系统临时目录");
         // tmp 根由宿主预先授权/创建，模型没有 resultPath/输出根参数。
-        Path root = tmpDir.toRealPath();
+        Path root = tmpDir.toAbsolutePath().normalize();
         Path parent = root.resolve("db-jobs");
         if (!PathsGuard.inside(root.toString(), parent)) throw new IOException("JDBC 结果目录越界");
         Files.createDirectories(parent);

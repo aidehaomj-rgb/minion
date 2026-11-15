@@ -83,6 +83,17 @@ final class ReplyHeuristics {
                 + "(?:[。.!！][ ]*(?:执行工具调用|现在|执行|good|execute)[。.!！]*)*[。.!！]*$");
     }
 
+    /** Explicit uncertainty is not a completion signal, even when phrased as a normal answer. */
+    static boolean looksLikeUnconfirmedOutcome(String text) {
+        if (text == null) return false;
+        String s = text.trim();
+        if (s.isEmpty() || hasTaskCompleteMarker(s)) return false;
+        return s.matches("(?is).*(?:交付|任务|执行结果|完成情况|状态|结果).{0,16}"
+                + "(?:不能确认|无法确认|尚未确认|未确认|无法确定|不能确定|情况不明|状态不明|结果未知).*")
+                ||s.matches("(?is).*(?:不能确认|无法确认|尚未确认|未确认|无法确定|不能确定)"
+                + ".{0,16}(?:交付|任务|执行结果|完成情况|状态|结果).*");
+    }
+
     /** 旧措辞诊断与测试兼容；生产waiting_user由统一结束核验决定。 */
     static boolean looksLikeUserBlock(String text) {
         if (text == null || hasTaskCompleteMarker(text)) return false;

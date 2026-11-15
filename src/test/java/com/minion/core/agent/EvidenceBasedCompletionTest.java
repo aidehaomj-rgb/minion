@@ -75,7 +75,8 @@ public class EvidenceBasedCompletionTest {
         create();check();checkpoint("");finalReply();
         llm.stopReviewRaw="should not be called";
         loop.runUserTurn(GOAL);
-        assertTrue(result(),loop.lastTurnSucceeded());
+        assertTrue("result="+result()+" decision="+loop.session().taskState.stopDecision
+                +" reviews="+llm.stopReviewRequests,loop.lastTurnSucceeded());
         assertEquals("local_evidence",loop.session().taskState.stopDecision.source);
         assertEquals(1,writes);assertEquals(4,llm.requests.size());assertTrue(llm.stopReviewRequests.isEmpty());
         assertTrue(loop.messages().get(loop.messages().size()-1).content.contains("完成时间："));
@@ -95,7 +96,8 @@ public class EvidenceBasedCompletionTest {
         llm.addTurnWithFinish(Collections.emptyList(),FILE+" 已核验。"+AgentLoop.TASK_COMPLETE_MARKER,"content_filter");
         loop.runUserTurn(GOAL);
         assertFalse(loop.lastTurnSucceeded());assertEquals("content_filter",loop.session().taskState.pauseCode);
-        assertTrue(llm.stopReviewRequests.isEmpty());assertEquals(1,writes);
+        assertEquals("reviews="+llm.stopReviewRequests+" decision="+loop.session().taskState.stopDecision,
+                0,llm.stopReviewRequests.size());assertEquals(1,writes);
     }
 
     @Test public void aCheckpointWithNextActionMustNotSkipTheReviewer() {
@@ -163,7 +165,8 @@ public class EvidenceBasedCompletionTest {
         loop.runUserTurn(GOAL);
         assertFalse(loop.lastTurnSucceeded());assertEquals("hook_failed",loop.session().taskState.pauseCode);
         assertEquals("unknown",loop.session().taskState.stopDecision.status);
-        assertTrue(llm.stopReviewRequests.isEmpty());assertEquals(1,writes);
+        assertEquals("reviews="+llm.stopReviewRequests+" decision="+loop.session().taskState.stopDecision,
+                0,llm.stopReviewRequests.size());assertEquals(1,writes);
     }
 
     @Test public void realTestBoundToACompletedWorkflowStopsWithoutARetest() throws Exception {

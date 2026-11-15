@@ -330,6 +330,9 @@ public class SubAgentLoop {
                 }
                 if(usage[0]!=null&&!usage[0].estimated&&lastWireRequest!=null)
                     context.observeRequestTokens(lastWireRequest,lastWireHistory,lastSchemaTokens,usage[0].inputTokens);
+                com.minion.core.diagnostics.DiagnosticLog.info("subagent-response",
+                        "messages=" + messages.size() + " finish=" + finish[0]
+                                + " tools=" + (toolCalls[0] == null ? 0 : toolCalls[0].size()));
                 if (com.minion.core.llm.RepetitionGuard.FINISH.equals(finish[0])) {
                     if(cancelled || Thread.currentThread().isInterrupted()) return "子 agent 已中断";
                     com.minion.core.diagnostics.DiagnosticLog.info("stream-repetition", "scope=child attempt=" + repetitionRecoveries);
@@ -500,9 +503,10 @@ public class SubAgentLoop {
 
     private void streamChat(List<Message> request, com.minion.core.llm.StreamHandler handler,
                             boolean withoutThinking, boolean forAction) throws LlmException {
-        List<Message> bounded = context.prepareForRequest(request);
+        java.util.Set<String> childControls=java.util.Collections.singleton("todowrite");
+        List<Message> bounded = context.prepareForRequest(request,childControls);
         List<JsonObject> schemas=subAgentTools();
-        lastWireRequest=bounded;lastWireHistory=context.prepareForRequest(messages);
+        lastWireRequest=bounded;lastWireHistory=context.prepareForRequest(messages,childControls);
         lastSchemaTokens=com.minion.core.context.ContextBudget.estimate(java.util.Collections.<Message>emptyList(),schemas).schema;
         context.requestOverhead(bounded,lastWireHistory,lastSchemaTokens);
         if (forAction) llm.streamChatForAction(bounded, schemas, handler);

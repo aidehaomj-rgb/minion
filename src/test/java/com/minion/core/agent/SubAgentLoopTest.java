@@ -67,12 +67,17 @@ public class SubAgentLoopTest {
         llm.addTurnWithTools(Arrays.asList(todo,context),null);
         ToolCall mark=new ToolCall();mark.id="child-mark";mark.name="TodoWrite";mark.arguments="{\"action\":\"mark\",\"index\":0}";
         llm.addTurnWithTools(Collections.singletonList(mark),null);llm.addTurn("子任务已完成");
+        RecordingUi ui=new RecordingUi();
         SubAgentLoop sub=new SubAgentLoop("系统","仅子任务",tmp.getRoot().toString(),llm,registry,
-                new ConfirmGate(config,new FakeConfirmUi(ConfirmUi.Decision.APPROVE)),new RecordingUi());
+                new ConfirmGate(config,new FakeConfirmUi(ConfirmUi.Decision.APPROVE)),ui);
         java.nio.file.Path record=tmp.getRoot().toPath().resolve("child.json"); sub.setRecordPath(record);
         sub.run();
         assertTrue(sub.succeeded()); assertEquals("主任务",parent.items.get(0).text);
-        assertTrue(llm.requests.get(1).messages.get(3).content.contains("子任务"));
+        List<Message> secondRequest=llm.requests.get(1).messages;
+        assertEquals("secondRequest="+secondRequest+" warnings="+ui.warnings+" errors="+ui.errors
+                        +" toolCalls="+ui.toolCalls,
+                4,secondRequest.size());
+        assertTrue("secondRequest="+secondRequest,secondRequest.get(3).content.contains("子任务"));
         for(JsonObject schema:llm.lastRequestTools) assertNotEquals("Context",schema.getAsJsonObject("function").get("name").getAsString());
         String saved=new String(java.nio.file.Files.readAllBytes(record),java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(saved.contains("仅子任务")); assertTrue(saved.contains("returned_needs_review"));

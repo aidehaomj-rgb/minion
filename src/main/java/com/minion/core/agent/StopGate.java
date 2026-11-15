@@ -156,6 +156,11 @@ public final class StopGate {
             this.semanticKey=digest(id+"\n"+goal+"\n"+guidance+"\n"+semanticFacts+"\n"+candidate+"\n"+this.blocking+"\n"+distinct);
         }
         public boolean sameFacts(Snapshot other) { return id.equals(other.id)&&version.equals(other.version); }
+        boolean hasSuccessfulMutation() {
+            for (Receipt receipt : receiptRefs.values())
+                if (receipt != null && receipt.ok && Boolean.TRUE.equals(receipt.mutation)) return true;
+            return false;
+        }
     }
     static String visibleCandidate(String candidate) {
         String text=candidate==null?"":candidate.trim();
@@ -389,12 +394,10 @@ public final class StopGate {
         private JsonObject probe(String path) {
             JsonObject item=new JsonObject();item.addProperty("path",path);
             try {
-                Path p=Paths.get(path);
-                if(Files.exists(p))p=p.toRealPath();
-                if(!allowed.test(p)){item.addProperty("status","permission_denied");}
-                else if(!p.toAbsolutePath().normalize().equals(Paths.get(path).toAbsolutePath().normalize()))
-                    item.addProperty("status","path_changed");
-                else {FileEvidence current=FileEvidence.capture(p);item.addProperty("status",current.status);item.addProperty("actualSha256",current.sha256);item.addProperty("size",current.size);}
+                Path logical=Paths.get(path).toAbsolutePath().normalize();
+                Path canonical=com.minion.core.tools.PathIdentity.canonical(logical);
+                if(!allowed.test(canonical)){item.addProperty("status","permission_denied");}
+                else {FileEvidence current=FileEvidence.capture(logical);item.addProperty("status",current.status);item.addProperty("actualSha256",current.sha256);item.addProperty("size",current.size);}
             } catch(Exception e){item.addProperty("status","unreadable");}
             return item;
         }

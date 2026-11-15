@@ -228,7 +228,18 @@ public class ContextManager {
      * 更宽松的上限，用户原始输入永不截断。
      */
     public List<Message> prepareForRequest(List<Message> messages) {
+        return prepareForRequest(messages, java.util.Collections.<String>emptySet());
+    }
+
+    /**
+     * Child agents use TodoWrite as a real local tool; the root control-plane filter must not
+     * erase its call/result pair from the child request. Other internal controls stay hidden.
+     */
+    public List<Message> prepareForRequest(List<Message> messages, Set<String> preservedControlTools) {
         if (messages == null || messages.isEmpty()) return messages;
+        final Set<String> preserved = new HashSet<String>();
+        if (preservedControlTools != null) for (String name : preservedControlTools)
+            if (name != null) preserved.add(name.toLowerCase(java.util.Locale.ROOT));
         SkillResidency.Selection skills = SkillResidency.select(messages, activeTaskId, activeRevision, activeSkillNames);
         int protectedFrom = Math.max(0, messages.size() - 12);
         for (int i = messages.size() - 1; i >= 0; i--) {
@@ -250,7 +261,8 @@ public class ContextManager {
             Message src = messages.get(i);
             if (src.role == Message.Role.TOOL && src.toolCallId != null
                     && droppedControlCalls.contains(src.toolCallId)) continue;
-            if (src.role == Message.Role.TOOL && internalControl(src.name)) continue;
+            if (src.role == Message.Role.TOOL && internalControl(src.name)
+                    && !preserved.contains(src.name.toLowerCase(java.util.Locale.ROOT))) continue;
             if (SkillResidency.isSkill(src) || SkillResidency.isReference(src)) {
                 if (skills.resident.contains(i)) { /* body remains within the shared count/character budget */ }
                 else if (skills.references.contains(i)) { out.add(copyMessage(SkillResidency.reference(src))); continue; }
@@ -297,7 +309,8 @@ public class ContextManager {
             if (m.toolCalls != null && !m.toolCalls.isEmpty()) {
                 List<com.minion.core.llm.ToolCall> calls = new ArrayList<com.minion.core.llm.ToolCall>();
                 for (com.minion.core.llm.ToolCall srcCall : m.toolCalls) {
-                    if (internalControl(srcCall.name)) {
+                    if (internalControl(srcCall.name)
+                            && !preserved.contains(srcCall.name.toLowerCase(java.util.Locale.ROOT))) {
                         if (srcCall.id != null) droppedControlCalls.add(srcCall.id);
                         continue;
                     }

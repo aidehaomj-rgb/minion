@@ -1735,7 +1735,8 @@ public class AgentLoopTest {
         llm.addTurn("处理完成");
         newLoop().runUserTurn("执行工具");
         assertEquals(1, ui.toolCalls.size());
-        assertEquals(3, llm.requests.size());
+        assertEquals("stopReviews="+llm.stopReviewRequests+" warnings="+ui.warnings+" requests="+llm.requests.size(),
+                3, llm.requests.size());
     }
 
     @Test
@@ -1793,11 +1794,13 @@ public class AgentLoopTest {
         AgentLoop loop = newLoop();
         loop.runUserTurn("分析两个表格并生成结果");
 
-        assertEquals(3, llm.requests.size());
+        assertEquals("stopReviews="+llm.stopReviewRequests+" warnings="+ui.warnings+" requests="+llm.requests.size(),
+                3, llm.requests.size());
         Message hint = llm.requests.get(2).messages.get(llm.requests.get(2).messages.size() - 1);
         assertEquals(Message.Role.USER, hint.role);
         assertTrue(hint.content.contains("当前目标尚未交付"));
-        assertEquals(2,llm.stopReviewRequests.size());
+        assertEquals("warnings="+ui.warnings+" reviews="+llm.stopReviewRequests,
+                2,llm.stopReviewRequests.size());
         assertTrue(ui.warnings.toString().contains("阶段性回复"));
         assertTrue(loop.messages().get(loop.messages().size() - 1).content
                 .startsWith("分析已完成，结果文件已生成并核验。"));
@@ -1977,11 +1980,13 @@ public class AgentLoopTest {
         AgentLoop loop = newLoop();
         loop.runUserTurn("完成复杂分析报告");
 
-        assertEquals(3, llm.requests.size());
+        assertEquals("stopReviews="+llm.stopReviewRequests+" warnings="+ui.warnings+" requests="+llm.requests.size(),
+                3, llm.requests.size());
         Message hint = llm.requests.get(2).messages.get(llm.requests.get(2).messages.size() - 1);
         assertTrue(hint.content.contains("统一结束检查"));
         assertTrue(hint.content.contains("已完成步骤不能重跑"));
-        assertEquals(2,llm.stopReviewRequests.size());
+        assertEquals("warnings="+ui.warnings+" reviews="+llm.stopReviewRequests,
+                2,llm.stopReviewRequests.size());
         assertTrue(ui.warnings.toString().contains("最终交付尚未确认"));
     }
 
@@ -2073,7 +2078,8 @@ public class AgentLoopTest {
         llm.addTurn("Excel 已生成并验证。");
         loop.runUserTurn("继续完成之前的任务");
 
-        assertEquals("跨回合阶段性回复必须继续并落实动作", 3, llm.requests.size());
+        assertEquals("跨回合阶段性回复必须继续并落实动作 stopReviews="+llm.stopReviewRequests
+                +" warnings="+ui.warnings+" requests="+llm.requests.size(), 3, llm.requests.size());
         assertTrue(ui.warnings.toString().contains("阶段性回复"));
         assertTrue(loop.messages().get(loop.messages().size() - 1).content.startsWith("Excel 已生成并验证。"));
         assertTrue(llm.stopReviewRequests.get(0).contains("扫描完成"));

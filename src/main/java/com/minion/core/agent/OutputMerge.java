@@ -2,6 +2,7 @@ package com.minion.core.agent;
 
 import com.google.gson.Gson;
 import com.minion.core.checkpoint.CheckpointStore;
+import com.minion.core.tools.PathIdentity;
 import com.minion.core.tools.*;
 import java.nio.file.*;
 import java.nio.charset.StandardCharsets;
@@ -45,7 +46,7 @@ public final class OutputMerge {
     public Plan inspect(TaskState.Child child,String relativeSource,String relativeTarget)throws Exception {
         ChildTaskIsolation.Record isolation=null;
         if(child!=null&&child.outputDir!=null){Path root=Paths.get(workspace.workDir()).toRealPath(),output=Paths.get(child.outputDir).toAbsolutePath().normalize();
-            if(output.startsWith(root.resolve(".minion/git-worktrees"))||Files.exists(output.resolve(".git"))){isolation=new ChildTaskIsolation(root).load(output.getFileName().toString());if(!output.equals(Paths.get(isolation.worktree)))throw new IOException("代码worktree与生命周期登记不匹配");}}
+            if(output.startsWith(root.resolve(".minion/git-worktrees"))||Files.exists(output.resolve(".git"))){isolation=new ChildTaskIsolation(root).load(output.getFileName().toString());if(!PathIdentity.same(output,Paths.get(isolation.worktree)))throw new IOException("代码worktree与生命周期登记不匹配");}}
         return inspect(child,relativeSource,relativeTarget,isolation);
     }
     public Plan inspect(TaskState.Child child,String relativeSource,String relativeTarget,ChildTaskIsolation.Record isolation)throws Exception {
@@ -55,7 +56,7 @@ public final class OutputMerge {
         Path source=relative(outputRoot,relativeSource),target=relative(root,relativeTarget);checkPaths(root,outputRoot,source,target);
         if(Files.size(source)>CheckpointStore.MAX_SNAPSHOT_BYTES||(Files.exists(target)&&Files.size(target)>CheckpointStore.MAX_SNAPSHOT_BYTES))throw new IOException("合并文件超过50MB检查点上限");
         Plan p=new Plan();p.taskId=child.taskId;p.childId=child.id;p.source=source;p.target=target;p.sourceSize=Files.size(source);p.sourceHash=FileEvidence.digest(source);p.targetHash=FileEvidence.digest(target);
-        if(isolation!=null){if(!Objects.equals(isolation.taskId,child.taskId)||!Paths.get(isolation.worktree).equals(outputRoot))throw new IOException("代码隔离不属于本任务/输出目录");String baseline=new ChildTaskIsolation(root).expectedTargetHash(isolation,root.relativize(target).toString());if(!baseline.equals(p.targetHash))throw new IOException("代码目标偏离派发基线");}
+        if(isolation!=null){if(!Objects.equals(isolation.taskId,child.taskId)||!PathIdentity.same(Paths.get(isolation.worktree),outputRoot))throw new IOException("代码隔离不属于本任务/输出目录");String baseline=new ChildTaskIsolation(root).expectedTargetHash(isolation,root.relativize(target).toString());if(!baseline.equals(p.targetHash))throw new IOException("代码目标偏离派发基线");}
         StringBuilder b=new StringBuilder("源: ").append(source).append("\n目标: ").append(target).append("\n源SHA256: ").append(p.sourceHash).append("\n目标SHA256: ").append(p.targetHash).append("\n字节: ").append(p.sourceSize);
         if(p.sourceSize<50000&&(!Files.exists(target)||Files.size(target)<50000)){
             String a=new String(Files.readAllBytes(source),StandardCharsets.UTF_8),old=Files.exists(target)?new String(Files.readAllBytes(target),StandardCharsets.UTF_8):"";
@@ -72,7 +73,7 @@ public final class OutputMerge {
         try{for(java.util.concurrent.locks.ReentrantLock lock:locks){lock.lockInterruptibly();acquired++;}
             synchronized(state){
                 checkPlan(plan,issued);TaskState.Child current=state.child(issued.childId);
-                if(current==null||!Objects.equals(state.id,issued.taskId)||!Objects.equals(current.taskId,issued.taskId)||!reviewed(current.status)||!current.isolatedOutput||!Paths.get(current.outputDir).toAbsolutePath().normalize().equals(issued.outputRoot))throw new IOException("子任务状态/输出根已变，合并预览失效");
+                if(current==null||!Objects.equals(state.id,issued.taskId)||!Objects.equals(current.taskId,issued.taskId)||!reviewed(current.status)||!current.isolatedOutput||!PathIdentity.same(Paths.get(current.outputDir),issued.outputRoot))throw new IOException("子任务状态/输出根已变，合并预览失效");
                 if(!Paths.get(workspace.workDir()).toRealPath().equals(issued.root))throw new IOException("工作区已变化");checkPaths(issued.root,issued.outputRoot,issued.source,issued.target);
                 if(!issued.outputIdentity.equals(realIdentity(issued.outputRoot))||!issued.sourceIdentity.equals(realIdentity(issued.source))||!issued.targetIdentity.equals(realIdentity(issued.target)))throw new IOException("合并目录/文件真实路径身份变化，禁止覆盖");
                 if(issued.isolation!=null)new ChildTaskIsolation(issued.root).expectedTargetHash(issued.isolation,issued.root.relativize(issued.target).toString());
@@ -108,9 +109,9 @@ public final class OutputMerge {
     private Path recordPath(String task,String child)throws IOException{if(task==null||child==null||!task.matches("[A-Za-z0-9_.-]{1,128}")||!child.matches("[A-Za-z0-9_.-]{1,128}")||"..".equals(task)||"..".equals(child))throw new IOException("任务ID非法");Path p=Paths.get(workspace.workDir()).resolve(".minion/child-merge-records").resolve(task).resolve(child+".json").toAbsolutePath().normalize();if(!PathsGuard.inside(workspace.workDir(),p))throw new IOException("合并账本越界");return p;}
     private void setChildStatus(TaskState state,String id,String status){List<TaskState.Child> next=new ArrayList<TaskState.Child>();for(TaskState.Child old:state.children){TaskState.Child c=gson.fromJson(gson.toJson(old),TaskState.Child.class);if(Objects.equals(c.id,id)&&Objects.equals(c.taskId,state.id))c.status=status;next.add(c);}state.children=next;}
     private static boolean reviewed(String status){return "reviewed".equals(status)||"merged_needs_validation".equals(status);}
-    private static Path realIdentity(Path p)throws Exception{Path probe=p;List<Path> tail=new ArrayList<Path>();while(!Files.exists(probe,LinkOption.NOFOLLOW_LINKS)){tail.add(probe.getFileName());probe=probe.getParent();}Path result=probe.toRealPath();for(int n=tail.size()-1;n>=0;n--)result=result.resolve(tail.get(n));return result.normalize();}
+    private static Path realIdentity(Path p)throws Exception{return PathIdentity.canonical(p);}
     private static Path relative(Path root,String raw)throws IOException{if(raw==null||Paths.get(raw).isAbsolute()||raw.replace('\\','/').matches("(^|.*/)\\.\\.(/.*|$)"))throw new IOException("只允许目录内相对路径");return root.resolve(raw).toAbsolutePath().normalize();}
-    private static void checkPaths(Path root,Path output,Path source,Path target)throws Exception{if(!PathsGuard.inside(root.toString(),output)||!PathsGuard.inside(output.toString(),source)||!PathsGuard.inside(root.toString(),target)||target.startsWith(output)||!Files.isRegularFile(source,LinkOption.NOFOLLOW_LINKS)||Files.isDirectory(target)||Files.isSymbolicLink(target))throw new IOException("源或目标路径越界/不存在/类型不符");Path realTarget=realIdentity(target);if(realTarget.startsWith(realIdentity(output)))throw new IOException("合并目标指向子输出自身");Path relative=root.relativize(realTarget);if(relative.getNameCount()>0&&Arrays.asList(".git",".minion").contains(relative.getName(0).toString().toLowerCase(Locale.ROOT)))throw new IOException("禁止合并覆盖Git/协调元数据");}
+    private static void checkPaths(Path root,Path output,Path source,Path target)throws Exception{if(!PathsGuard.inside(root.toString(),output)||!PathsGuard.inside(output.toString(),source)||!PathsGuard.inside(root.toString(),target)||!Files.isRegularFile(source,LinkOption.NOFOLLOW_LINKS)||Files.isDirectory(target)||Files.isSymbolicLink(target))throw new IOException("源或目标路径越界/不存在/类型不符");Path realTarget=realIdentity(target),realOutput=realIdentity(output),realRoot=realIdentity(root);if(realTarget.startsWith(realOutput))throw new IOException("合并目标指向子输出自身");if(!realTarget.startsWith(realRoot))throw new IOException("合并目标真实路径越界");Path relative=realRoot.relativize(realTarget);if(relative.getNameCount()>0&&Arrays.asList(".git",".minion").contains(relative.getName(0).toString().toLowerCase(Locale.ROOT)))throw new IOException("禁止合并覆盖Git/协调元数据");}
     private static void checkPlan(Plan p,Issued i)throws IOException{if(i.consumed||!Objects.equals(p.taskId,i.taskId)||!Objects.equals(p.childId,i.childId)||!Objects.equals(p.source,i.source)||!Objects.equals(p.target,i.target)||!Objects.equals(p.sourceHash,i.sourceHash)||!Objects.equals(p.targetHash,i.targetHash)||!Objects.equals(p.preview,i.preview)||p.sourceSize!=i.sourceSize)throw new IOException("合并计划已使用或被篡改，需重新预览");}
     private static String hash(byte[] bytes)throws Exception{StringBuilder b=new StringBuilder();for(byte value:java.security.MessageDigest.getInstance("SHA-256").digest(bytes))b.append(String.format("%02x",value&255));return b.toString();}
 }

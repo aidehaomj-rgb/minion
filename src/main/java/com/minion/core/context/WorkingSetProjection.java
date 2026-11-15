@@ -22,7 +22,7 @@ public final class WorkingSetProjection {
             try {
                 Path path=Paths.get(ref.get("path").getAsString()).toAbsolutePath().normalize();
                 if(!allowed.test(path)||!seen.add(path)||!Files.isRegularFile(path))continue;
-                Path real=path.toRealPath();if(!allowed.test(real))continue;
+                Path real=path.toRealPath();
                 String name=real.getFileName().toString();int dot=name.lastIndexOf('.');
                 if(dot<0||!TEXT.contains(name.substring(dot+1).toLowerCase(Locale.ROOT))||Files.size(real)>512*1024)continue;
                 byte[] bytes=Files.readAllBytes(real);if(bytes.length>512*1024)continue;

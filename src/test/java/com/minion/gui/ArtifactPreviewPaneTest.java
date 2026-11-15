@@ -47,13 +47,13 @@ public class ArtifactPreviewPaneTest {
             fx(()->{links[0]=new LocalFileLinks(()->root,()->null,p->{},m->{});pane[0]=new ArtifactPreviewPane(()->{},links[0]);
                 pane[0].setArtifacts(Arrays.asList(md,docx,hidden,ref,py));});
             fx(()->{try{
-                MenuButton results=field(pane[0],"files");assertEquals("成果 · 2",results.getText());
-                assertEquals(2,results.getItems().size());
+                MenuButton results=field(pane[0],"files");assertEquals("成果 · 3",results.getText());
+                assertEquals(3,results.getItems().size());
                 assertTrue(results.getItems().stream().noneMatch(Menu.class::isInstance));
-                java.util.Map<?,?> visible=field(pane[0],"artifacts");assertEquals(2,visible.size());
+                java.util.Map<?,?> visible=field(pane[0],"artifacts");assertEquals(3,visible.size());
                 assertFalse(visible.values().stream().anyMatch(item->GeneratedArtifact.EXECUTION_RECORD.equals(((GeneratedArtifact)item).kind)));
                 assertFalse(visible.keySet().stream().anyMatch(path->path.toString().endsWith(".py")));
-                javafx.scene.layout.FlowPane overview=field(pane[0],"overviewGrid");assertEquals(2,overview.getChildren().size());
+                javafx.scene.layout.FlowPane overview=field(pane[0],"overviewGrid");assertEquals(3,overview.getChildren().size());
                 VBox overviewView=field(pane[0],"overviewView");assertTrue(overviewView.isVisible());
             }catch(Exception e){throw new RuntimeException(e);}});
         }finally{fx(()->{if(pane[0]!=null)pane[0].close();if(links[0]!=null)links[0].close();});}

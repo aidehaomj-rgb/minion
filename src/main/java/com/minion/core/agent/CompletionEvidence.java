@@ -161,7 +161,11 @@ final class CompletionEvidence {
     }
 
     private static String key(JsonObject file,String hashKey) {
-        return Paths.get(string(file,"path")).toAbsolutePath().normalize()+"\n"+string(file,hashKey);
+        try {
+            return com.minion.core.tools.PathIdentity.canonical(Paths.get(string(file,"path")))+"\n"+string(file,hashKey);
+        } catch(Exception invalid) {
+            return Paths.get(string(file,"path")).toAbsolutePath().normalize()+"\n"+string(file,hashKey);
+        }
     }
 
     private static String mutationTarget(JsonObject args) {

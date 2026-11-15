@@ -191,7 +191,10 @@ public class SessionManagerTest {
             llm.addTurnWithTools(java.util.Collections.singletonList(read),null);
             llm.stopKind="task";llm.addTurn("已读取并核查文件，结果已交付。");
             m.send(h,"读取sample.txt并核查内容");h.pool.submit(()->{}).get(10,TimeUnit.SECONDS);
-            assertEquals(2,llm.requests.size());assertTrue(h.loop.lastTurnSucceeded());
+            assertEquals("status="+h.session.taskState.status+" pause="+h.session.taskState.pauseCode
+                            +" stop="+h.session.taskState.stopDecision+" evidence="+h.session.taskState.evidence
+                            +" requests="+llm.requests.size(),
+                    2,llm.requests.size());assertTrue(h.loop.lastTurnSucceeded());
             assertEquals(1,h.session.taskState.automaticContinuations);
             assertEquals("completed",h.session.taskState.status);
             assertEquals(1,h.session.messages.stream().filter(x->x.role==Message.Role.USER&&!x.supplement).count());
@@ -302,7 +305,10 @@ public class SessionManagerTest {
         SpyManager m=new SpyManager(FAKE_UI,Config.load(jar),jar,WorkspaceManager.load(jar),ModelManager.load(jar));
         try{SessionHandle h=m.createSession("测试");FakeLlmClient llm=m.created.get(0);llm.stopStatuses.add("unknown");llm.addTurn("交付情况不能确认。");
             h.running=true;m.stageGuidance(h,"后续任务",null);m.send(h,"当前任务");h.pool.submit(()->{}).get(5,TimeUnit.SECONDS);
-            assertFalse(h.loop.lastTurnSucceeded());assertEquals(1,h.queuedSnapshot().size());assertEquals(1,llm.requests.size());
+            assertFalse("status="+h.session.taskState.status+" pause="+h.session.taskState.pauseCode
+                            +" stop="+h.session.taskState.stopDecision+" requests="+llm.requests.size(),
+                    h.loop.lastTurnSucceeded());
+            assertEquals(1,h.queuedSnapshot().size());assertEquals(1,llm.requests.size());
             assertEquals("unknown",h.session.taskState.stopDecision.status);
             Session loaded=new SessionStore(WorkspaceManager.sessionDirFor(jar,h.workspaceName)).load(h.id);
             assertEquals("后续任务",loaded.queuedTasks.get(0).text);
