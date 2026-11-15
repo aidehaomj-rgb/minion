@@ -81,6 +81,47 @@ public class AgentLoopTest {
         return loop;
     }
 
+    @Test public void defaultChildUsesPromptAndCannotReplaceRootTodo() {
+        AgentLoop loop=newLoop();
+        loop.session().taskState.begin("主目标生成整表",false);
+        loop.session().todos.items.add(new TodoList.TodoItem("主目标未完成",false));
+        ToolCall call=new ToolCall(); call.id="todo-child"; call.name="TodoWrite";
+        call.arguments="{\"items\":[{\"text\":\"子范围\",\"done\":true}]}";
+        llm.addTurnWithTools(Collections.singletonList(call),null); llm.addTurn("子范围结果");
+        JsonObject args=new JsonObject(); args.addProperty("description","只查指定行");
+        args.addProperty("prompt","只返回id与证据，不改变主任务");
+        String result=loop.runSubAgent(args);
+        assertTrue(result.contains("子Agent ID"));
+        assertTrue(result.contains("【已完成（子Agent自报，非核验事实）】"));
+        assertTrue(result.contains("【证据路径】"));
+        assertTrue(result.contains("【完整记录】"));
+        assertTrue(llm.requests.get(0).messages.get(1).content.contains("只返回id与证据"));
+        assertEquals("主目标未完成",loop.session().todos.items.get(0).text);
+        assertEquals(1,loop.session().taskState.children.size());
+        assertTrue(loop.session().taskState.children.get(0).assignment.contains("只返回id与证据"));
+        loop.shutdown();
+    }
+
+    @Test public void repeatedCompactCannotReplaceActiveGoalWithOldSummaryOrSteer() {
+        AgentLoop loop=newLoopWithContext(100000,0.8,1);
+        llm.addTurn("阶段记录"); loop.runUserTurn("原目标核查全部记录并生成Excel");
+        loop.offerSupplement("只新增列宽要求，不重新分析");
+        llm.addTurn("当前断点：待生成Excel"); loop.runUserTurn("继续执行");
+        String id=loop.session().taskState.id;
+        llm.compressResult="错误的摘要：去执行旧任务A";
+        loop.compactNow();
+        llm.addTurn("最终完成 [[MINION_TASK_COMPLETE]]"); loop.runUserTurn("继续执行");
+        loop.compactNow();
+        assertEquals(id,loop.session().taskState.id);
+        assertEquals("原目标核查全部记录并生成Excel",loop.session().taskState.objective);
+        assertTrue(loop.session().taskState.guidance.contains("只新增列宽要求，不重新分析"));
+        String system=llm.requests.get(llm.requests.size()-1).messages.stream()
+                .filter(m->m.origin==Message.Origin.TASK_CONTROL).map(m->m.content).collect(java.util.stream.Collectors.joining("\n"));
+        assertTrue(system.contains("原目标核查全部记录并生成Excel"));
+        assertTrue(system.contains("只新增列宽要求，不重新分析"));
+        loop.shutdown();
+    }
+
     @Test
     public void singleTurn_noTools() {
         llm.addTurn("好的");
@@ -94,8 +135,92 @@ public class AgentLoopTest {
         assertEquals("好的", loop.messages().get(1).content);
         // 请求 = system + 全部历史
         assertEquals(Message.Role.SYSTEM, llm.lastRequestMessages.get(0).role);
-        assertEquals(2, llm.lastRequestMessages.size());
+        assertEquals(3, llm.lastRequestMessages.size());
+        assertEquals(Message.Origin.TASK_CONTROL,llm.lastRequestMessages.get(1).origin);
         assertEquals(1, ui.contentParts.size());
+    }
+
+    @Test
+    public void normalQuestionCompletesWithoutRemoteReview() {
+        llm.addTurn("Qoder 当前信息无法在内网核实。");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("qoder可以用到fable5.2和gpt6吗");
+        assertEquals(1, llm.requests.size());
+        assertTrue(llm.lastRequestMessages.get(0).content.contains("当前回合模式：普通"));
+        assertTrue(llm.stopReviewRequests.isEmpty());
+        assertTrue(loop.lastTurnSucceeded());
+        assertEquals("completed", loop.session().taskState.status);
+    }
+
+    @Test
+    public void planModeBlocksMutationTools() {
+        ToolCall tc = new ToolCall();
+        tc.id = "plan-write";
+        tc.name = "example";
+        tc.arguments = "{\"text\":\"should not run\"}";
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn("计划：先读取文件，再修改并测试。");
+        AgentLoop loop = newLoop();
+        loop.requestExecutionMode(ExecutionMode.PLAN);
+        loop.runUserTurn("制定修改方案");
+        assertEquals(2, llm.requests.size());
+        assertTrue(loop.messages().get(2).content.contains("计划/审查只读回合"));
+        assertTrue(loop.lastTurnSucceeded());
+    }
+
+    @Test
+    public void normalReadOnlyWebFetchThenAnswersWithoutReview() {
+        registry.register(new Tool() {
+            @Override public String name() { return "WebFetch"; }
+            @Override public String description() { return "抓取网页"; }
+            @Override public JsonObject schema() {
+                return com.minion.core.tools.SchemaGenerator.objectSchema(
+                        "抓取网页", new String[]{"url"}, new String[]{"url"});
+            }
+            @Override public ToolResult execute(JsonObject args) {
+                return ToolResult.success("官方模型列表：GPT-6 不在 Qoder 内置清单中");
+            }
+        });
+        ToolCall tc = new ToolCall();
+        tc.id = "fetch";
+        tc.name = "WebFetch";
+        tc.arguments = "{\"url\":\"https://docs.qoder.com/models\"}";
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn("内网没有权威来源，不能确认。");
+        AgentLoop loop = newLoop();
+        loop.runUserTurn("qoder可以用到gpt6吗");
+        assertEquals(Collections.singletonList("WebFetch"), ui.toolCalls);
+        assertEquals(2, llm.requests.size());
+        assertTrue(llm.stopReviewRequests.isEmpty());
+        assertTrue(loop.lastTurnSucceeded());
+    }
+
+    @Test
+    public void goalModeUsesCompletionReview() {
+        llm.addTurn("目标阶段结果");
+        llm.stopStatuses.add("completed");
+        llm.stopKind="answer";
+        AgentLoop loop = newLoop();
+        loop.requestExecutionMode(ExecutionMode.GOAL);
+        loop.runUserTurn("持续检查并给出结论");
+        assertTrue(llm.lastRequestMessages.get(0).content.contains("当前回合模式：目标"));
+        assertEquals(ExecutionMode.GOAL,loop.currentExecutionMode());
+    }
+
+    @Test
+    public void repeatedInternalControlLoopIsSuppressed() {
+        for (int i=0;i<3;i++) {
+            ToolCall status=new ToolCall();
+            status.id="status-"+i;status.name="AgentControl";
+            status.arguments="{\"action\":\"status\"}";
+            llm.addTurnWithTools(Collections.singletonList(status),null);
+        }
+        llm.addTurn("检查完成，没有需要继续登记的内容。");
+        AgentLoop loop=newLoop();
+        loop.runUserTurn("检查当前状态并回答");
+        assertEquals(4,llm.requests.size());
+        assertTrue(loop.lastTurnSucceeded());
+        assertTrue(ui.toolCalls.size()<=2);
     }
 
     @Test
@@ -497,8 +622,9 @@ public class AgentLoopTest {
         assertTrue(msgs.get(0).content.contains("<skill name=\"brainstorming\">"));
         assertTrue(msgs.get(0).content.contains("正文：先澄清需求"));
         // 第一轮请求即携带技能正文（runUserTurn 开头 drain；请求 = system + 全部历史）
-        assertEquals(3, llm.requests.get(0).messages.size());
-        assertTrue(llm.requests.get(0).messages.get(1).content.contains("正文：先澄清需求"));
+        assertEquals(4, llm.requests.get(0).messages.size());
+        assertEquals(Message.Origin.TASK_CONTROL,llm.requests.get(0).messages.get(1).origin);
+        assertTrue(llm.requests.get(0).messages.get(2).content.contains("正文：先澄清需求"));
     }
 
     /** 同一技能重复入队：同轮仅注入一次 */
@@ -687,8 +813,9 @@ public class AgentLoopTest {
         // 参数在 <skill> 标签外（闭合之后），标签内严格等于技能正文
         assertTrue(msgs.get(0).content.indexOf("</skill>") < msgs.get(0).content.indexOf("用户参数:"));
         // 首轮请求即携带技能正文与参数（请求 = system + 全部历史）
-        assertEquals(3, llm.requests.get(0).messages.size());
-        assertTrue(llm.requests.get(0).messages.get(1).content.contains("用户参数: 帮我设计一个设置页"));
+        assertEquals(4, llm.requests.get(0).messages.size());
+        assertEquals(Message.Origin.TASK_CONTROL,llm.requests.get(0).messages.get(1).origin);
+        assertTrue(llm.requests.get(0).messages.get(2).content.contains("用户参数: 帮我设计一个设置页"));
     }
 
     /** 同名不同参连续入队：仍按技能名去重（参数以第一次为准） */
@@ -1004,42 +1131,34 @@ public class AgentLoopTest {
         assertNull(msgs.get(1).images); // 无图输入不产生 images
     }
 
-    /** 带图请求失败（如 DeepSeek 400 不支持 image_url）：自动移除图片降级为纯文本重试，会话恢复可用 */
+    /** 视觉接口拒绝图片时不可清图后以纯文本假装已经看图。 */
     @Test
-    public void imageFailure_degradesToTextAndRetries() {
+    public void imageFailure_keepsPixelsAndReportsCapabilityError() {
         llm.addTurnError("400: 不支持 image_url");
-        llm.addTurn("好的，已按文字处理");
         AgentLoop loop = newLoop();
         ImagePart img = new ImagePart();
         img.mime = "image/png"; img.base64 = "QUJD"; img.name = "截图.png";
         loop.runUserTurn("看图", Collections.singletonList(img));
-        // 两次请求：第一次带图失败，第二次降级纯文本成功
-        assertEquals(2, llm.requests.size());
-        // 历史中带图消息 images 已清空（下轮请求不会再触发 400）
+        assertEquals(1, llm.requests.size());
         Message user = loop.messages().get(0);
         assertEquals(Message.Role.USER, user.role);
-        assertNull(user.images);
-        // 降级成功不显示错误，仅提示一次
-        assertEquals(0, ui.errors.size());
-        assertEquals(1, ui.warnings.size());
-        assertTrue(ui.warnings.get(0).contains("图片"));
-        // 正常完成：assistant 回复入历史
-        assertEquals("好的，已按文字处理", loop.messages().get(1).content);
+        assertEquals(1, user.images.size());
+        assertEquals(1, ui.errors.size());
+        assertTrue(ui.errors.get(0).contains("原图已保留"));
     }
 
-    /** 降级后仍失败：不无限重试，正常报错退出 */
+    /** 不能因其他模型错误就误判图片不受支持、清掉历史图像。 */
     @Test
-    public void imageFailure_degradeRetryFailsAgain_stopsWithError() {
-        llm.addTurnError("400: 不支持 image_url");
-        llm.addTurnError("500: 服务错误");
+    public void unrelatedFailure_doesNotRemoveImages() {
+        llm.addTurnError("400: 参数错误");
         AgentLoop loop = newLoop();
         ImagePart img = new ImagePart();
         img.mime = "image/png"; img.base64 = "QUJD"; img.name = "截图.png";
         loop.runUserTurn("看图", Collections.singletonList(img));
-        // 原请求 + 降级重试各一次，不无限循环
-        assertEquals(2, llm.requests.size());
+        assertEquals(1, llm.requests.size());
+        assertNotNull(loop.messages().get(0).images);
         assertEquals(1, ui.errors.size());
-        assertEquals("500: 服务错误", ui.errors.get(0));
+        assertEquals("400: 参数错误", ui.errors.get(0));
     }
 
     /** 带思考的测试客户端：onThinking + onContent + onFinish */
@@ -1335,7 +1454,7 @@ public class AgentLoopTest {
         assertEquals(2, loop.messages().size()); // user + assistant
         assertEquals("最终回复", loop.messages().get(1).content);
         assertEquals(2, llm.requests.size()); // 原始请求 + 1 次重试
-        assertTrue(ui.warnings.isEmpty());     // 成功后静默恢复，不发"已恢复"；重试提示在指示器不进消息区
+        assertTrue(ui.warnings.stream().allMatch(s -> s.contains("正在核验"))); // 网络重试静默，仅允许结束核验提示
         // 进度序列：进入重试（第1次）→ 成功退出（0）
         assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
         assertTrue(ui.errors.isEmpty());
@@ -1404,7 +1523,7 @@ public class AgentLoopTest {
         loop.retryPolicy = new RetryPolicy(10, 0, 10, 60000); // 测试短固定间隔
         loop.runUserTurn("任务");
         assertEquals(2, llm.requests.size()); // 原始请求 + 1 次重试
-        assertTrue(ui.warnings.isEmpty());
+        assertTrue(ui.warnings.stream().allMatch(s -> s.contains("正在核验")));
         assertTrue(ui.errors.isEmpty());
         assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
     }
@@ -1471,7 +1590,7 @@ public class AgentLoopTest {
         loop.runUserTurn("任务");
         assertEquals(2, llm.requests.size());
         assertTrue(ui.errors.isEmpty());
-        assertTrue(ui.warnings.isEmpty());
+        assertTrue(ui.warnings.stream().allMatch(s -> s.contains("正在核验")));
         assertEquals(Arrays.asList(1, 0), ui.retryAttempts());
         assertEquals("网络超时", ui.retryProgress.get(0).label);
     }
@@ -1597,6 +1716,37 @@ public class AgentLoopTest {
     }
 
     @Test
+    public void stopWithTools_stillExecutesCompleteCall() {
+        ToolCall tc = new ToolCall();
+        tc.id = "compat"; tc.name = "example"; tc.arguments = "{\"text\":\"hi\"}";
+        llm.addTurnWithFinish(Collections.singletonList(tc), null, "stop");
+        llm.addTurn("处理完成");
+        newLoop().runUserTurn("执行工具");
+        assertEquals(1, ui.toolCalls.size());
+        assertEquals(2, llm.requests.size());
+    }
+
+    @Test
+    public void incompleteStream_neverExecutesUnterminatedToolCall() {
+        ToolCall tc = new ToolCall();
+        tc.id = "partial"; tc.name = "example"; tc.arguments = "{\"text\":\"hi\"}";
+        llm.addTurnWithFinish(Collections.singletonList(tc), "部分正文", "incomplete");
+        llm.addTurnWithTools(Collections.singletonList(tc), null);
+        llm.addTurn("处理完成");
+        newLoop().runUserTurn("执行工具");
+        assertEquals(1, ui.toolCalls.size());
+        assertEquals(3, llm.requests.size());
+    }
+
+    @Test
+    public void incompleteStream_recoveryIsBounded() {
+        llm.addTurnWithFinish(null, "部分正文", "incomplete");
+        newLoop().runUserTurn("执行任务");
+        assertEquals(4, llm.requests.size());
+        assertTrue(ui.toolCalls.isEmpty());
+    }
+
+    @Test
     public void finishLength_afterThinkingOnly_autoContinuesWithoutFakeHistory() {
         llm.addTurnLength(null, null, "很长的思考");
         llm.addTurn("任务最终完成");
@@ -1646,10 +1796,11 @@ public class AgentLoopTest {
         assertEquals(3, llm.requests.size());
         Message hint = llm.requests.get(2).messages.get(llm.requests.get(2).messages.size() - 1);
         assertEquals(Message.Role.USER, hint.role);
-        assertTrue(hint.content.contains("原始任务尚未交付完成"));
+        assertTrue(hint.content.contains("当前目标尚未交付"));
+        assertEquals(2,llm.stopReviewRequests.size());
         assertTrue(ui.warnings.toString().contains("阶段性回复"));
-        assertEquals("分析已完成，结果文件已生成并核验。",
-                loop.messages().get(loop.messages().size() - 1).content);
+        assertTrue(loop.messages().get(loop.messages().size() - 1).content
+                .startsWith("分析已完成，结果文件已生成并核验。"));
     }
 
     @Test
@@ -1761,7 +1912,7 @@ public class AgentLoopTest {
         llm.addTurnWithTools(null, null, null);
         llm.addTurn("最终产生有效结果");
         AgentLoop loop = newLoop();
-        loop.runUserTurn("执行复杂任务");
+        loop.runUserTurn("解释复杂任务");
 
         assertEquals(3, llm.requests.size());
         assertEquals("只有思考后的恢复轮应关闭思考，空响应后必须重新开启", 1,
@@ -1781,8 +1932,8 @@ public class AgentLoopTest {
         llm.addTurn("压缩后恢复输出");
         AgentLoop loop = newLoopWithContext(100000, 0.8, 50);
         for (int i = 0; i < 20; i++) {
-            loop.messages().add(Message.user("历史数据" + i));
-            loop.messages().add(Message.assistant("历史结果" + i));
+            loop.messages().add(Message.user("历史数据" + i + repeat("证据",100)));
+            loop.messages().add(Message.assistant("历史结果" + i + repeat("分析",100)));
         }
         loop.runUserTurn("继续执行");
 
@@ -1790,6 +1941,28 @@ public class AgentLoopTest {
         assertTrue(ui.warnings.toString().contains("强制压缩上下文"));
         assertTrue(ui.warnings.toString().contains("空响应恢复压缩完成"));
         assertEquals("压缩后恢复输出", loop.messages().get(loop.messages().size() - 1).content);
+        assertEquals("空响应不能证明服务端窗口缩小",0,loop.session().observedContextLimit);
+    }
+
+    @Test
+    public void repeatedThinkingOnlyAtModerateContext_compactsAndContinues() {
+        llm.addTurnWithTools(null, null, "只在思考下一步");
+        llm.addTurnWithTools(null, null, "仍只在思考下一步");
+        llm.addTurn("压缩后继续完成分析");
+        AgentLoop loop = newLoopWithContext(131072, 0.8, 50);
+        for (int i = 0; i < 20; i++) {
+            loop.messages().add(Message.user("历史任务" + i + repeat("数据", 1000)));
+            loop.messages().add(Message.assistant("历史结果" + i + repeat("分析", 1000)));
+        }
+        assertTrue(loop.contextManager().estimate(loop.messages()) > 50000);
+        loop.runUserTurn("继续原任务");
+
+        assertEquals("两次纯思考后应压缩并继续，不等满 12 次", 3, llm.requests.size());
+        assertFalse("强制压缩应请求摘要", llm.completeChatRequests.isEmpty());
+        assertTrue(ui.warnings.toString().contains("强制压缩上下文"));
+        assertTrue(ui.warnings.toString().contains("空响应恢复压缩完成"));
+        assertEquals("压缩后继续完成分析", loop.messages().get(loop.messages().size() - 1).content);
+        assertEquals("只有思考不能永久降低自动压缩线",0,loop.session().observedContextLimit);
     }
 
     @Test
@@ -1806,8 +1979,9 @@ public class AgentLoopTest {
 
         assertEquals(3, llm.requests.size());
         Message hint = llm.requests.get(2).messages.get(llm.requests.get(2).messages.size() - 1);
-        assertTrue(hint.content.contains("完成握手"));
-        assertTrue(hint.content.contains("从断点继续"));
+        assertTrue(hint.content.contains("统一结束检查"));
+        assertTrue(hint.content.contains("已完成步骤不能重跑"));
+        assertEquals(2,llm.stopReviewRequests.size());
         assertTrue(ui.warnings.toString().contains("最终交付尚未确认"));
     }
 
@@ -1882,6 +2056,8 @@ public class AgentLoopTest {
     @Test
     public void continuationTurn_usesPreviousToolContextForProgressDetection() {
         AgentLoop loop = newLoop();
+        loop.session().taskState.begin("生成最终筛查Excel",false);
+        loop.session().taskState.recordEvidence("root","example",true,"扫描完成",null);
         ToolCall prior = new ToolCall();
         prior.id = "prior-tool";
         prior.name = "example";
@@ -1890,13 +2066,17 @@ public class AgentLoopTest {
         priorAssistant.toolCalls = Collections.singletonList(prior);
         loop.messages().add(priorAssistant);
         loop.messages().add(Message.toolResult("prior-tool", "example", "扫描完成"));
+        llm.stopStatuses.add("continue");llm.stopStatuses.add("completed");llm.stopKind="task";
         llm.addTurn("继续。扫描和复核已完成，现在生成最终筛查结果 Excel。");
+        ToolCall deliver=new ToolCall();deliver.id="deliver";deliver.name="example";deliver.arguments="{\"text\":\"最终交付已核验\"}";
+        llm.addTurnWithTools(Collections.singletonList(deliver),null);
         llm.addTurn("Excel 已生成并验证。");
         loop.runUserTurn("继续完成之前的任务");
 
-        assertEquals("跨回合阶段性回复必须继续", 2, llm.requests.size());
+        assertEquals("跨回合阶段性回复必须继续并落实动作", 3, llm.requests.size());
         assertTrue(ui.warnings.toString().contains("阶段性回复"));
-        assertEquals("Excel 已生成并验证。", loop.messages().get(loop.messages().size() - 1).content);
+        assertTrue(loop.messages().get(loop.messages().size() - 1).content.startsWith("Excel 已生成并验证。"));
+        assertTrue(llm.stopReviewRequests.get(0).contains("扫描完成"));
     }
 
     private static String repeat(String value, int count) {

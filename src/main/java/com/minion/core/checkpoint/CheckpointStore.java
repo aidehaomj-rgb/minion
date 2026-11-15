@@ -23,6 +23,10 @@ public final class CheckpointStore {
     private final Path workspaceRoot;
     private final Path root;
     private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
+    private static final ThreadLocal<String> GROUP=new ThreadLocal<String>();
+    private static final ThreadLocal<List<Runnable>> SEALS=new ThreadLocal<List<Runnable>>();
+    public static void beginGroup(String id){GROUP.set(id);SEALS.set(new ArrayList<Runnable>());}
+    public static void endGroup(boolean success){try{if(success&&SEALS.get()!=null)for(Runnable r:SEALS.get())r.run();}finally{GROUP.remove();SEALS.remove();}}
 
     public CheckpointStore(Path workspaceRoot, Path root) {
         this.workspaceRoot = workspaceRoot.toAbsolutePath().normalize();
@@ -41,14 +45,65 @@ public final class CheckpointStore {
         String id = stamp + "-" + UUID.randomUUID().toString().substring(0, 8);
         Entry e = new Entry();
         e.id = id;
+        e.groupId=GROUP.get()==null?id:GROUP.get();
         e.target = normalized.toString();
         e.existed = existed;
         e.createdAt = System.currentTimeMillis();
         e.action = action == null ? "modify" : action;
         e.dataFile = existed ? id + ".bin" : "";
+        e.beforeHash=hash(normalized);
         if (existed) Files.copy(normalized, root.resolve(e.dataFile), StandardCopyOption.REPLACE_EXISTING);
         writeEntry(e);
+        if(SEALS.get()!=null)SEALS.get().add(()->{try{seal(e);}catch(IOException ex){throw new IllegalStateException("检查点写后版本登记失败",ex);}});
         return e;
+    }
+    private static String hash(Path p)throws IOException{try{return com.minion.core.agent.FileEvidence.digest(p);}catch(Exception e){throw new IOException("无法核验文件版本",e);}}
+    public synchronized void seal(Entry e)throws IOException {e.afterHash=hash(safeTarget(Paths.get(e.target)));writeEntry(e);}
+
+    /** Read-only review; hashes for binaries, bounded before/after text for small UTF-8 files. */
+    public synchronized String diff(String id)throws IOException {
+        Entry e=get(id);Path p=safeTarget(Paths.get(e.target));String current=hash(p);
+        StringBuilder b=new StringBuilder("文件: ").append(p).append("\n分组: ").append(e.groupId).append("\n修改前: ").append(e.beforeHash).append("\n登记修改后: ").append(e.afterHash).append("\n当前: ").append(current);
+        if(e.existed&&Files.size(root.resolve(e.dataFile))<100000&&Files.isRegularFile(p)&&Files.size(p)<100000){
+            String before=new String(Files.readAllBytes(root.resolve(e.dataFile)),StandardCharsets.UTF_8),after=new String(Files.readAllBytes(p),StandardCharsets.UTF_8);
+            if(before.indexOf('\0')<0&&after.indexOf('\0')<0)b.append("\n--- 修改前预览 ---\n").append(before.substring(0,Math.min(10000,before.length()))).append("\n+++ 当前预览 +++\n").append(after.substring(0,Math.min(10000,after.length())));
+        }return b.toString();
+    }
+    public synchronized List<Entry> group(String id)throws IOException {
+        Entry anchor=get(id);List<Entry> selected=new ArrayList<Entry>();String key=anchor.groupId==null?anchor.id:anchor.groupId;
+        for(Entry e:list(Integer.MAX_VALUE))if(key.equals(e.groupId==null?e.id:e.groupId))selected.add(e);
+        // For multiple edits of one file, retain the earliest before-image and latest after-version.
+        java.util.Map<String,Entry> merged=new java.util.LinkedHashMap<String,Entry>();selected.sort(Comparator.comparingLong(e->e.createdAt));
+        for(Entry e:selected){Entry first=merged.get(e.target);if(first==null)merged.put(e.target,e);else first.afterHash=e.afterHash;}return new ArrayList<Entry>(merged.values());
+    }
+    public synchronized String preflight(String id)throws IOException {
+        StringBuilder b=new StringBuilder();for(Entry e:group(id)){
+            String actual=hash(safeTarget(Paths.get(e.target)));
+            b.append(e.target).append(" | ").append(e.afterHash==null?"unknown: 无修改后版本，需人工审阅":e.afterHash.equals(actual)?"ready":"conflict: 当前文件已改变").append('\n');
+        }return b.toString();
+    }
+    /** User-only approval for legacy/uncertain checkpoints; not exposed to the agent. */
+    public synchronized void approveCurrent(String id)throws IOException {for(Entry e:group(id)){
+        if(e.beforeHash==null&&e.existed){Path data=root.resolve(e.dataFile).normalize();if(!data.startsWith(root)||!Files.isRegularFile(data))throw new IOException("旧检查点原始内容缺失");e.beforeHash=hash(data);}
+        if(e.beforeHash==null)e.beforeHash="<missing>";
+        e.afterHash=hash(safeTarget(Paths.get(e.target)));writeEntry(e);
+    }}
+    public synchronized String restoreGroup(String id)throws IOException {
+        java.util.concurrent.locks.Lock workspaceLock=com.minion.core.agent.ToolExecutionGuard.exclusiveWorkspaceLock();
+        try{workspaceLock.lockInterruptibly();}catch(InterruptedException e){Thread.currentThread().interrupt();throw new IOException("恢复被中断",e);}
+        try{return restoreGroupLocked(id);}finally{workspaceLock.unlock();}
+    }
+    private String restoreGroupLocked(String id)throws IOException {
+        List<Entry> entries=group(id);List<java.util.concurrent.locks.ReentrantLock> locks=com.minion.core.tools.PathLocks.forPaths(entries.stream().map(e->Paths.get(e.target)).collect(java.util.stream.Collectors.toList()));
+        for(java.util.concurrent.locks.ReentrantLock lock:locks)lock.lock();
+        try {
+            for(Entry e:entries){Path p=safeTarget(Paths.get(e.target));if(e.afterHash==null||!e.afterHash.equals(hash(p)))throw new IOException("恢复预检失败，当前版本未知或冲突: "+p);
+                if(e.existed&&(e.beforeHash==null||!e.beforeHash.equals(hash(root.resolve(e.dataFile)))))throw new IOException("检查点内容损坏或旧版缺少哈希: "+e.id);}
+            List<Entry> backups=new ArrayList<Entry>();for(Entry e:entries)backups.add(create(Paths.get(e.target),"restore-backup"));
+            List<String> done=new ArrayList<String>();try{for(Entry e:entries){restore(e.id);done.add(e.target);}for(Entry e:backups)seal(e);}
+            catch(IOException failure){throw new IOException("分组恢复部分失败；已恢复 "+done+"。当前备份保存在检查点中: "+backups.stream().map(e->e.id).collect(java.util.stream.Collectors.toList()),failure);}
+            return "已恢复 "+done.size()+" 个文件；恢复前备份ID: "+backups.stream().map(e->e.id).collect(java.util.stream.Collectors.toList());
+        }finally{for(int i=locks.size()-1;i>=0;i--)locks.get(i).unlock();}
     }
 
     public synchronized List<Entry> list(int limit) throws IOException {
@@ -133,5 +188,6 @@ public final class CheckpointStore {
         public long createdAt;
         public String action;
         public String dataFile;
+        public String groupId,beforeHash,afterHash;
     }
 }

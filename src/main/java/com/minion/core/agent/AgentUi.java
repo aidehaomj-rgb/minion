@@ -1,19 +1,35 @@
 package com.minion.core.agent;
 
 public interface AgentUi {
+    /** External wait is not a model request, retry or a completed task. */
+    default void onExternalWaitChanged(boolean waiting, String jobId) {
+        if(waiting)onWarning("等待外部作业完成（不重复提交）："+jobId);
+    }
     default void onUserMessage(String text) { }
     default void onThinking(String delta) { }
     default void onContent(String delta) { }
+    /** 一次模型响应结束（不代表主任务完成），供界面折叠思考和分隔后续响应。 */
+    default void onResponseEnd() { }
+    /** Host-generated completion metadata, not a new model response. */
+    default void onTaskCompletionTime(String line) { onContent("\n\n" + line); onResponseEnd(); }
     default void onToolCall(String name, com.google.gson.JsonObject args) { }
     default void onToolResult(String name, com.minion.core.tools.ToolResult result) { }
     default void onSubAgentStart(String description) { }
     default void onSubAgentDelta(String delta) { }
     default void onSubAgentDone(String summary) { }
+    /** 带稳定子任务标识的独立消息通道，旧实现继续通过原回调接收。 */
+    default void onChildEvent(String id, String kind, String text, Object data) {
+        if ("START".equals(kind)) onSubAgentStart(text);
+        else if ("CONTENT".equals(kind)) onSubAgentDelta(text);
+        else if ("DONE".equals(kind)) onSubAgentDone(text);
+    }
     default void onStatsLine(String line) { }
     default void onError(String message) { }
     default void onWarning(String message) { }
     /** 运行中用户补充（UI 事件在点击时发一次；历史注入不再发） */
     default void onUserSupplement(String text) { }
+    /** Technical main-model delivery only, not understanding, execution or task completion. */
+    default void onSteeringReceipt(SteeringReceipt receipt) { }
     /** AskUserQuestion 工具开始挂起等待回答 */
     default void onAskUserStart(String question) { }
     /** AskUserQuestion 收到回答（answer 为回答文本；中断路径不回调，由运行态复位兜底） */
