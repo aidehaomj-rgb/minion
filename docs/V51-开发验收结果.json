@@ -1,0 +1,86 @@
+{
+  "version": "V51 development",
+  "date": "2026-11-08",
+  "fullRegression": {
+    "tests": 2182,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4,
+    "log": "target/v51-full-regression.log"
+  },
+  "focusedAndPackage": {
+    "tests": 178,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "log": "target/v51-focused-package.log"
+  },
+  "latestDistinctReports": {
+    "tests": 2182,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4,
+    "suites": 260,
+    "missing": [],
+    "skips": [
+      {
+        "class": "com.minion.core.agent.ToolResourceScopeTest",
+        "test": "symbolicAliasesOfNewFilesShareCanonicalIdentityWhenOsPermitsLinks",
+        "reason": "got: <java.nio.file.FileSystemException: C:\\Users\\59809\\AppData\\Local\\Temp\\junit6870658715242005416\\junit4984779141130815508\\alias: 客户端没有所需的特权。\n>, expected: null"
+      },
+      {
+        "class": "com.minion.core.context.SourceFingerprintBatchTest",
+        "test": "replacingFileWithSameTimestampAndLengthChecksFileIdentity",
+        "reason": "filesystem must expose distinct file identities"
+      },
+      {
+        "class": "com.minion.core.tools.data.OcrIntegrationTest",
+        "test": "localEngineReturnsCoordinatesOnSyntheticImage",
+        "reason": "requires installed OCR"
+      },
+      {
+        "class": "com.minion.core.tools.dev.CodeIndexToolTest",
+        "test": "symlinkEscapeWhenSupported",
+        "reason": "got: <java.nio.file.FileSystemException: C:\\Users\\59809\\AppData\\Local\\Temp\\junit2540151758958998548\\linked: 客户端没有所需的特权。\n>, expected: null"
+      }
+    ]
+  },
+  "build": {
+    "sourceFiles": 578,
+    "sourceSha256": "a84272d006c1af27a3e778f06ac44cf4c37bff1d8d8def5aebf27643087b9987",
+    "sourceAlgorithm": "SHA256(sorted src path + NUL + bytes + NUL)",
+    "jarBytes": 25373248,
+    "jarSha256": "ec43cb992800e8e3a7f225676777df5562d9ca57aa0c19af94507a76df1140bb",
+    "appClasses": 595,
+    "appClassMajors": [
+      52
+    ]
+  },
+  "nativeFx": {
+    "newAssertions": 33,
+    "newLog": "target/v51-native-jar.log",
+    "legacyProjectTreeAssertions": 169,
+    "legacyLog": "target/v51-project-tree-regression.log",
+    "classpath": "target/v51-qa-classes;target/minion-0.1.0.jar (no target/classes)",
+    "realModelCalls": false,
+    "osMouseInjection": false,
+    "screenshots": [
+      "target/v51-native-jar/draft-a-restored.png",
+      "target/v51-native-jar/project-ordering.png"
+    ]
+  },
+  "scope": {
+    "singleMainAgent": true,
+    "storageMigration": false,
+    "draftStorage": "in-memory only, current process",
+    "latestRunningRule": "pinned group first, newest run first within its group",
+    "newUpdateZip": false,
+    "githubPush": false,
+    "intranetWin7Certified": false
+  },
+  "notes": [
+    "Full regression used the existing Python 3.7.9 runtime; no claim of new Python 3.7.6 end-to-end certification.",
+    "Native verification covered DnD handler wiring and shared ordering decisions/menu/keyboard integration, not real OS mouse drag gestures.",
+    "Overlapping test counts must not be added together."
+  ]
+}

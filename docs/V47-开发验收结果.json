@@ -1,0 +1,3921 @@
+{
+  "version": "V47 development (not an installer/update ZIP)",
+  "generated_at": "2026-11-06T15:26:26.375932+08:00",
+  "reference_commit": "zai-org/ZCode@a9fe401eede6e6e5e01be9048679c206fe6f02d9",
+  "environment": {
+    "java": "openjdk version \"1.8.0_222\"\r\nOpenJDK Runtime Environment (Zulu 8.40.0.25-CA-win64) (build 1.8.0_222-b10)\r\nOpenJDK 64-Bit Server VM (Zulu 8.40.0.25-CA-win64) (build 25.222-b10, mixed mode)",
+    "python_full_suite": "Python 3.7.9",
+    "python376_workflow_syntax_only": {
+      "log": "target/zcode-v47-python376-syntax-20261106.log",
+      "sha256": "3198552c39c1bc1eb66172949f48ac77f7ef3678a01dfad96f585aa6fff95ec0",
+      "files": 2,
+      "third_party_execution": false
+    },
+    "network": "Maven offline; local loopback mocks only; no real model/MaxCompute endpoint"
+  },
+  "source": {
+    "algorithm": "sha256(sorted UTF-8 path + NUL + ASCII sha256 + LF records)",
+    "count": 513,
+    "sha256": "7b717dd485e541409dc90485bcbdb5cee6e4a8fb0005d8a12ae7368e91b0f5d6",
+    "files": [
+      {
+        "path": "pom.xml",
+        "sha256": "571f7110567398937aa8882a41a7490cf9b4a2fa601a423d9d4b21f9f0d09bd4"
+      },
+      {
+        "path": "src/main/java/com/minion/Boot.java",
+        "sha256": "28f846cb72f197d1c9b458a5a6917a4521c4fcc773a500f9c038c4e6a8239c6c"
+      },
+      {
+        "path": "src/main/java/com/minion/JdkResolver.java",
+        "sha256": "f614abdc1108219bd53ad0ce460be2791ba149824fe3951bb26e6b2aa1811baf"
+      },
+      {
+        "path": "src/main/java/com/minion/Main.java",
+        "sha256": "c17d1e42a2ac52f313d6b8239d97fe8c8a7da3399d44f3e4cea182f5b99afa6c"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/AcceptanceRules.java",
+        "sha256": "2758156f6591488f112edabe2474d6affafd5f02e4c9fe3ccc5319a1f00c6a6e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/AgentLoop.java",
+        "sha256": "4712e98c4aeb503b957a20b4418448cf426af941771e1baeb85dc71f1dd0792b"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/AgentRuntime.java",
+        "sha256": "45d9dda1439e4e01b3bf0f4fc800e223c08d733550fc9a6ef03b69c499586ec0"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/AgentToolPolicy.java",
+        "sha256": "d021fb1280ffdbe2fa40526891f2d8d24e4346e73c5b4a0027398215ae49fa56"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/AgentUi.java",
+        "sha256": "63be965699a996fd8a2cb03383da03508d741f02133f7c4215704ec781277643"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ChildAgentUi.java",
+        "sha256": "73a358555d4cac23c4ff3712bf0eee77636359b389cddfdb07bfddfc8d88b507"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ChildTaskCoordinator.java",
+        "sha256": "73554ccc64a08c1a82799421d231aa9e7fcb8114f36f6fe65ceabca7abae4197"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ChildTaskHost.java",
+        "sha256": "79d222573990f8a0664f4c1af9d2a361d6e2c06f1533d5b6b6ac3ce7a8cf4f2e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ChildTaskIsolation.java",
+        "sha256": "b98a772b67428809fecc4c0f02b044238066c3036352e695cb34640ab8d44dbe"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/CompletionContract.java",
+        "sha256": "ec149ae79985cca7948b505e07e6bbdb9c205a9771efe5a5aca18cb9e2e3f5a6"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ContinuationBudget.java",
+        "sha256": "4d70e99a7870c27820ee98f58125be634ad950181b5e8dedcfad2e5e5bfde688"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/FileEvidence.java",
+        "sha256": "2b27acdd15acc3044b03dfb1fb176a15c9a1389f796f3e445148751458567b77"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/LocalJobs.java",
+        "sha256": "919cd193baaf80402dedf8789224a7ca0933f1e657cb3363b38de36ed68cdbba"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ModelProbe.java",
+        "sha256": "a6397b32c0cd150b841a0a82b69d626564e1d293a275192ef362b492936aaf60"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/OutputMerge.java",
+        "sha256": "a15da96e96606e31b7d3d4ffdfdc11eec59d7f609a9f4400dd6baeb2988e366e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ProgressEvidencePolicy.java",
+        "sha256": "a58e350335525835415feb1337edcee126c1d972b512268e066a566f92f4df86"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ProgressReceiptLedger.java",
+        "sha256": "41e522a96807336c3e10b4277b567be5c288e11501e607afc19d866238c35fbe"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ReliabilityService.java",
+        "sha256": "6021246fabbb362be1f581f8398dec30f40bc024106957b7ceadf5a403a47ced"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/RetryPolicy.java",
+        "sha256": "18b76f41fd55d5baaf1a659a57a838747a902809f61a1bc51fe1e97a3d4cce58"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/RetryProgress.java",
+        "sha256": "1d8a5feb719714ce260c3a62525e00ee95ffb7de8da43424c46b5c7d3043ff2b"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/RuntimeJobCancellation.java",
+        "sha256": "89846ad6139c02c6018e30bd065b6d11cbfd12423144a57b9557c7a33005843c"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/RuntimeJobRegistry.java",
+        "sha256": "a2f4718902d576637c4a7cec4586032644e283dbd1504285b53812ea238d7b13"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/Session.java",
+        "sha256": "5efbedaeb52e10e458e472c81194cd7424ca8bcf2bc7375f41a5e0ab2f498c4f"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/StatsLine.java",
+        "sha256": "cf2b84f51b15f6f543d84179c3d51e1431a0364055b519b934377affaf3bf70f"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/StopGate.java",
+        "sha256": "200e3a2941e2faa62703abfbbdd6d0d1a3fac0d0a66f590e00b3303de8f31d98"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/SubAgentLoop.java",
+        "sha256": "506cf950f74486c7b64ea8009c00f775719d38281d0451cb7626131a386cbb5d"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/SystemPromptBuilder.java",
+        "sha256": "9ed5854c81196153be12c4796da04aab7ede3bb5b56c59c330f87f85f64c710d"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/TableFacts.java",
+        "sha256": "3ca9af02b1cdb2f84d756b088c5bfd85c5d4598e415167998da385748eca1d21"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/TaskEvaluation.java",
+        "sha256": "12afa044a72882dd59a692e60e329eb196eb99b0d8e61db4f7fb0f072dda5e54"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/TaskReportWriter.java",
+        "sha256": "b97490e9391268676bbb1a80efabbd2f798887480ca63a95f08b754b24dc2e91"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/TaskState.java",
+        "sha256": "1b0a0dcb43c87f5ecee694814d3e98e34ce795e203ba553a3315adc754ad2ff0"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/TaskValidation.java",
+        "sha256": "7a6a5115b53e92428a4f409151970e25e2ad27ecfb53f60029862a99a709cda6"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/TaskWorkflow.java",
+        "sha256": "6351828175a0f3d20c983702aab98b50ae3ce3604976e78c68b61d103caf3dac"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/TitleGenerator.java",
+        "sha256": "371adc19e87764e6abc9ceb362392caea9192d9ae07574ca7be7628719cc2938"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/TodoList.java",
+        "sha256": "3cd858564e831810917235c35fe3bec48dc2eb3e707ee1fcfe939f7cf16499e7"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ToolBatchScheduler.java",
+        "sha256": "5cee289717eaa8e27af07951c67f9f1f93e9cab95b834e6c56f5eba21449a606"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ToolExecutionGuard.java",
+        "sha256": "c902fe1495ec4c787fe505eb43687e71f33037d7fe8c917309e431842f18b907"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ToolOutputStore.java",
+        "sha256": "0024a99b9908248901b929941378e48ca4db746890b279cd8a639b5a3339cfbe"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ToolResourceScope.java",
+        "sha256": "1cb08bb38bf78eaa1ce04bcba9084fbcca7845c265eea9740ac89ccc72ca5b63"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ToolSchedulingPolicy.java",
+        "sha256": "acc59bbef1471d0a0081f27ea2f9515ea6ed589f9bdd719cfbf4d739711ce680"
+      },
+      {
+        "path": "src/main/java/com/minion/core/agent/ToolSchemaRouter.java",
+        "sha256": "6fe175abd007bb03d092e4a8bc30f4a425398238946f3abf356d0e647fa5bcbc"
+      },
+      {
+        "path": "src/main/java/com/minion/core/checkpoint/CheckpointStore.java",
+        "sha256": "e4052beea0b7cb7445ae2463deb97d615f93814cfdcdfaeba9d7f3e2bcc6ad5d"
+      },
+      {
+        "path": "src/main/java/com/minion/core/config/Config.java",
+        "sha256": "21a622f6dee01afc4d3c0c859fdffc19b6019a676d118f7468ad16b37b407209"
+      },
+      {
+        "path": "src/main/java/com/minion/core/config/ContextSettings.java",
+        "sha256": "4ade487814c872bf6402966d200bcf3b7810010f7ba0c7dc9d6ead772aa9b671"
+      },
+      {
+        "path": "src/main/java/com/minion/core/config/ModelConfig.java",
+        "sha256": "04acee7af6222a3a3362587f589d47c20a2c55263afc2ff53ca7b92d6e429ae3"
+      },
+      {
+        "path": "src/main/java/com/minion/core/config/ModelManager.java",
+        "sha256": "1addf10034af3be25abe0cbeb14ea18accb4266bad6e71ea7a4dec2e0182577e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/config/WorkspaceConfig.java",
+        "sha256": "108433eff7181ff29306f30cd984de5c7b34de3544f15087ef2613d1a1a4d0e1"
+      },
+      {
+        "path": "src/main/java/com/minion/core/config/WorkspaceManager.java",
+        "sha256": "08e43f177ab36bade41ac0de55c10a7037577de500d7025197267197031eb52f"
+      },
+      {
+        "path": "src/main/java/com/minion/core/config/WorkspacePaths.java",
+        "sha256": "75a2a62f8625cccb869ee8aa88476e8deb9ce5755bee1a8a7436cd4151d38cc8"
+      },
+      {
+        "path": "src/main/java/com/minion/core/context/ContextBudget.java",
+        "sha256": "ac815193aaee08387777ab0c4e9930d90810a49d1358bf6927ca19935051294e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/context/ContextManager.java",
+        "sha256": "8cd2504f10fd7ba3e759c89a4ec484ddd88860e04214a99d4c472e7ce68ccae5"
+      },
+      {
+        "path": "src/main/java/com/minion/core/context/LocalMemoryIndex.java",
+        "sha256": "8acbe9771706c856221195c0567e0e55851fddeeb8a8479323d1071b6f06c420"
+      },
+      {
+        "path": "src/main/java/com/minion/core/context/MemoryRecallQuery.java",
+        "sha256": "86aa0ddf2a0c6d2eb95415c2679c251c8b1aca11f1cf8787d61c9d4bb8f46ae3"
+      },
+      {
+        "path": "src/main/java/com/minion/core/context/ProjectMemoryStore.java",
+        "sha256": "c8b3e65388a4149ac3370697e2f1ff304e8208aea01a6dadba9987bbe70976af"
+      },
+      {
+        "path": "src/main/java/com/minion/core/context/SkillResidency.java",
+        "sha256": "d4423d9df11c7d21a364651a107308ffac7e57145ca1a36928bdf2fa82a481fd"
+      },
+      {
+        "path": "src/main/java/com/minion/core/context/SourceFingerprintBatch.java",
+        "sha256": "4ee809e0b5ea74c042bda9e9682272d188dd10a6ace6ef2c7fb9289d40f1a552"
+      },
+      {
+        "path": "src/main/java/com/minion/core/context/StructuredCheckpoint.java",
+        "sha256": "46f392f81722ca3cdd1a3b56b8ca6e687e65adfb691636eda9b2221ba375143f"
+      },
+      {
+        "path": "src/main/java/com/minion/core/context/TokenCounter.java",
+        "sha256": "4a9c0430f09d349b795ceba9b31fa8734ee17971819dacc33e0175fb77cb0fb1"
+      },
+      {
+        "path": "src/main/java/com/minion/core/context/WorkingSetProjection.java",
+        "sha256": "23a9f1243e43fa07feffc418ced65d5d10ba18d01c440290a8480ecf45b78823"
+      },
+      {
+        "path": "src/main/java/com/minion/core/diagnostics/DiagnosticLog.java",
+        "sha256": "231275f5ccb0deb557e43ebb1db4ae4d27bcfc14d0707e906aaa7b6b076f5eb9"
+      },
+      {
+        "path": "src/main/java/com/minion/core/diagnostics/SecretRedactor.java",
+        "sha256": "fb51343bbf2350e0733822050d690b52e173bf2f753251d1282388a496bfc515"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/DeepSeekClient.java",
+        "sha256": "887ebeb2894ecddc036e086bfe524857fb6abb482ae589080bcae708f203277a"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/ImagePart.java",
+        "sha256": "c23f80e17016801038901b100fee245e1626e0313ecbbe0fc580e043d7344793"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/LlmClient.java",
+        "sha256": "e052a975015231ef803763f86a0b163057a501834f2ee8aa3c02b5583007736d"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/LlmException.java",
+        "sha256": "d6dec96593d8a5fdbd18b3cab183f778e8c61fb5c916f74cb29544d6840385d3"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/LlmRecovery.java",
+        "sha256": "b229cb506b2d533a4f185290e42a8593911c668741187cf1278f7cc81207e8dd"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/Message.java",
+        "sha256": "2ef75a668cfb1b386848501d4b1a3d0a7f39674d6454ade9c5b3f913d5d6a6ac"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/ModelCapabilityProfile.java",
+        "sha256": "a5603df37f17aa7744d70c1c532aa400c144be3fc00c24904b3e9344e75e3ff4"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/ModelCapabilityStore.java",
+        "sha256": "ac611365d1cdd9f33931802858776a3ae76d2b88d45d4553a5387a57bd503cea"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/PhaseTimings.java",
+        "sha256": "9c2655847ddc92ec61fa618ebf699c616bfde720a3d4caa70b11ad40c9f45f90"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/RepetitionGuard.java",
+        "sha256": "fdd30d2a4faa61f20b3d7a3b1bdedfd25e3b61c71909fbe104ff16157f6b7ec2"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/RequestTelemetry.java",
+        "sha256": "2791768d610ac0db0fe0be657b255dff8c88966cf9ba695d0d2021ba66c14187"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/StopReviewResponse.java",
+        "sha256": "b0bc9a4071b70cf139766536836cd47d66fe3d10f8535d7422fe48438be89a55"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/StreamHandler.java",
+        "sha256": "d26eaf0b3d062dda3632e042f1bbe7ef84782744f36c7e7b56472064980ea75c"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/ToolCall.java",
+        "sha256": "1838ecbfc60722191fd15eca4dceb02997676ce11f31ecc71b12b1c783cf033a"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/Usage.java",
+        "sha256": "b1045bcde575708ac41f8ebcee3afb6587bcb07b62434d77109508708d96da94"
+      },
+      {
+        "path": "src/main/java/com/minion/core/llm/UsageTracker.java",
+        "sha256": "0f0d1c2dfc04a4565fdbc794d8ea01d592ded471ac83683c3ee4dc50e96d51cd"
+      },
+      {
+        "path": "src/main/java/com/minion/core/mcp/AjMcpClient.java",
+        "sha256": "4d6898f416474284db85a6e0bdda682b134587f1c2edef95ffcf2d1d675e4390"
+      },
+      {
+        "path": "src/main/java/com/minion/core/mcp/McpCommands.java",
+        "sha256": "bf8b76f0f29cf998efece8a086a2f8e6642ce6f3587955b657b21e2412946646"
+      },
+      {
+        "path": "src/main/java/com/minion/core/mcp/McpConnectionException.java",
+        "sha256": "6aff2ad28eda510801859d5511625eb040d1ff083c8e0703fa9c195bb4aeaecb"
+      },
+      {
+        "path": "src/main/java/com/minion/core/mcp/McpException.java",
+        "sha256": "cc53f770272c79edf5b6ccd9d9a7080183ef5584a65eeb03dd44ffb067d0b018"
+      },
+      {
+        "path": "src/main/java/com/minion/core/mcp/McpHandle.java",
+        "sha256": "03037c4deb05b9eb248a4b362fade5542075914aafad86e4dfdff5238dc01c7b"
+      },
+      {
+        "path": "src/main/java/com/minion/core/mcp/McpJson.java",
+        "sha256": "2a485996e6d20f18a60bb095bc1bb6dea937bfe137b926103367d8ac66e239e7"
+      },
+      {
+        "path": "src/main/java/com/minion/core/mcp/McpManager.java",
+        "sha256": "49ffcb86580d7983f2859a4bbdb4078de652c53d50005a3b6bf0339224600918"
+      },
+      {
+        "path": "src/main/java/com/minion/core/mcp/McpServer.java",
+        "sha256": "bf5b7d9be7aeebbb10ab745b2c5e0717248e0b5f57852682346d43d961fd0285"
+      },
+      {
+        "path": "src/main/java/com/minion/core/mcp/McpStore.java",
+        "sha256": "9924048e389b0b3735790d5ee7ceacee9b6ce899d3094012e2f2afb674aba535"
+      },
+      {
+        "path": "src/main/java/com/minion/core/mcp/McpToolInfo.java",
+        "sha256": "be7e92f26c6239a9377a578075fc1123595c1c8c224445562f19eaffb2092cff"
+      },
+      {
+        "path": "src/main/java/com/minion/core/security/SecretStore.java",
+        "sha256": "e7254d2ed24c0447f9224d81dcaf0358ad9203f6303fed4f40513353e69acebc"
+      },
+      {
+        "path": "src/main/java/com/minion/core/skills/BuiltinSkills.java",
+        "sha256": "38f2ad6477f0eff198fa3cbd0ad0cf81846909b9dd0f8bdbe1fd58b515fc32c5"
+      },
+      {
+        "path": "src/main/java/com/minion/core/skills/Skill.java",
+        "sha256": "823bc63d083f033fdbd73680e32c1fc2148dbd9430803e664a277040757ce523"
+      },
+      {
+        "path": "src/main/java/com/minion/core/skills/SkillManager.java",
+        "sha256": "ab14c91e95edbc1256b48cc7e275fecbba3d6b8b26b5e73eb047c8ae44553631"
+      },
+      {
+        "path": "src/main/java/com/minion/core/skills/SkillSet.java",
+        "sha256": "32cd3bbae00e70046b488aab11e37d4588230d68305907779a65faab109038f4"
+      },
+      {
+        "path": "src/main/java/com/minion/core/storage/HistoryArchive.java",
+        "sha256": "64794b010b75df3d037b0ab21d56e9837caf56ce73c4b003b8b818fc953a0982"
+      },
+      {
+        "path": "src/main/java/com/minion/core/storage/SessionEventJournal.java",
+        "sha256": "212b7df6f472f1e13cc81b113a58c4a3113c8f008dfd9970fe4cf3fa2dff03a9"
+      },
+      {
+        "path": "src/main/java/com/minion/core/storage/SessionIndex.java",
+        "sha256": "1703a49a5441659d5e92a5d0ba250c9551ac4310fed037b21d275a53cac550c2"
+      },
+      {
+        "path": "src/main/java/com/minion/core/storage/SessionStore.java",
+        "sha256": "6c5f45ae911fbd10223f1a903d55ec13e50ea6f8ac7e94dcb0c30d2cdbce143c"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/AgentControlTool.java",
+        "sha256": "4ca7c55255a1f469c1ccc9a3c220c79528b87f6c78647c539465217ad7d2a6a1"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/AskUserQuestionTool.java",
+        "sha256": "7836c3a4f25503e7e671a5fa873329ccf34cbd42a89f14408a162c9fceb7a9a9"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/AtomicFiles.java",
+        "sha256": "7fd6f6b60a0d5bc14a9b6a147f7c11fb2e8e3426f446d527a6a0429c2e69faed"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/BashTool.java",
+        "sha256": "3f8545af53726f5ff201aa40d6da59bb757a34f89d12db85528b9bebf03a8f45"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/DangerousCommands.java",
+        "sha256": "bc59715f6803e4acfb3f720f43e34a9cd37f97f2ff2cd7574876f954996238ea"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/DiscoverToolsTool.java",
+        "sha256": "9e933d47be5b961257baab2c5624f02469a0bc61f29ffe83e591a733e3b15788"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/EditTool.java",
+        "sha256": "1eea20e45cf85bad1dc3020e98ee7d1c11824eb8946bbdaa914688591b11f28d"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/GlobTool.java",
+        "sha256": "7bfaaeba328d9689e3603335d1d5b6e75d644a43ce7aa78ad5cada5071ff3da0"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/GrepTool.java",
+        "sha256": "4e512d24062d14d5d283b1d8be3423a4ea5b55ba2e5278475b84cc54e902fcb2"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/NativeLibraryBootstrap.java",
+        "sha256": "db102de6231d4ec395c673644cfb0d39ec157d16befc7bb7729977979bed3ab3"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/OutputDump.java",
+        "sha256": "73f1c0d7f722a5cd3044b8d143f637c4060fd296b424d95196670ff912b5d0e5"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/PathLocks.java",
+        "sha256": "b5179c203f69167dcd99940814ac4099b24505c4670a59b5cad461f7b9ef118a"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/PathsGuard.java",
+        "sha256": "d780559a4f38f8b9eedb8911aba40e5ec588412f5b98a145a0d75ab11746d69a"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ProcessCleanup.java",
+        "sha256": "42a44b47a8367865cfc599aaaf1a222f1839ef65540523975973c2e16a5c184e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ReadTool.java",
+        "sha256": "731956e8e356642a606ac767d0ce2fadb0b6152ad5206a25ef94267e8156df5d"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/SchemaGenerator.java",
+        "sha256": "ce85f983d62003beeb2595006f3d1bfdaf79a9af4667c220536105382aedf370"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/SkillTool.java",
+        "sha256": "b0945474540752d4ba3a35f465d4e54c276920bf6b1c43601533a2f637bcf034"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/TaskTool.java",
+        "sha256": "797a93a25c3b50b3be67d2989c8b3fdaa07c2262915a4e537e20489aaa7ca6b2"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/TextFiles.java",
+        "sha256": "293838b473e60b7119d765a1326168f025931c71b5215c578de022a2c9b25aa5"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/TodoWriteTool.java",
+        "sha256": "91ce06d03c9b3f09f47d5490a344f0f6921e6efae78766c8117c45dfc5440e27"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/Tool.java",
+        "sha256": "22507bcbd9fc66e902377d6e273281227439cb172f082ce352bf91ce2aabcdf3"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ToolArguments.java",
+        "sha256": "157f6b12e7638e53decf480becb92b5384dfe14094f5673961329def6063e177"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ToolRegistry.java",
+        "sha256": "db1c142cbdc56dc8d138c383df4cb6ac72a43bf9e9c55de8049ed4a0c797d54c"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ToolResult.java",
+        "sha256": "6590742c733deb9948f8a2358a7b750db42fdd1d2bad17fbe3d90c99ed9864a9"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/TruncatedOutput.java",
+        "sha256": "7da31dcd4e5d4ec0c6125f39db006b9b5023d00ee5814a066ef56fcc3d74ef02"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ViewImageTool.java",
+        "sha256": "8fd69ddfabdd0c73757913350904655cb6518f28519be62aa910e64d5ec3b646"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/WebFetchTool.java",
+        "sha256": "1079ced8d65bac1d118dcc6f5bdb90e678b67dd9bd98efad1f2f3e879c18d2a3"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/WindowsAppIdentity.java",
+        "sha256": "d2512fe375757513d11db75f04ac1c391024b017f2f9597bcf0aa899f381af2b"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/WindowsShell.java",
+        "sha256": "a5299921098c7389c1b7b9e7becfd87faf16c49f1c61b1b409d7472a70fb50ad"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/Workspace.java",
+        "sha256": "038a614e2dbcbb1ea2c306c6d9b0ae949cc6505ab3d3a1f8a0cc76b44626afb1"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/WriteTool.java",
+        "sha256": "73df793b24c9cb8afc6ae59fd9db0ce5be06f71d36d9b7f1210557b4bef3f67b"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/artwork/ArtworkRenderer.java",
+        "sha256": "ee03c8bfa1d07acf4683e4bd067bc2417441591aef0196d2dc4d50d444e1ca7b"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/artwork/ArtworkTemplates.java",
+        "sha256": "79c935682735263a1e7ad100686b9fba3527d2a7525c953c6f75b72939374595"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/artwork/ArtworkTool.java",
+        "sha256": "791c77faf3a7608eb456462bbc88dd7d9ec20a1b4319284fbe9214dc97b3ba7e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/browser/BrowserActionTool.java",
+        "sha256": "a89bae5c340094e194fe12f2d75b7020be017ed4d78c7a86daf3f85683915625"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/browser/BrowserDebugTool.java",
+        "sha256": "d8efd862582642de4583ad606e34f9c596ab8419e811770a8b1fa4ed5186f091"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/browser/BrowserEvalTool.java",
+        "sha256": "cd11def43fc3a9adf43bd5484e9914ecf0ba19d3c3c1ffbdd32914d2a8c1ab01"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/browser/BrowserReliability.java",
+        "sha256": "9c795a10bea1d5ae308730eb19a22241628b74e9156699bfdfc542e3db614acd"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/browser/BrowserScreenshotTool.java",
+        "sha256": "f8f72fcd90f1763fc3f5f8aad227a20752e50eae14b0874ea343ab2ca530fa95"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/browser/BrowserSession.java",
+        "sha256": "c78f392a664e7cf085f10d387d6cc857275c2d3f032fc947130ad4c58ab7434b"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/browser/BrowserTool.java",
+        "sha256": "64b54d454c5257709d4d4469a6c8e92d87352bacdd0bd7e27f279b6fb177bf13"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/browser/CdpClient.java",
+        "sha256": "0e8ae6ff26c66adcca3898fdd0af4b69ef23625ae0cd105d863d10e6211971ef"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/browser/ChromeLauncher.java",
+        "sha256": "e95bf07fa093d7030ec47c33a17242f16508aa68ef004f76c893052b51a51f15"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/browser/PaginationEvidence.java",
+        "sha256": "b9985eee308b1802c0a9fb3b180ce66ba1def1269857f21e81e23ff6b0512d3a"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/checkpoint/CheckpointTool.java",
+        "sha256": "d0caa1cc79ca0c60dbd7b3283c1969b9333b120e0213a4c79c081d396184ec14"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/confirm/ConfirmGate.java",
+        "sha256": "6d18880b7493d21cdcf39aba9ce385b60a97a68582b474f649a81abe8d80eb3e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/confirm/ConfirmUi.java",
+        "sha256": "0cea6b415e0109f68d26d870883a1b62434cfd6e4ed0e5b28e975f05ec2f5507"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/context/ContextTool.java",
+        "sha256": "d7046ddf9024b6584532c1e03eebd746227c97094fb757b7d76ec8707a203af5"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/context/MemoryTool.java",
+        "sha256": "ef240ec8a31be45064e3dafdf914242b127cb0872462f47a2a2b58e8547ac4cb"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/data/DatabaseTool.java",
+        "sha256": "ba374ff89966b1205f2226a93035e33d758cd1cd7cd96a37b03a6fadd747ee10"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/data/DocumentTool.java",
+        "sha256": "16c6a3a03bf9ccb30cd4890d889394eaca89401e996bc72ee17324f67f708a5e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/data/ExcelTool.java",
+        "sha256": "836b1635abb0de55675d0a71afac44f87e100663c3178bd656a4f2abcb98b36e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/data/LocalOcr.java",
+        "sha256": "ff3a7ed28e872b5664ad40e59e906c8cb06df63162c71c4735f59fa2b7159a2d"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/data/PdfViews.java",
+        "sha256": "73b2b28443a00a3fae3f8cf20225da1075375d3e66a087294ef0370516a44b65"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/data/ResourcePython.java",
+        "sha256": "acd1b9ece171107d241d46d04b1ddcad832c481ebe61f83f14e91cfa92ef92f9"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/data/SqliteTool.java",
+        "sha256": "7d2a34475e08591bd1349b7f77663f90460517b3ae6b2d8322fc0436dbeedc11"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/data/TextProcessTool.java",
+        "sha256": "a55c1fc6ad557804d66c9215b9b050eacd565577fb09091f6ecf675c75292e27"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/db/DataSourceConfig.java",
+        "sha256": "ce547f5bafd51e2b422cefa1bba25edee62359620b767b0362956995cf0d5747"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/db/DataSourceValidator.java",
+        "sha256": "b8b0ad81cd4fa4931ba5f4de73f10238c8c5b68ff78106188ee6aba84f44deef"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/db/DbAsyncJobs.java",
+        "sha256": "4ae4bffd8e3976248a9027c0755555f95aefca11cac76457b0eaee8c13a6b0be"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/db/DbExecutor.java",
+        "sha256": "b9fabeb02171bfc6cb758f0dd9d2133607abd84d18e2f0eedf1ed41be246f412"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/db/DbExport.java",
+        "sha256": "85651f971815f765ab1c579b1c318cbd2ff4180ec44c4013e590f20367aa6382"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/db/DbQueryControl.java",
+        "sha256": "6b829760ca135baf5d40b02c9b8d283d63a127ddc235807f36347a7c10a4bce4"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/db/DbSecrets.java",
+        "sha256": "21728dd9275fa955a14beed6b13bba45085390c3aca2f3211efc9077be89c4d6"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/db/DbTool.java",
+        "sha256": "b31dd58a3d3cd23e4626a7843a3653ad4fe4f1a97cd75687a78c982163afd230"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/db/DbType.java",
+        "sha256": "4a1218e235ef4732e0b2058719b659ad6ba0784ac3ec5990c839686e394f4db1"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/db/MarkdownTable.java",
+        "sha256": "9fa19754ba336352f6ecaa87b413221c42776b7355f3f1d169b3b48a87549dc0"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/db/SqlGuard.java",
+        "sha256": "df6a874c0e4b5f69b5628a0b6347a759df887b1abe18afbd357c152d34c23fe6"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/ArtifactVerificationTool.java",
+        "sha256": "1a89765cd3ca35886847f1f9b59fd2275dc0b7da194c0d73c47d0f2fef13c6e2"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/ArtifactVerifier.java",
+        "sha256": "185454dc6d68132665819310cceadc7f22fe269664276cf8c74f0bd4ef6952d0"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/BuildTool.java",
+        "sha256": "94f4626f10973d6c67c12a248a7c28fdbe88f0d4a67522af9998e6d2cdba196b"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/FilesTool.java",
+        "sha256": "5bd70075ed4cd7b65bb65a6cafa132a6efcbcafa669ec3807c1cfb10a27e1771"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/GitCommand.java",
+        "sha256": "8b00b6aa0e9e1c404e1bf54317fe8ccbd1b77d84f5be2e7afdb6a54ad40f0a8c"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/GitTool.java",
+        "sha256": "85da2b95bc6028fc042d49c38da599562fc49f7221521dd9fc0cc34907de61cc"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/ProcessTool.java",
+        "sha256": "08d0e9d5208434aa6aa6b13f03c878464f6a398af6e50edd725b1e2a32969247"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/ProjectTool.java",
+        "sha256": "11c6688d3c3172463a6fe432df1bd0ccab6fdd140985b40122f2136367090148"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/SourceVersion.java",
+        "sha256": "ca6d5d1958af4085e4a9d9e86fb11c7f3e43b3def4c5b0f8c536b6223a69ff2c"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/ValidationDiscovery.java",
+        "sha256": "caa127c3a5d84e6604388b2bbd13a6a6098cd60bcd38704f21abd68f0f4c8166"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/ValidationReports.java",
+        "sha256": "04d5729f33ba141008ffa7d7481d642915aa61a4b7a4021b577006dadd743e4b"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/dev/ValidationRunner.java",
+        "sha256": "1f4afdaf23e79ad68e3689ff91051ecd3e34352006241d8ab7a374e75279a956"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/example/ExampleTool.java",
+        "sha256": "529b792f84a69f11c64e012ce99258a8cae2f11bb418cef77f3e4c6ee116c47f"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/knowledge/KnowledgeTool.java",
+        "sha256": "18b33917fdf7fa88fccc48b3ec5bc58e361f7e607acea940259a3fe942c59195"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/mcp/McpProxyTool.java",
+        "sha256": "5ddbb2613d48134a3ce5452e138e7c94a0d7ed98d40d315964fda616958bdbe4"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/plugin/BrowserConfig.java",
+        "sha256": "76be93bdd92608de5f3e1b30076d4957a7012699f219599049a816d8673b7f74"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/plugin/BrowserManager.java",
+        "sha256": "9e432495e3f5d268caff1ec80d107bb05e4304a4d46dcb65d9c31ad53e53d442"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/plugin/BrowserPlugin.java",
+        "sha256": "46e4fbfca0e73bed653fc28fcd3d041dc94d9438b8f0d872c9e17b7a13257171"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/plugin/DbConfig.java",
+        "sha256": "79808fcccbbccaf6ee93a8653b99eb41d9eed703a9c1ba4a6cc2750a9cba6f52"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/plugin/DbPlugin.java",
+        "sha256": "702a42fd04a43d2356d18361b779fb0f403e7ad0814f9d446881e849aef4d6ba"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/plugin/ToolContext.java",
+        "sha256": "e94cc348f519f35ef18d11222e35f0edb76a21fc4685ddfee6e5950a6d58508b"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/plugin/ToolPlugin.java",
+        "sha256": "5ee5f7ac6a12bb1661b6eafa2cf46b100bfa885bc4b301b72923fd70ecfa3b3c"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/plugin/ToolPluginManager.java",
+        "sha256": "c08a2e151d643f1ff036fbb8743f669ce6d4df53ccb89fc9a7554957508547bc"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/plugin/ToolStore.java",
+        "sha256": "6c56027423e5cd7f106fbd127b9ebf28bb020bd8f18aa2abf78358b33e012f53"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/python/PythonRuntime.java",
+        "sha256": "ef8432958589a2a13581d1b6db8ad7cf642546d505ae8ffc67d5ae0dc83d1cb0"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/python/PythonTool.java",
+        "sha256": "107f53970475a2e1d61efd4098688c98b0319ce8a54f387f7623cff519bbd05e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/security/PermissionTool.java",
+        "sha256": "249fde2b4fc73ee9ecc2e95aa267b223b2679226032b9583be18c254bbd50109"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/security/SecretsTool.java",
+        "sha256": "034da83eb423a697bcb6b112f9dc04aee403e1f29fc37c1cb5b61a8ae4d68955"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/skills/SkillAdminTool.java",
+        "sha256": "88f650ccb2d9177a1e50535b47b27987b0998a1f67d546a7d0f36b517c32606c"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SftpGetTool.java",
+        "sha256": "44b65954f549d902afb312ecdc6f98d0f852fbf54923e1046def859bbe3c467a"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SftpLsTool.java",
+        "sha256": "7cd7c2939f19e70231c5d646cb4e611c24b0bae60189f85de02cfbdf1e30a734"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SftpMkdirTool.java",
+        "sha256": "a33f6b48abb4ef455dc57e8c42247a418c49ea47fb10dccf1cb0ad99461e209e"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SftpPutTool.java",
+        "sha256": "5c193e257900f6d411a1ed171c49df4aa547b23546b4773df51a7c00e5f4d0c5"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SftpRenameTool.java",
+        "sha256": "3fa1dd2564141c156129a4cf2e1f2c615f0b6f44bbc2b43e2e2c9f1df994b539"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SftpRmTool.java",
+        "sha256": "be3aa1a43dbe4352f484991fa49024a08bf1ab3e225c60779119fed6648676f7"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SshAuth.java",
+        "sha256": "a390278d3475c4f19d7303f1b73d2925fc8f049dbbbe6894bcb6d79dca4efec3"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SshConfig.java",
+        "sha256": "e2155df7cc73d326691bb9298fccc810bb04ffa77c321e3b63de18b0a3755795"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SshConnection.java",
+        "sha256": "39596c5197ced4d7b19c9694a073ad31bf0f58b022ebd5fefa64211c5c49a8cf"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SshExecTool.java",
+        "sha256": "e8a459a2d628d01a4d203f220dea89c684f70cef7095c4f8cfde1af23b8ee48d"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SshExecutor.java",
+        "sha256": "bd419440a5e71e24226139642a3c3af71cf90509bf970a2df80886eb8dd2741b"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SshOpException.java",
+        "sha256": "3572f31544aeef93f54a7b9a4f6ecda4eaca23ff1079ca58d55fe1fa7759b79f"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SshPlugin.java",
+        "sha256": "26356b41d565da65dbbde1b74c213a3eab0685192855aa49469ea0cefeb43964"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SshTool.java",
+        "sha256": "9891c1ff763e89f409e91763f5d2a551d301b9ec25f2b551916b5ba804a66fa9"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/ssh/SshValidator.java",
+        "sha256": "13e52e1b62927701c31ecbb42ba62cc634a38cc61ec9bc8fb3c7f50c62c2b76c"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/system/DiagnosticsTool.java",
+        "sha256": "2bcc4f5204e2538bfe745607a3fb58b70880feb20063039466d9a6d08e5b1a21"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/system/LogsTool.java",
+        "sha256": "052edc9a440ef637c2559096e31ebae412dfa26d1c87d6408d3ea2b9ed0bd1ff"
+      },
+      {
+        "path": "src/main/java/com/minion/core/tools/system/UpdateTool.java",
+        "sha256": "aa83575a19ee160d84ed3c5cb61008a34cacb7a1ec37f6d598895655753fce04"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/ArtifactPreviewPane.java",
+        "sha256": "0e2a4d5d7fce31080adaa8207ec23be30ce4d1e570d05e61b2c8da4bd66cf646"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/MainWindow.java",
+        "sha256": "2914c22ad96af21f7f59c2f75a2c2a8d6aa20da2ba90d5f4dbb6913ce895cda8"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/MinionApp.java",
+        "sha256": "44428efbaaad42fa39eba1de316e6114b629e80610c5b4efc1b949e8ad3142ad"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/ReliabilityPanel.java",
+        "sha256": "6f5ebc1d3c403094eb401bb90f3cc92852f938660060a95c3b6efea16e02df80"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/ResizeHelper.java",
+        "sha256": "1e7f034be5fd7bedb5be9ac811b7b0b570413f96c4a2bd8575b41456e8dc4501"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/RunningIndicator.java",
+        "sha256": "f61111ebaa75fdc6db5ce65e2e011695776e331c0bd53f6af85698697e9033dd"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/SidebarSplit.java",
+        "sha256": "2fa61f6c9115c6c2b46002de940c048af951911614531274e24ee1187a28d2ff"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/StatusDot.java",
+        "sha256": "360a1afcf8f4c8fd51e6a838d1025e59f5b98f05b9ba462465ac0ed523fbbed0"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/TaskDashboard.java",
+        "sha256": "ffb41e47fec73fdb1beff8a68d99ebbb2abb2d0686a45a387d00d6bd05db1463"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/TitleBar.java",
+        "sha256": "fc925713abb5b7214d83114ae1b2560966e2ef4dd3d07a9de6bcb096ba20d3e5"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/WheelScrollAccelerator.java",
+        "sha256": "cd1ae3ee3ac002883081f584a9c807e84794c1318ef82f34289324e5076d0b42"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/WindowsTaskbar.java",
+        "sha256": "829928eb7a4c3a7152e7691dddc10a818c26e79572f10e3024aacaeaf6fc401e"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/chat/BlockNodeFactory.java",
+        "sha256": "d97dfc8e5fd09b6ac92a18723febe8ed4cb12e2ae75780963c774fc25c5db82a"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/chat/ChatView.java",
+        "sha256": "3801843b215dbf971ae977a1050d6187f0b932a07026c231fb4df8a00fd5ad4f"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/chat/CollapsibleText.java",
+        "sha256": "af89e931b8c4cb3659f57806db497806cdc6123e942b4e2d32ac83cf7f5a27c3"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/chat/MarkdownRenderer.java",
+        "sha256": "29d59b78e75890efa91556134211c2f8675ecf6ff07eadf5d92e8644624eda46"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/chat/MessageTextArea.java",
+        "sha256": "845ac7ac8bf8347ed37a369e7bb10edf0e74781f10e45e456f7848769eae3123"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/chat/MessageTextPane.java",
+        "sha256": "a8fd18f6edf845ee7c49617224a744179aa0a67e264eded6c5a0dd31896e370b"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/chat/SimpleDiff.java",
+        "sha256": "28c05fc2d8496b768c1fd5f6c5d6bdfc29079db5a8ff182db30e6053fb82d445"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/command/CommandDispatcher.java",
+        "sha256": "3bf820a964f0dea16994a29380f5aa0fe49dc636f928db0c82f35ae3ce82fd32"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/confirm/GuiConfirmUi.java",
+        "sha256": "0a93fe15e558fcd54324b3203338238dfc5419c59fe032489c28f3689fa2f959"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/dialog/ConfirmSheet.java",
+        "sha256": "a8ba753b85c638a1a7a7a59e2280e22ebfa2cb521864d7b05fd264543ec08a2c"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/dialog/McpFormPolicy.java",
+        "sha256": "4015fd830e6a6132273589a23f414de5d1ecffcd3259eea898a05f7d2adb93f1"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/dialog/NewProjectDialog.java",
+        "sha256": "9919b32a374940f0f16c3d12d239609c6002251a0abd31e5b3f76e07ec7157db"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/dialog/QueueEditor.java",
+        "sha256": "5f27f918e83570e4451d7fbf414bc589823dec04ddaf681a79b79860b7d6f045"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/dialog/SettingsDialog.java",
+        "sha256": "32c159c485eab2fb4f1bef4566bf707d5064fd9541b579867047c53413ad8e76"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/dialog/WorkspaceFormDialog.java",
+        "sha256": "6f9597af1203e2fe47c9496720ede8556b0ca45573b1ef243897e92f9092e187"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/icon/AppIcons.java",
+        "sha256": "d5096964fdb35f6ff12d4be05644f6cc9e6943c9c3499d658307e09f21aa4ee4"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/icon/IconFactory.java",
+        "sha256": "d57eccd9c779b88100191b34b510f3a94cada1afb25ac3ae9ea708cf530484eb"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/input/AttachmentReader.java",
+        "sha256": "cff3e4cd32708e79bf512796e7f7ba30c3712fc92474b02f135efba3808ff741"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/input/CompletionParser.java",
+        "sha256": "c81b8fa5e0440739568cb65407dd5d8183dfacd8874c43edbaaef35ffce4eec5"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/input/ContextRing.java",
+        "sha256": "56fbeb33cafef552a8fd33a2a02645d90c9ad4e5f1362c84e9dea2d45fd03ef4"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/input/FileSuggester.java",
+        "sha256": "86cd5ad50624d71dbfa4796b858f660cbdff7becfd9c850080f840a4d5d88d2c"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/input/GitignoreMatcher.java",
+        "sha256": "5c1ae23e7f28d80ad96aa27382c9549dd0ece7b9f71c8a34b6a9f08725cd8fd7"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/input/InputChip.java",
+        "sha256": "c42bc1d18fa4c8351d46471ab605095c38562d32187942fe8b76726d3c453daf"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/input/InputView.java",
+        "sha256": "3e9557bf3e0ce8d706316587852dac0b04633d32b70e7b1a548bb10b48e19650"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/input/SlashSuggester.java",
+        "sha256": "2a3dae2ed1eb60c4ac1dc8650cfc0a27eabd3e452818e40109f53e16d23420f1"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/input/Suggestion.java",
+        "sha256": "7263a857fba2423809b0108ef86067e7ec124e603249eac41a39bd8000d9b70e"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/input/SuggestionPopup.java",
+        "sha256": "5f938cedda83db6004b8f2fb889c36e3569befd506398cffa88ce3fdf8266040"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/plugin/BrowserConfigDialog.java",
+        "sha256": "c974faca46a1cd13c2d7b61a81602b8213984e0220496ab60f0c216f2bbd836b"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/plugin/DataSourceDialog.java",
+        "sha256": "b0183c3e5d1b64ae9e3788aaac4e8df3ee5a9abcbff77835d326f3c20b9646f3"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/plugin/PluginUi.java",
+        "sha256": "f125ec095d1bbe1e45bdf96222df010306de0bd394e959f48d39346f14004170"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/plugin/SshConnectionsDialog.java",
+        "sha256": "9a62df1cc01c3e288963624757a513e3dc913413a1728db9c67d7836acf99d39"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/plugin/ToolsPane.java",
+        "sha256": "5bd9cf5ebe6df64c142598512ba7c39f13085e68aece1fbceb6d6c6f8fb88090"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/session/AutoScrollPolicy.java",
+        "sha256": "8b087628b86195c9389665682dac91b4f8ac93ecc2531aec2a9e0d5b08a14bab"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/session/EventList.java",
+        "sha256": "842358425ed865afbf68ec72b9653d660ff0c044aea0b855049e70a6d5bdfa0b"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/session/SessionController.java",
+        "sha256": "a13d5fe9b26e009b0fc8c1be50bbfd595921cfb161d796879d9b85b22b512568"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/session/SessionHandle.java",
+        "sha256": "03853b936585ac2f200e6f1eb3db9838257a13df939599125a7c2f9f27767a1c"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/session/SessionManager.java",
+        "sha256": "6a2bdde93b84221f996475bc488f65d80cbfbd4f0d2286e072627ad2269aacc4"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/sidebar/SessionListView.java",
+        "sha256": "3646e3573ed388bd4d18383156a5dbd94dc73f1dd29e59d05550c24b852298cf"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/sidebar/TimeFormatter.java",
+        "sha256": "8bea720be2fbc8b2872016987248f1e1326ff311af15ca7257814fff9fc0f961"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/sidebar/WorkspaceListView.java",
+        "sha256": "6d69c98c84a1ee55989ef780eed102724a82c088eb7f6103174be10ee8424921"
+      },
+      {
+        "path": "src/main/java/com/minion/gui/theme/Theme.java",
+        "sha256": "0ae98a030daeb3051b345e64bd1257484a90987e090cc65e6edecce9c6aecc2e"
+      },
+      {
+        "path": "src/resource/app/minion-128.png",
+        "sha256": "cc497ca7354a59bfa10565580103b0e42e59f7381e37161ff9393030cbf5b412"
+      },
+      {
+        "path": "src/resource/app/minion-16.png",
+        "sha256": "fb2eea04491a28e576553734974f3597e3c4345bbde1e4ae6df5f5afa39af6e6"
+      },
+      {
+        "path": "src/resource/app/minion-24.png",
+        "sha256": "939feb1e1fa0f690773e632c6fa5ca85757d9c4539d7b527a3b1948d0b1e0563"
+      },
+      {
+        "path": "src/resource/app/minion-256.png",
+        "sha256": "63883cf956e9f5081b5431caec63d90e2bc410020faa5cd13ef4881fb6ad46e9"
+      },
+      {
+        "path": "src/resource/app/minion-32.png",
+        "sha256": "9edfae2f566c92e13cd3d80a5350745b7af74fc4aa683137e36f7a41f0beac68"
+      },
+      {
+        "path": "src/resource/app/minion-48.png",
+        "sha256": "2474a62c62fe4c7c7c5fe48ff22b920ebd5980c4ec9e171a02bd0bf6eead0dd1"
+      },
+      {
+        "path": "src/resource/app/minion-64.png",
+        "sha256": "576e93bd686b278b8e48e7644a38a89f7893992e2fd513f053ab097f745287f3"
+      },
+      {
+        "path": "src/resource/app/minion.ico",
+        "sha256": "4e836d8613dc2f570727d70f3805f7c25fb1fe3c42e0b205801c4f92c18fc610"
+      },
+      {
+        "path": "src/resource/config.properties",
+        "sha256": "45d66e48698d693d53a4dbbf373db485c9b4677cdb991a9c28394eddb99a6d13"
+      },
+      {
+        "path": "src/resource/config_deepseek.properties",
+        "sha256": "68f36116dea1eda7f7af186c5c29a23ecec49ca085445c551f8e68ebcb07bf0a"
+      },
+      {
+        "path": "src/resource/config_qwen.properties",
+        "sha256": "06d8a6145b971a5272f90f65843ac4b89c8c2646ce327bdcac24d3862bd9a949"
+      },
+      {
+        "path": "src/resource/simplelogger.properties",
+        "sha256": "b24fec14beab3f7e9b45d84160a04620a2a47bdc1f1d64cbf01521a3395953f8"
+      },
+      {
+        "path": "src/resource/theme/theme.css",
+        "sha256": "fa11fc458053edd35acfaa96f590f5e53cd9aea8e16c28d82d0bf03ab36e2e6d"
+      },
+      {
+        "path": "src/resource/workflows/excel_workflow.py",
+        "sha256": "3f26f3171ba2ee3cbe95cdb6452fcfdd220f3b38242a74f56384624f27919e53"
+      },
+      {
+        "path": "src/resource/workflows/office_workflow.py",
+        "sha256": "7286a69dae93b6b9368a379ac08978b053fc69bf40692f0b4cf9c72bfdcd3a2f"
+      },
+      {
+        "path": "src/test/java/com/minion/BenchSwitch.java",
+        "sha256": "cd5c58feaee5e9eff8179f7f022f0f7a09f07b02ec783ec7978c566f2c91a6b0"
+      },
+      {
+        "path": "src/test/java/com/minion/JdkResolverBuildCommandTest.java",
+        "sha256": "ac919a84c244c88ba75710ae7150854c8d944ca7bd2d50c6fe0bb76ce7f73580"
+      },
+      {
+        "path": "src/test/java/com/minion/JdkResolverTest.java",
+        "sha256": "78ed6ee4574036f1dac8408f2ba97854645c883a85270bf524929c4bc3191023"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/AcceptanceRulesGTest.java",
+        "sha256": "e441af1f992592e47480d37e30b6f02339e28893983178c407956763dec6ec81"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/AgentActionRecoveryV27Test.java",
+        "sha256": "aa83bd39f49e21a7dfeb30a1b07afdbcceec0739a5744ae7e9970581a88c548e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/AgentContinuationV26Test.java",
+        "sha256": "2b3f5aee428254af997f50f92bd2e9b7c352ecd42ea237e4e7acba83108196b4"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/AgentHttpActionRecoveryV27Test.java",
+        "sha256": "6da1aa8cf9d3b9b6c57dd01ef76fc5e7bce9c7e367573ea048b07685500011e4"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/AgentLoopCompactTest.java",
+        "sha256": "da4fdbac3a95f2892f277aec39dc11cc7216dbaa8263b81ecb45bd55d66daea7"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/AgentLoopTest.java",
+        "sha256": "2abaa49835e6a418289c7a28c9283a4ddbf61900e0bed39e068cb41dbb3bcd5b"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/AgentMemoryRecallTest.java",
+        "sha256": "60b0bd1b8d4a483d07df280ea22bf897647012e5c46bfd4cdc6cd6812007a1e8"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/AgentWorkflowV24Test.java",
+        "sha256": "85ba46edf4cd22e92096057b7e3ff924416df4c294e3be3a0f10841c09487300"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ArtworkAgentIntegrationTest.java",
+        "sha256": "61831126d3bc107bea8c0b70a7c9e165376f2f2f09757236b11c2512151ec2fe"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ChildTaskCoordinatorFTest.java",
+        "sha256": "8f0f94c2ac966d5d28b9d2363d7fcae6df9b9fce1b8a7f6de006925e48a2f077"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ChildTaskIsolationFTest.java",
+        "sha256": "9395f1acdc59de28dc556ec30f14b1fb1ac9667dc60825ffa6475ab7bd31b638"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/CoordinatedChildHostTest.java",
+        "sha256": "fbe968c5b1e7db5bc6270e85c47584990e921b078d96340fc3f7ebc4734138a0"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/FGitFixture.java",
+        "sha256": "27c5bfd9057ff65053130dd89fbf0f5637d2e692236f0952a79dab27ec538e3e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ImageContextLoopTest.java",
+        "sha256": "b531e974edf2425d05e9a96e23af1a9f9a6d5d522601a1aa830a5dc62552c0bd"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/IndependentReviewPolicyTest.java",
+        "sha256": "00557a1856368c396f0937decd9bc853ab4a149d296e0378a1ba5036f6190887"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/InstructionContractTest.java",
+        "sha256": "c2d6ef611b52487c993e824a49bd51c32839842085983dc4bbce806494aec605"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/LegacyStopFixtures.java",
+        "sha256": "44ced33b7600707c2bf63561f0e6dedca0091262712c7585b19ac268ea1554bd"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ModelProbeTest.java",
+        "sha256": "f5594a46f2e6dbc16ca5873a956980bfdc4df6dbab95f4ea39e5d70d2ca34535"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/OutputMergeFTest.java",
+        "sha256": "e1030b4bb8edf525eb4bc179e253885aa54d0af57d56a6159104a7a6d3d896d9"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ProgressContinuationTest.java",
+        "sha256": "5620822113e2b882a657d11214478350ee99659be8dd89af5db9e89cc921623e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ProgressEvidencePolicyTest.java",
+        "sha256": "871b4af9c2a4658283a7ba4fd3d707d0dc02243506b5ed29e6a2e40e8b24bacc"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ProgressReceiptLedgerTest.java",
+        "sha256": "6f5584593efd28a0b62c5df05ab0a69db837f7ee1364e77b0ff35f476f8e1f88"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/QuestionImageContinuationTest.java",
+        "sha256": "d3ada0e90623f63e3cb2c6b1f5e296b279b5529321fd3977c61d1d680b776cf7"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/RecordingUi.java",
+        "sha256": "588899dfcb3e34b87903b9a3042aa3b93c1440405cc3a9d1f34172f9f1387c30"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ReliabilityFeaturesTest.java",
+        "sha256": "f263647aa9672bd82b28c5c4233bc99306a4ad7f693faed2436e9d002f0d1a8c"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ReplayScoreboardTest.java",
+        "sha256": "22737b99fd4fd31d224198acad689e8007b87e80eeb2e3422e88a108c3a14afd"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/RetryPolicyTest.java",
+        "sha256": "b1b8476f480e7dedc566cbf210f188b71b56eefd5c2bae3307a73182f7f8578a"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/RetryProgressTest.java",
+        "sha256": "fe8222224a05a71014a0382abad52f9ca4d316074606f6913e64ab5e758d6e61"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/RuntimeJobRegistryTest.java",
+        "sha256": "8529ed8c1263b856e049f993e409c522f3b4d6136c589e1aa76186c4ce05f0bb"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/SelectiveUpstreamTest.java",
+        "sha256": "3d9093398d516e6b0c7bc8f59c7934f347a1f81c8098d127cb43e8a8732ea7ca"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/StatsLineTest.java",
+        "sha256": "2438f6d4172f1b7966de2d00a9b1f6d6077baa1c0ab53e68ba5c3ca5c30b5b9f"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/StopGateTest.java",
+        "sha256": "755dcbe80517e29ce1da20ba36e9a1a1727f0415e3402be4bdb46bc857f08f6c"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/StopReviewDispatcher.java",
+        "sha256": "a1427f8ca584bad3d0e1b5eaebb72197476fac52dff7b3047c7d73805e57db45"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/SubAgentLoopTest.java",
+        "sha256": "729b06092ce625a1af3e9f8969187599b48d28fc24d5a207acd72bf6851eea2e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/SystemPromptBuilderSeparationTest.java",
+        "sha256": "e82ea9211e353f695a9233263633948116485a19bf9531baeb8b712fb20d4db2"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/SystemPromptBuilderTest.java",
+        "sha256": "092fe2aba9164347fd8fbe03e32072e489de837300bfd87d4f19fa44aff141ef"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/TaskQualityMetricsTest.java",
+        "sha256": "9a0981a7959ce9468f2c42084d7db78d772781794615ab11722e4f8f0952fe13"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/TaskReportWriterTest.java",
+        "sha256": "04bac08a6f2970000c0948cec276aaeec448b15a52cda51a32665720ff2113ef"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/TaskScopedContinuationTest.java",
+        "sha256": "25f89b216a806a087fd1ca9a285a2e690b7879e42395bc66e477060b92d85d22"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/TaskStateTest.java",
+        "sha256": "737c39ea842ca87739c88135e9ab8516e1e366eaa63e6993fbafbad6f28c4522"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/TaskWorkflowTest.java",
+        "sha256": "283cf6096e1432c9e3f97223a11b9ce67dcc75cb47bd989a4ffd4dd685971d2c"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/TaskWorkflowToolTest.java",
+        "sha256": "204a6cc66a0e4eead57b8f3edc7dc7c0374a27c773fdc750162b19e959607713"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/TaskWorkingSetTest.java",
+        "sha256": "40cb3184b9ab77e0fae7fe251b6b969c8d51d9c147f8d7479eab6c49aa88c7a5"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/TitleGeneratorTest.java",
+        "sha256": "eae58747de41ba818760df9b4e0d6357fe4e44b5ffb5ccd18a230ff0f7b799ee"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ToolBatchSchedulerTest.java",
+        "sha256": "7ea257dedf2e5b05bd1b0c65864186a0711c28d2dcc339162652a976326e8c2c"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ToolExecutionGuardResourceTest.java",
+        "sha256": "421d16deec190f7f080b688ba2b98706d76f3441df2163f2a7b4775a1a68cdee"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ToolResourceScopeTest.java",
+        "sha256": "b9ae2acf174b0a020b939b1c14880fe7efbe3b9a410fa149431901727ffa6e19"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ToolSchedulingPolicyTest.java",
+        "sha256": "f277b1add5ea3eea56cd971f9f885914f5ac9c9b7b13b112c263fb0ce5038dfe"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ToolSchemaRouterTest.java",
+        "sha256": "4ae61365b9d83eccd456c513ac84f5d909e7891a8b724eed753bb6ec025b4083"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/UnifiedStopLoopTest.java",
+        "sha256": "8ad7e019353a4d80a2ddc900ffc0fe551061daf61a79bd69ee039f8f8d38ef07"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/VerificationExecutionPolicyTest.java",
+        "sha256": "d0fb76b237726f25025a39462f364f6c62e14634ef6741d926690771e8b25591"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/WorkflowValidationGateTest.java",
+        "sha256": "3365e28a3dcd1695366501e1f738e67e11d3796ceb6a387f3f5b150ca446d164"
+      },
+      {
+        "path": "src/test/java/com/minion/core/agent/ZcodeRuntimeIntegrationTest.java",
+        "sha256": "6572f4f83fecbeb960f86bff593a2cfc859c0b9c29ceaeced117dcf801b7918c"
+      },
+      {
+        "path": "src/test/java/com/minion/core/checkpoint/CheckpointStoreTest.java",
+        "sha256": "efc4f0ea0476ed38496d581862a29c44e4f4d84ae228becc184cd0d95fd6b1ff"
+      },
+      {
+        "path": "src/test/java/com/minion/core/config/ConfigTest.java",
+        "sha256": "3d9776821de75b9bb04851983a1b044c4b4bd6f5c277170d86a4f71a30bd69de"
+      },
+      {
+        "path": "src/test/java/com/minion/core/config/ContextSettingsTest.java",
+        "sha256": "43f6c6f1a151f4b3b97de592aa808f15fc01a852e159edd641a03ac06c95d497"
+      },
+      {
+        "path": "src/test/java/com/minion/core/config/ModelManagerTest.java",
+        "sha256": "7bf6836fa9e1d21134f9380c40630eb8d28dff8ca8ada5954ac71cca2122c61c"
+      },
+      {
+        "path": "src/test/java/com/minion/core/config/TaskBudgetConfigTest.java",
+        "sha256": "7fd75f7aa32045748a39a9ac9f119481db4347067584638182d66716905da1c6"
+      },
+      {
+        "path": "src/test/java/com/minion/core/config/WorkspaceManagerTest.java",
+        "sha256": "3652b659909722b62ad9463891bbc118fc5448e3f028e7f2c9df83f10ad0fb6f"
+      },
+      {
+        "path": "src/test/java/com/minion/core/config/WorkspacePathsTest.java",
+        "sha256": "696e40522cc2dcacd9424288443c2a12f93ea1840b731ee8d4d7c087413e6888"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/ContextManagerTest.java",
+        "sha256": "496e29ef5509dd1aa50fe5fff36a526c7693605b9fbc1b585b2fcf1907d53a25"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/LocalMemoryIndexTest.java",
+        "sha256": "2266f5e6e8dddf12236dc27ef74311910a23a6cb6738f85ec088cc3efb2f4f53"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/MemoryRecallQueryTest.java",
+        "sha256": "947647311f697e32402e2b13568a4eeb91171012c7b6103535c119cc320cf56e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/MessageProjectionP0CTest.java",
+        "sha256": "fbdc2fb14e435def4e76c2bac90921af47053c05e483a709d8a25509c7b8fcc7"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/ProjectMemoryPrecisionTest.java",
+        "sha256": "a8463e2b6355279098e3739da95a6bbd803e5840d42f8f37cc98761c909b65f6"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/ProjectMemoryRecallPerformanceTest.java",
+        "sha256": "f3ff178304fb44e46b0de8ff045a49d8d287e16d0a46a03d80f32cb062b724a7"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/ProjectMemoryStoreTest.java",
+        "sha256": "7d26332cb7d615f1b7660269e29fbb830eec0eb252f6c4068f603ddd7fdfda35"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/RequestTokenCalibrationTest.java",
+        "sha256": "4feeac3b604af265602d43197980e4bffee0dafa0a89c4557a4f00e38da2aa2d"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/SkillResidencyP0CTest.java",
+        "sha256": "9e5c57bde708795d2a0e6c707ca9eee329c59e0618977b3d69a22d17e46726b7"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/SourceFingerprintBatchTest.java",
+        "sha256": "dca74834279eb11ee5bb122ca414507c29ef9e83b298d0d6e6300ed7608e20a2"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/StructuredCheckpointTest.java",
+        "sha256": "8f313b061f299dfae14fb8c953273b631f2520261482e19637d194f8298e0c71"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/TaskScopedCompactionTest.java",
+        "sha256": "2611e48d16b22b7ad07468d4885aaa830a917004ae11ac16959fecee89c0b5f1"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/TokenCounterTest.java",
+        "sha256": "6a348858dd74b52abac37d2950c66efc090eda94eca169a4e924e9fd00a6d16d"
+      },
+      {
+        "path": "src/test/java/com/minion/core/context/WorkingSetProjectionTest.java",
+        "sha256": "4be934a228263116372e1679ceed7f7140c0e0f3206cefe57908812e7d52f105"
+      },
+      {
+        "path": "src/test/java/com/minion/core/diagnostics/SecretRedactorTest.java",
+        "sha256": "1a59d888575f31984c1b1b0a61e01a3acea31d4b2f2a988225a2da10a3005576"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/DeepSeekActionRecoveryV27Test.java",
+        "sha256": "86a3cade1954853b4a432e712e3df424526e40b4cd51a642568c4490c658dbe8"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/DeepSeekClientTest.java",
+        "sha256": "4367fc177abb03516bc0228435bb70ba780bfcebd1754ee3f98fb6d795e90a77"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/DeepSeekTelemetryBatchETest.java",
+        "sha256": "5970011647d939c2450021506a292167c4b52a8fefee97840ce87881dfda196b"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/FakeLlmClient.java",
+        "sha256": "29cc4bbd3a2226eb25a8248616d7c2f2222b19fd14ff53cc53b5f2937605e168"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/LlmExceptionTest.java",
+        "sha256": "9b14782124479dd7c478b85a5693b1458860cc101ff92e7b0d85cbd860c5537c"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/MessageOriginP0CTest.java",
+        "sha256": "9701d47e4405422a8ab3d20f3f28dc0573e3d3dd1a1c7085b9a48793d06f4ac1"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/MessageTest.java",
+        "sha256": "1fd34e662118dff9670120c36b72f4e36442a0d1abef89fdd515de99b6a18ae8"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/ModelCapabilitiesBatchETest.java",
+        "sha256": "209008483bd5bfa218196f8497f9f19a6b1df4c50c60ec746ad19ae4572ee75b"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/RepetitionGuardTest.java",
+        "sha256": "629b2f05493cb3d0e1b4464db068ac12cf248efc1ebd581a294ff0b9c627c569"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/StopReviewHttpTest.java",
+        "sha256": "100d8c909ce3ecbccb2928f176e4f2c729b82b3df85855766f3d3d1ed3042dbf"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/StreamRepetitionHttpTest.java",
+        "sha256": "f35e386e0c5a0fa843d25f0eb3abf0d743cf74c900ab5eedeb201ba9afd3e43d"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/UsageObservabilityBatchETest.java",
+        "sha256": "c98da0cdec258817aa3ed9ced2584cdfd8318137493825f6a701d8def61e7ac1"
+      },
+      {
+        "path": "src/test/java/com/minion/core/llm/UsageTrackerTest.java",
+        "sha256": "9645c5456c98b6cd199a4ede7e13e1de71858d1ea570de9f1383c024a17919ad"
+      },
+      {
+        "path": "src/test/java/com/minion/core/mcp/AjMcpClientLegacySseTest.java",
+        "sha256": "c17c3115ddede527df95ba124a9a6dfe463fec47e36d6e006ea23eb691ae7db4"
+      },
+      {
+        "path": "src/test/java/com/minion/core/mcp/AjMcpClientStreamableTest.java",
+        "sha256": "4729fb4b6a6707b75242b708200744308e2653fc6338b90609ca633cc289322e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/mcp/AjMcpClientTest.java",
+        "sha256": "557e5a3a28c38482f9f1b0cae73f6e8559fe527daa86d3e042f2c0a886787306"
+      },
+      {
+        "path": "src/test/java/com/minion/core/mcp/FakeMcpServer.java",
+        "sha256": "b496c0fb139876cd09552d952e03f69452512f3decc96f3dfe26ee466bc385c2"
+      },
+      {
+        "path": "src/test/java/com/minion/core/mcp/FakeSseMcpServer.java",
+        "sha256": "0e4578d141f080a4f3463d5f6709f3a1f0b47a098f207af14cba008c9d4dd6da"
+      },
+      {
+        "path": "src/test/java/com/minion/core/mcp/McpCommandsTest.java",
+        "sha256": "d332e479b765df33c643b4bcbc8d719f1ec2fd50b18c040310447b89c2044ea1"
+      },
+      {
+        "path": "src/test/java/com/minion/core/mcp/McpJsonTest.java",
+        "sha256": "3802361a4b279d42359210f309649ae883c07699f5f98ede8c269ef3995f8b54"
+      },
+      {
+        "path": "src/test/java/com/minion/core/mcp/McpManagerTest.java",
+        "sha256": "02fa9680c4e7d3431338f0587e3644be1f7f8619d8d83a5697e35ecf30d1d72f"
+      },
+      {
+        "path": "src/test/java/com/minion/core/mcp/McpStoreTest.java",
+        "sha256": "afbd1eec0240a3a36b31a97ac26156bf205050e5299378ff534e51f23228fbbe"
+      },
+      {
+        "path": "src/test/java/com/minion/core/skills/SkillManagerTest.java",
+        "sha256": "9c3dfce0172b4c1ccfb32006e5f9e282e7f0ffcc03ab4f5b692586dec99c5933"
+      },
+      {
+        "path": "src/test/java/com/minion/core/skills/SkillSetTest.java",
+        "sha256": "6821e83cad3ff7c9fa3d04058c83fb4c127a2d02f846b4407a523e4de80de649"
+      },
+      {
+        "path": "src/test/java/com/minion/core/skills/VisualDesignSkillTest.java",
+        "sha256": "0afe319efb52602ab574ee00e180dd6d3a66cdb8ffa2674613606a57cde816cc"
+      },
+      {
+        "path": "src/test/java/com/minion/core/storage/HistoryArchiveTest.java",
+        "sha256": "599a7e4ebc6cd7ab734dd588a6db4a6784f7b50e5321939440942bed98079a0b"
+      },
+      {
+        "path": "src/test/java/com/minion/core/storage/HistoryPrecisionTest.java",
+        "sha256": "10b3d4d03a297b958535e44e542dc03f7764cece93b88e4f37a7f348e009aca3"
+      },
+      {
+        "path": "src/test/java/com/minion/core/storage/SessionEventJournalTest.java",
+        "sha256": "0f912408ab1ca26a2b244313d271e5b4b9c596875dfa39ff65bf8c45dfa450cf"
+      },
+      {
+        "path": "src/test/java/com/minion/core/storage/SessionStoreTest.java",
+        "sha256": "9d2188d16dacdd41c452a9b2aa9a80eb4d537533b68d238936f257bb7b3e7a65"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/AskUserAnswerV27Test.java",
+        "sha256": "e90b345d64c76ae0d2a9fd737304ca31d94f8fb961dcc5ebed98d01948c5efca"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/AskUserImageAnswerTest.java",
+        "sha256": "f1e13771b7f173bca11dbddb714db872663f4eddeec077191d0a8da6ee280298"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/AskUserQuestionNormalizeTest.java",
+        "sha256": "7ac44c3a77e485ef7c9ce22cde02c790797358b5eccae81e31cbdac9e4da1562"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/AskUserQuestionToolTest.java",
+        "sha256": "036e5e81a613123c58e9190922d27c51bb6faf8e24ed91884615324624197872"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/AtomicWriteConcurrencyTest.java",
+        "sha256": "fb0db9061e195a6d003339bfa6e65c17de13a06ddf46389d22211c96e5682df7"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/BashToolTest.java",
+        "sha256": "525500dad8e87b2c779b52fb772cc1fab7ae00d4c3f122dff269e39aad5d244f"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/DangerousCommandsRemoteTest.java",
+        "sha256": "58cb8bcf7b3c21a0874c247191648c85f35ed2b7b77653ab70f37b296d2f1d0c"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/EditToolsTest.java",
+        "sha256": "702920d870025b0d309d2966ff445e1a877bc98e6f3e7b5640455cce10c99e61"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/FileToolsTest.java",
+        "sha256": "f0519e530f085bd47b1ed955abaf2e45d248b949e91af7a1fff461550b0e409f"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/FullReadMergeTest.java",
+        "sha256": "563c3e209cd6171c9322b22739b65fb8a16cb07ae93dfde2b03e7efe0c5377c2"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/NativeLibraryBootstrapTest.java",
+        "sha256": "f122ccf5ddca139d3b1c381f497152097a2742bfc3e0f17ea4463bf9d2331e00"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/NewCapabilityToolsTest.java",
+        "sha256": "e7eb1c9fd011bf19c63e05079dfa0a07e1726abf564db686b6b974da1549cec6"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/OutputDumpTest.java",
+        "sha256": "a45804858624cce5e93908c82021b22a953810ea0a4f185aed2395fa0ec5387d"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/PathsGuardTest.java",
+        "sha256": "239debbf0b48a9a407a54f7b3732fa0c07f8ff52f9531a430598e972bcb7d9fa"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/ProcessCleanupTest.java",
+        "sha256": "3acb9b8a089633ee38040955ee6ec329472d86e5be87c793ac13b3e4e471261f"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/SchemaGeneratorTest.java",
+        "sha256": "1df9c2f12c57468b867f435bf96b4e1f20063ec27f046d59d714ed49e551d12a"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/SkillToolResidencyP0CTest.java",
+        "sha256": "0b6c17f29e56a6170177aa46a1e1cf2dc75d20730292e356f1faf5b4362d772e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/SkillToolTest.java",
+        "sha256": "7bd772f409cfa972d2c42c1eaabfe104154426da183552c276ddf24ead03dfb1"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/TodoWriteToolTest.java",
+        "sha256": "cf0f6aea66af1cafad05a6c104a228e25dc635e7f846085da21a8a2fad31f075"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/ToolArgumentsTest.java",
+        "sha256": "973737a8f65ec83361f997e36b9c9704b69e05e029f3783afbf7a9371b6ee266"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/ToolRegistryTest.java",
+        "sha256": "8fdc43fcd87ff8a95e4e52cde6109ae6049f923fd9d3621b7bf457da6196db9a"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/ToolResultTest.java",
+        "sha256": "a8eeb28545e537c55d5f8aa46067c80033179c24cdbf138e64c4e9ec9104a60f"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/TruncatedOutputTest.java",
+        "sha256": "049c3523bfb05409a7721c0f5b32796d66e2b5f664b6e9faca2bf204283d45f1"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/ViewImageTest.java",
+        "sha256": "ae071047bdd767b29fd3380aa7878e37aaf5b8c9774cb17b90ed01fc05eb8a1d"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/WebFetchToolTest.java",
+        "sha256": "12fa5b814e2bdd2b964afb134ef6362f517df124d7a8c54cfcce0ab804b1fc0a"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/WindowsAppIdentityTest.java",
+        "sha256": "b6c29f04a6c0cbf11622f44f25a73009140733a2263b4951bac622f9ae519528"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/WorkspacePathTest.java",
+        "sha256": "fc9a4bda2bbf1362459d0b52ff8d47da8a0ae32825d4a9ce0428c7ce5217421b"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/WorkspaceTest.java",
+        "sha256": "074f38b3c54faa2ea6aa4dcbdb660136d2e8f73294654eb1d527a5b379798ad0"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/artwork/ArtworkToolTest.java",
+        "sha256": "e6a8f152fcaef8e0a8f9690de3feae09f93680351b30270cdfa7025f82d78038"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/browser/BrowserDomProbeGTest.java",
+        "sha256": "f05b25f9fcc163bb59e048cae60655dbe033b6df2235a79a4b9cf9c1abcc8e4f"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/browser/BrowserProtocolGTest.java",
+        "sha256": "24fa72d613d66fbe2fadec4cf3760605ff39dcacd305e4682f437709ba3a4886"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/browser/BrowserReliabilityGTest.java",
+        "sha256": "1c08a47d774666664789aa6c4f0fe0f0758f3e7da99c19649870a19454bcd99e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/browser/BrowserToolsTest.java",
+        "sha256": "5ab7f99c6b704a5ba775adff44a9582c45c2740ff6a9f64fcbdcc0e3df035909"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/browser/CdpClientTest.java",
+        "sha256": "fdbfd206b49470b18e2be6419a21318f1119095db3e9e24f6333d3630500e684"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/browser/ChromeLauncherTest.java",
+        "sha256": "70856922ed9ff6ee0a770c1c10eab08ac7229933b0c792b540b352a43db7938a"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/confirm/ConfirmGateTest.java",
+        "sha256": "1b6c0de7891437a74bed22545439e7a91a7421a0a8a48f370eb5f257ed9c3431"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/confirm/FakeConfirmUi.java",
+        "sha256": "c96ebe53552fbd69a3d84faa9e96dc3bb48478f9b8423c45abeac2e97614e1ec"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/confirm/GuiConfirmUiTest.java",
+        "sha256": "781149daa1dd46c7acd99e913ef871ea0c07f7a85baf81ec7a247f872d2e97a7"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/context/MemoryToolGlobalTest.java",
+        "sha256": "4a6d4230ea965561ae3d365aac680fd066e033fee6e0ffbda2b5bb1c2b4f3c41"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/context/MemoryToolHistoryTest.java",
+        "sha256": "bde781ccda86559997fe1de635a15762c2f0aa40a31b3d7400e0e678da748630"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/context/MemoryToolPrecisionTest.java",
+        "sha256": "752bc9330c4cca8153a5bb3ee63a327e214c9e6107cdf1ffa4c0497eb9406a39"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/context/MemoryToolTaskTest.java",
+        "sha256": "1af9780aba8deb06cda17359063d960f975c039a59d1aba997d3d4f793b9198d"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/data/DataToolsTest.java",
+        "sha256": "3376645dc4883b9e211e8fb3d427a51e8017d815150c697dab4684ddf0c24205"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/data/DatabaseReadOnlyTest.java",
+        "sha256": "be1b4449fa232a71129bc1ed44340ab174736b7abece6519a19ce39a68645457"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/data/OcrIntegrationTest.java",
+        "sha256": "063735f76e401559fd934ca3cd053f051684abdc5973cdbc05e6667b7502c39c"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/data/OfflineWorkflowIntegrationTest.java",
+        "sha256": "3a42d23e021bab6d1fdfd19e9d951d73d7a4863556bbfe858a31b1b054d458f8"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/data/PdfWorkflowTest.java",
+        "sha256": "d40dced9c378c55726daf1aab7c3135b46fd29a2a02fd5ad85f661422f61060a"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/data/TextProcessToolTest.java",
+        "sha256": "cfeb631484a0ab58cf5994493f302c3312a71f14449a0e14878c83d6d99abb1e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/db/DataSourceValidatorTest.java",
+        "sha256": "cddaf98f9957139c5883e7f7db3f90ed62d0bb06707289f14ebdba754ca4a3b4"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/db/DbAsyncJdbcP0ATest.java",
+        "sha256": "a27d031f39f898f1696c0d1cb227e64ac2b73fb35c511b4fdab8828978bb832e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/db/DbDriverTest.java",
+        "sha256": "f0facd0e194b6559437b23231dc6f943f2b66859aded96899bef353a05456220"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/db/DbExportTest.java",
+        "sha256": "1f69aa2b6cae1057e161060cabb6b010d23e3ca0c851c76aafa0acc72188e020"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/db/DbToolTest.java",
+        "sha256": "efae2e8053aac56c4baf9a8faca0903d6e3d91e62be69a781d35edfa70b40107"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/db/MarkdownTableTest.java",
+        "sha256": "c844293d19da4f17f51cc41eb2fdc893873d34d4e5e7e6161fff3e48d2c123a3"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/db/SqlGuardDialectTest.java",
+        "sha256": "72db2d52af5d1fd9f70a471fd3dc5e9b71e93768f5550b6f99e0b26c1a2ca402"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/db/SqlGuardTest.java",
+        "sha256": "08a5864e0dae9623f0227846ef110247b99ec2ea1b76b69d47a458934fcbcce6"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/dev/ArtifactVerificationGTest.java",
+        "sha256": "7feec9a23f2c5d948c828a2544a500dd1391222d1015491ac8385032dbef67c7"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/dev/BuildToolTest.java",
+        "sha256": "700b89c10f42babf98396d408de746de8f362f864a7155c5464302fe5dcc999d"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/dev/GitReviewSnapshotFTest.java",
+        "sha256": "cfb5ab1444a6cf45b1dfc7e0db002a845ecaf9f3ab1004cf2e6715110301e975"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/dev/RuntimeProcessP0ATest.java",
+        "sha256": "e646b5d3f9d194bf22e3cd408cf86f6a88a6d192eefd9c800ef09b8653f6e7d3"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/dev/SourceVersionTest.java",
+        "sha256": "6e485f16ecc4768a7f4025120c6f2484f8e129f2e17a7ee1ae287a7ff670964c"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/dev/ValidationBoundaryTest.java",
+        "sha256": "af8553863fa751f0613abc1d434ce25fbd9c8104cb580041309ad7a320fcd2ac"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/dev/ValidationDiscoveryTest.java",
+        "sha256": "eae3aa03c99d69d352d6c488c9571135e99d4cceac01324715230738579f9d79"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/dev/ValidationFreshPythonTest.java",
+        "sha256": "56ed97de8aa81a0903610b222d500f6bc3aea65a2601f9aa816e6e280685f787"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/dev/ValidationReportsTest.java",
+        "sha256": "0dcdb1252a57c3d54a7caf76b18e7864104581bcfdb9449a2f29c494da0389dc"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/dev/ValidationRunnerTest.java",
+        "sha256": "d65002158f1d981a418a2db43ca4873a86a66c047d16057b44ab6fd9391f0f67"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/knowledge/KnowledgeToolTest.java",
+        "sha256": "3e788a44b14a096fea14508300fce4f0becc77a5f32703777f8b4367cb345667"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/mcp/McpProxyToolTest.java",
+        "sha256": "c9eb24449e5ca25ba4da548d9609d8a38d96b1725a1551e9f00b0f19486a81c4"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/plugin/BrowserManagerTest.java",
+        "sha256": "0b9e24321c0ec595271c7dfedcab5bfb84f0b2d1a5b10fabd00acc70c3dbe322"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/plugin/BrowserPluginTest.java",
+        "sha256": "e5875d49b2c50b49f7927febf3ccfb9b12ad363d2d5c36945a076bfaf3157ce1"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/plugin/DbConfigTest.java",
+        "sha256": "6e0127359c9d201600e9d0a30c45c54bd13a0a9ce3ab3fbd5f73b137617dc660"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/plugin/DbPluginTest.java",
+        "sha256": "4e5fe6a382ce7dde5a59afac5594490fe0c7e4d42d9ace98984f30eeacd7f151"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/plugin/ToolPluginManagerTest.java",
+        "sha256": "f93f335aac47592ef0332264ce8734e7ed3053ed691a61f3bc8a47b8fba3ed42"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/plugin/ToolStoreTest.java",
+        "sha256": "190c91aaf9af16e6d0e4b0f79e96be9c2391850cf3bf2474b9da6b41d8dfa648"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/python/PythonToolTest.java",
+        "sha256": "dae495b86a02e2003d37088667a9b42db3ce734db887fdf2f3fea8d1689f58c9"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/ssh/SshAuthTest.java",
+        "sha256": "0de68e3d1892e9716258182d536131bc18308695ee5784e4c350fc5481c3f722"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/ssh/SshConfigTest.java",
+        "sha256": "c9e6f9f2c8b398f0077a769d762b5c419a0e1ec07060a5167bc2e8799fe87a7e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/ssh/SshExecutorTest.java",
+        "sha256": "d898208f3886c3f1228f04676c84afd031207b4b8ba7b6237a7351eec02c12e8"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/ssh/SshPluginTest.java",
+        "sha256": "2b09d3ddb2cfb7c3e8a1c5dc69a6fbc9b89df094748feb08c98b35b3fdd69a51"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/ssh/SshToolsTest.java",
+        "sha256": "f043c311ed1c77ba2192e4630559c61970345dccd0fe99084e4e71890695121e"
+      },
+      {
+        "path": "src/test/java/com/minion/core/tools/ssh/SshValidatorTest.java",
+        "sha256": "b7ed96956b91566ae84680c47936466571546281a3ed580ee762462a156982f7"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/AppIconAssetsTest.java",
+        "sha256": "86fd6f587b15db685f286932656e2027c3732ddf7d2ae2f391e88da935133a05"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/MainWindowTabStatusTest.java",
+        "sha256": "819deaa9c157e7a827f42fff1644c64e25775d63ae4934b838205683cbcc895c"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/MainWindowTabTitleTest.java",
+        "sha256": "3af6796854a5ef6a8f8b819db761c71dc1cc5fd74614dd9f94b1ae074fa7fe6c"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/ReliabilityModelCapabilitiesUiSmoke.java",
+        "sha256": "416d454900ff4aa5933cd90a5715a89752b35fc5f0fd1792d07c2d491878ace6"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/RunningIndicatorExternalWaitTest.java",
+        "sha256": "42f630c393feddc97001629cea66b46613725bc288a12b46e65793072da6b393"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/RunningIndicatorTest.java",
+        "sha256": "0cecf767ae99cdc064697a77230d89b730330091853fae8ddb3481cff5fe4fe7"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/SidebarSplitTest.java",
+        "sha256": "032176e8f097976e93a9df95e0038fa4f250333b0623931b58cd328a6c3fd0f9"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/TitleBarTest.java",
+        "sha256": "1be57e5f2d84188b795754d2a5f65caa0cfd7353c26c2eb5c4cdd5d2f28329f3"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/WheelScrollAcceleratorTest.java",
+        "sha256": "35c8efe3073523558dc786d42862d7ba8909cb0238b280ebb0a66ec9c16356e1"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/chat/ChatViewAskQuestionOfTest.java",
+        "sha256": "0b272abddd3fc91aaecef292472c83f28b9f3745a1ad3f75a5e086a90d76b159"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/chat/ChatViewStreamBufferTest.java",
+        "sha256": "5f7dfb66b80020fd39f08d1f9d8db1e4b34f02735a416131e72e9879ee59b323"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/chat/ChatViewToolBodyTest.java",
+        "sha256": "857e74a2bce762b3bd5927153a02f2526949c95231e59d4998a6c294ea66f828"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/chat/CollapsibleTextTest.java",
+        "sha256": "fbfffca06b868271a0c454c0b80497ca6d2b79c9eefd94c4b24fd23c02debeec"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/chat/MarkdownRendererTest.java",
+        "sha256": "0335d6f888b91b1b37800cc5ae76d0ed59bedf738bbed62ea60a5996fffd407b"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/chat/MessageTextPaneTest.java",
+        "sha256": "bb6e437bfd5ed819eaaf478d9ebc9f073872e42a22bbd13ad143c4486904b830"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/chat/SimpleDiffTest.java",
+        "sha256": "c66e32aaf759138a6073f8161438fc866e6bdbee5feb9d0153583dd651543d03"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/command/CommandDispatcherTest.java",
+        "sha256": "9b3053d1999d7eadc58857e775ebe9e331f9975f5fce5194467a28d896aa37c6"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/dialog/AboutOfflineTest.java",
+        "sha256": "29310815446c25584ac9931de0ec6923b486b5c53d6868a76aa2b7e5f31d481d"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/dialog/McpFormPolicyTest.java",
+        "sha256": "dbfbaa8f925058defc2cd9d17a14bb124c4d9b70037f46d7273ca48839a03071"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/dialog/SettingsDialogTest.java",
+        "sha256": "5ef9d23139c9140b2f473e9790b8ce2f53c5d274b9a82eb7ce173c9760ce7c91"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/icon/IconFactoryTest.java",
+        "sha256": "e21a48b0d58175661f7092a4a34b4ac09c82c467cac1588ca80a3ab404d073ae"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/input/AttachmentReaderTest.java",
+        "sha256": "ebd1108f41cb8679119c9691b5d2dfe6130ecdb8d59b319f3db8b7d784b0d9b0"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/input/CompletionParserTest.java",
+        "sha256": "15ed4a4ddc0329da571a433143ef5b426043cfd2387ffac45609c36137b2721c"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/input/ContextRingTest.java",
+        "sha256": "9cde9db2ca59cf3055715e3230b1bc5a5c621f5c3e7f38c9a53ca5ce2681f8af"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/input/FileSuggesterTest.java",
+        "sha256": "3b544ff01b471d4e402f76538d85fe4f320a1e522aeb30f5c3c2fe137dd14ba8"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/input/GitignoreMatcherTest.java",
+        "sha256": "c18620945d3ad16935e1ac7edcd7c1fe3d01dcb5ffc2caff0f728e8228e365ac"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/input/InputChipTest.java",
+        "sha256": "5aafef989f9e7fea920891aba3722868701e106155b9dd7c55d442b587ed62b9"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/input/InputViewButtonTest.java",
+        "sha256": "d71f5e24f0485457bfd8de5db4a90e66a0a7b615bacc2dc29a85b9a7329b4118"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/input/InputViewInlineTest.java",
+        "sha256": "7d7e6cf5964986d34ee812c197a8402d15f3d07a7e3dd8a3183dfb424f5de85a"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/input/InputViewKeyTest.java",
+        "sha256": "3ce7cf624f7ad2268ee62df917ba45331d8f4bccb643ab3a2351bbab3b2ed254"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/input/SlashSuggesterTest.java",
+        "sha256": "6b44eceb94abd180b1315b26de0ace66a451e081a7e82422c2ac6464b0d6f078"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/input/SuggestionPopupTest.java",
+        "sha256": "727c25b11c911221700d06c0701cb596358d618784a15d0c1963a940924b887c"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/plugin/DataSourceTimeoutP0ATest.java",
+        "sha256": "58efa636b97f9c1edbea7025a7d19adc8476882c285cff123a19bb89a0f894b2"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/plugin/PluginUiTest.java",
+        "sha256": "dba55e865c9b2c0b5fdde50527f1bcdf8792b8f0bfc0e99e7fa2bdf44c6f5e6d"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/session/AutoScrollPolicyTest.java",
+        "sha256": "d67072abe2660953f4145b01cb93147ceb16e6feb0f9ea5509ccfa4bf6655bda"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/session/EventListTest.java",
+        "sha256": "a8fca597d3202d91646e7b3e2ee8d711b213f35c69de67f5bf6b2b27d460ee92"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/session/QueueEditingTest.java",
+        "sha256": "738bf1e1c44524e250216dd2047b84c1668dd7b697e13e6d5472e5cbcacbba71"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/session/SessionControllerTest.java",
+        "sha256": "788e7274d88345df97c7651d367ef98394b3fbb17bd8ff2879d4a835506d32dd"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/session/SessionManagerTest.java",
+        "sha256": "4a3c099bf310340b03e024c1094ede25fba50a1901f6301a1662c539f4ca6f20"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/session/StartupLazyTest.java",
+        "sha256": "81c1a536eba77cce2cf247b562391b6fa4c5a4c802984a38028c3b37dacf36f2"
+      },
+      {
+        "path": "src/test/java/com/minion/gui/sidebar/TimeFormatterTest.java",
+        "sha256": "d3793a08e3d4dea88aaace4c868392d955c38729f642d460673de1dc2a31caf1"
+      },
+      {
+        "path": "src/test/resources/config-test.properties",
+        "sha256": "2d23f2ba5b28fc4d47bf5e98303b69691c8496e14879dcda0b8a62d401d0302e"
+      }
+    ]
+  },
+  "test_runs": [
+    {
+      "path": "target/zcode-v47-final-regression-20261106.log",
+      "sha256": "842d90ca50a03079917023c84dcd78dc832679e84dc430b362078b07558d9e4d",
+      "tests": 1925,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 3
+    },
+    {
+      "path": "target/zcode-v47-verified-regression-20261106.log",
+      "sha256": "827e565a3a650c2e6af8dd9fe908566fd203aeac63cfcb6c6445705c4a6cb5f1",
+      "tests": 1932,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 3
+    }
+  ],
+  "final_test_totals": {
+    "tests": 1932,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 3
+  },
+  "skipped_tests": [
+    {
+      "suite": "com.minion.core.agent.ToolResourceScopeTest",
+      "test": "symbolicAliasesOfNewFilesShareCanonicalIdentityWhenOsPermitsLinks",
+      "reason": "got: <java.nio.file.FileSystemException: D:\\codex\\科室工作日常管理\\minion\\target\\v47-test-temp\\junit3965489706313435416\\junit1637019147384991361\\alias: 客户端没有所需的特权。\n>, expected: null"
+    },
+    {
+      "suite": "com.minion.core.context.SourceFingerprintBatchTest",
+      "test": "replacingFileWithSameTimestampAndLengthChecksFileIdentity",
+      "reason": "filesystem must expose distinct file identities"
+    },
+    {
+      "suite": "com.minion.core.tools.data.OcrIntegrationTest",
+      "test": "localEngineReturnsCoordinatesOnSyntheticImage",
+      "reason": "requires installed OCR"
+    }
+  ],
+  "suites": [
+    {
+      "suite": "com.minion.core.agent.AcceptanceRulesGTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "0e2274cfe722be59fe305db2d749fbc9c38161a548de9aca7c160ac48aa401ea"
+    },
+    {
+      "suite": "com.minion.core.agent.AgentActionRecoveryV27Test",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "7c8bf01fe70a5da44c559e8185e68786902b5435c8f2a896b46484c575b4ead7"
+    },
+    {
+      "suite": "com.minion.core.agent.AgentContinuationV26Test",
+      "tests": 27,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "fb9b3ee8982086a4feb805a6a42c0710c75ed0146596aa066d4e260fb62a5b27"
+    },
+    {
+      "suite": "com.minion.core.agent.AgentHttpActionRecoveryV27Test",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "7d69e59754f70f24f177797221074ecf16588b2fe1f554cc80a362accf451b43"
+    },
+    {
+      "suite": "com.minion.core.agent.AgentLoopCompactTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5043ff4d2c0e9dd67c04bf0a373de480f5d8ed19d004666b4aecd16e215edfed"
+    },
+    {
+      "suite": "com.minion.core.agent.AgentLoopTest",
+      "tests": 89,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "4cb49001d0809391673897625dd2b066429ba95afb2657ab1c933c8c21b6c338"
+    },
+    {
+      "suite": "com.minion.core.agent.AgentMemoryRecallTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "0914f69294ce197e6cd3cbdf25d0799af610e323a6fa9d745a80ee6a04bfd6ae"
+    },
+    {
+      "suite": "com.minion.core.agent.AgentWorkflowV24Test",
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a445c995d7e8affdcb2a7607b070d259e5c30183292e940db668046262432dac"
+    },
+    {
+      "suite": "com.minion.core.agent.ArtworkAgentIntegrationTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "7aa26f9ffb22c8618af70e5b7feccf81360d1567bc46eb2b818ffb329fd14380"
+    },
+    {
+      "suite": "com.minion.core.agent.ChildTaskCoordinatorFTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "546b6673d06626e18fa2b2893d970402b5cd0dc5ead951089d409b96f215f879"
+    },
+    {
+      "suite": "com.minion.core.agent.ChildTaskIsolationFTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "8bb41fa31fb4fce899512a9c6e9e16a76ba72457d7a5d03a773ed8e6a1b61fa5"
+    },
+    {
+      "suite": "com.minion.core.agent.CoordinatedChildHostTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "6929b9a36ae22402f79667063818c299c3316eb3b617c5e21a2bfd61922e0666"
+    },
+    {
+      "suite": "com.minion.core.agent.ImageContextLoopTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "da634144ad04b882881a708af6e89bdcb279d7060718e7dd8de61d08f62e70cc"
+    },
+    {
+      "suite": "com.minion.core.agent.IndependentReviewPolicyTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "e0e6e317194f3809745a8102fee5612bf46bab209dd932321557d50b788cbb68"
+    },
+    {
+      "suite": "com.minion.core.agent.InstructionContractTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "94ca06b9d23005f6ef604b8fdc74b4fc2b7af471a104ea01c3ea251f67c60622"
+    },
+    {
+      "suite": "com.minion.core.agent.ModelProbeTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "8648ebdc7481208c094334f7910b430cf54f806f6520a0db24a6c34a4bff1a05"
+    },
+    {
+      "suite": "com.minion.core.agent.OutputMergeFTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "fcfe62f63e14d32e4b084553eaa1fcf2a9e8ccde9a28d85683432a406d2c352d"
+    },
+    {
+      "suite": "com.minion.core.agent.ProgressContinuationTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "008699fa6f985d06781bc2b022c188c2c44c68af6f64e029b9d5a45b47628588"
+    },
+    {
+      "suite": "com.minion.core.agent.ProgressEvidencePolicyTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "bbeaacdb89692f2ab93a29b189f331cfd89871c06c15bb585c4ffc0eea7ba8b2"
+    },
+    {
+      "suite": "com.minion.core.agent.ProgressReceiptLedgerTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "db6142bc25dad4e4d969b384126d04413ace2639887e36f528f695889d8ede16"
+    },
+    {
+      "suite": "com.minion.core.agent.QuestionImageContinuationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "7acf2e6d1500fd504406074aac8484faa56f4e1ce0b7ac471f38831789e1715e"
+    },
+    {
+      "suite": "com.minion.core.agent.ReliabilityFeaturesTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "fce52059f7981a12d67b82eb8075cd382950a6e9687d96aa5eb78874eff77f82"
+    },
+    {
+      "suite": "com.minion.core.agent.ReplayScoreboardTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "4fe5cd18587b8914069ed78cbe4849e677c83b2683db303c1e63707a21a01fe9"
+    },
+    {
+      "suite": "com.minion.core.agent.RetryPolicyTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "0adc21f0d202793694ce7e53d7ea8cbbdacfc14382fddd101ce620112d09fbd0"
+    },
+    {
+      "suite": "com.minion.core.agent.RetryProgressTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "eb788506b81b8c9b42f70a2b984dc884a47f733c363777fd78cc5178a7a5abf7"
+    },
+    {
+      "suite": "com.minion.core.agent.RuntimeJobRegistryTest",
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "808f381c59b9d3b48eb0f66ce3fd9bd115129c1cc47749c576538f4e34aa7385"
+    },
+    {
+      "suite": "com.minion.core.agent.SelectiveUpstreamTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5d1bfc2797c3eab857c92b3d16aed48e537f500f01df788651ec8a53f1e09cbb"
+    },
+    {
+      "suite": "com.minion.core.agent.StatsLineTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "7f2f9c321033934d98bef3d9b94de4d10993bdbbebf9dbce02a19f4a52972026"
+    },
+    {
+      "suite": "com.minion.core.agent.StopGateTest",
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "85f7bfa64b37378c49ca9052a5ed02cd998601426c399146e34a819e8eb4081d"
+    },
+    {
+      "suite": "com.minion.core.agent.SubAgentLoopTest",
+      "tests": 25,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "7dc91234193c9d0ebce909a531b3a4d159e02845829aafb530c86ea3d9ceeb01"
+    },
+    {
+      "suite": "com.minion.core.agent.SystemPromptBuilderSeparationTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "06ed1c6fcfa0fe7eda56609d55e93a8078879ab86a9104bbbb4721abd7c7cd85"
+    },
+    {
+      "suite": "com.minion.core.agent.SystemPromptBuilderTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "516cd6fd677d6deec418fea7ddcc7cc85da3dd3f841ff952ee55cf41f07127cb"
+    },
+    {
+      "suite": "com.minion.core.agent.TaskQualityMetricsTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "84b8f319fdf4e0aa4995c998cfae0439e418f4d45fdcce5dc20125d960a06e3a"
+    },
+    {
+      "suite": "com.minion.core.agent.TaskReportWriterTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "423e0c5e92c2270afd24cfe4b72af00e5c5b5b73a670bb072d83f0ca5d368aff"
+    },
+    {
+      "suite": "com.minion.core.agent.TaskScopedContinuationTest",
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "bda1a4c415d00938bb81b362aa6e4979e672a8f97c654b824f88babd382118c9"
+    },
+    {
+      "suite": "com.minion.core.agent.TaskStateTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "6913b743fcb853ff860d26391dcbb12e913b355aad539e3f864a925403344172"
+    },
+    {
+      "suite": "com.minion.core.agent.TaskWorkflowTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "384902216be4ff22cb203f1bb9c20d780141e4943efb270d60b3bcfd1981fa3e"
+    },
+    {
+      "suite": "com.minion.core.agent.TaskWorkflowToolTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "656686b59871b335299d955c540b3dca62fa82575ebad702a716ffebfc6dbf85"
+    },
+    {
+      "suite": "com.minion.core.agent.TaskWorkingSetTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5403b152241b54daeff5ed41062c0ad614f81b5cc5f60bb361aadd96e31b35ac"
+    },
+    {
+      "suite": "com.minion.core.agent.TitleGeneratorTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a4887c3fd9c9bcb57c9e6bf79fa5328351fc880673a540a4c24f0e2787792d4e"
+    },
+    {
+      "suite": "com.minion.core.agent.ToolBatchSchedulerTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "bcf28902cfd9cfcbff3a5cc233fb6bd340c7c3a60bc102439352d6026f72d400"
+    },
+    {
+      "suite": "com.minion.core.agent.ToolExecutionGuardResourceTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "df1fafaa8ef4eb286d79ad3494dfaa42aa8f476dbff00aedbfad5bcbf5ad7ca8"
+    },
+    {
+      "suite": "com.minion.core.agent.ToolResourceScopeTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "sha256": "3a05d03e497cc2257c08e4a36f34fefc57ad56551837a8d2eb37246f4c542818"
+    },
+    {
+      "suite": "com.minion.core.agent.ToolSchedulingPolicyTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "187853b10e28d354c273c90a8299fdebd1dab56f9835bbed1aaa124f82c3b979"
+    },
+    {
+      "suite": "com.minion.core.agent.ToolSchemaRouterTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5cff066ba1c273133f1d21c872e8fa79cb10df638d472fb689f176453073328c"
+    },
+    {
+      "suite": "com.minion.core.agent.UnifiedStopLoopTest",
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "e3dc609b40c0f411c9f86429a6f1b691dd3d443d318a52a58c9fe8d9f2318dae"
+    },
+    {
+      "suite": "com.minion.core.agent.VerificationExecutionPolicyTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "48bfe244321bd9ccbf89d2f859e4547d50aa710af46acaa7fbc3ef254ce20f3c"
+    },
+    {
+      "suite": "com.minion.core.agent.WorkflowValidationGateTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a7231a0d085e62c27ada0f51402253c069ae467f3220204fe087cd52834f977f"
+    },
+    {
+      "suite": "com.minion.core.agent.ZcodeRuntimeIntegrationTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "2aee3ff4c01998e48ac428b71c16ebc46e8b7fc18471227c5f5b53075e1f3810"
+    },
+    {
+      "suite": "com.minion.core.checkpoint.CheckpointStoreTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "7ab6648a211288abd8f792ea9098cedda781d80a5ed1489bf109c9c14dc87ca2"
+    },
+    {
+      "suite": "com.minion.core.config.ConfigTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "e510022d2cd789d1c2c4e14be3006708b469318ae5f58408cfab69bcc5019405"
+    },
+    {
+      "suite": "com.minion.core.config.ContextSettingsTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "4d737f78f1e219755d1af45f2c9e7fe105e44a1a71a9029e6445d81b2ffc83f9"
+    },
+    {
+      "suite": "com.minion.core.config.ModelManagerTest",
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5d58aa44f1622972be58aae74659c0b40769436dc109d3bf56ef9f5398b3aca4"
+    },
+    {
+      "suite": "com.minion.core.config.TaskBudgetConfigTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "185c226c62ab8c0673ad1bbc42aba1d5e45c84c0c63bfbdd9910011104a8403b"
+    },
+    {
+      "suite": "com.minion.core.config.WorkspaceManagerTest",
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "9f192bcbcbca588162cd832099d61892f2707d86f7ef03e90874064e59277641"
+    },
+    {
+      "suite": "com.minion.core.config.WorkspacePathsTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "f5b2bd58ddbe65bcc3b52d3dbd6d47c7b9bd02b8f509283ba38664c22a92f1f0"
+    },
+    {
+      "suite": "com.minion.core.context.ContextManagerTest",
+      "tests": 40,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "9688a1dbdcfef64baedaefffe5d6ccee80a00885939f9f85277e98db844175b6"
+    },
+    {
+      "suite": "com.minion.core.context.LocalMemoryIndexTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "92feb4bd72300609f0a68b5a3b50af714b45f7232b6e37c9fb6dc5b1a3175469"
+    },
+    {
+      "suite": "com.minion.core.context.MemoryRecallQueryTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5400202f9bfcc04bcd6a8c8c215fce8813962a443a2b76dc02c53b376a0e0c39"
+    },
+    {
+      "suite": "com.minion.core.context.MessageProjectionP0CTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "9a29f390d4be199fffecb390ff617dec1ee4f98ce87befb2be439db7c43cd5aa"
+    },
+    {
+      "suite": "com.minion.core.context.ProjectMemoryPrecisionTest",
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5250878dee53a4ed54fd8924db6acb06b94a5171a698edabcfd9e4ee686b2140"
+    },
+    {
+      "suite": "com.minion.core.context.ProjectMemoryRecallPerformanceTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "4eb7b3a82ded8f2d81a4aef989d0dd96c23f49938957d929af4bb138b4f279d9"
+    },
+    {
+      "suite": "com.minion.core.context.ProjectMemoryStoreTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "c6f042356ec8d1aaca0cc415b46c67c58a0960a5894f1f93742197264c999559"
+    },
+    {
+      "suite": "com.minion.core.context.RequestTokenCalibrationTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "67f5e41e1b639ea8a888e8f88e68fe6cd12d8a755d00cb1377064a00bb507776"
+    },
+    {
+      "suite": "com.minion.core.context.SkillResidencyP0CTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "ce08fa23f46372fc655005ac782c1e476bb3af92011127de05d727d051ffdf7c"
+    },
+    {
+      "suite": "com.minion.core.context.SourceFingerprintBatchTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "sha256": "8b4cf623c4e216fa3e22bc8ad144a65aafeaf77c466a2fb5c017226b900cad35"
+    },
+    {
+      "suite": "com.minion.core.context.StructuredCheckpointTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "6e3ecf036b8f9b76938fd0f38afd626726b07f0d2677d00c8e82074ff68e4779"
+    },
+    {
+      "suite": "com.minion.core.context.TaskScopedCompactionTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "2736765fe4d58d138f30a87d2f5c575173586a91420bb5da4e7f8504271b4383"
+    },
+    {
+      "suite": "com.minion.core.context.TokenCounterTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "795fec7cf9f012b56d3f0af664dfe4c93e10fda76f9ace2b8caf301a85d0ca3f"
+    },
+    {
+      "suite": "com.minion.core.context.WorkingSetProjectionTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a1d10a5fb499d2a38e062dc4b1b7afbd3b4386a412a16f928dbc02be489b16f0"
+    },
+    {
+      "suite": "com.minion.core.diagnostics.SecretRedactorTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "980a9a78317166bd0ef3707963023a26debdfad0d1aefef4126b376f913927c1"
+    },
+    {
+      "suite": "com.minion.core.llm.DeepSeekActionRecoveryV27Test",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "3c702530240d335421041e35faf3274cfa51b66e99d73780c182a752e287c001"
+    },
+    {
+      "suite": "com.minion.core.llm.DeepSeekClientTest",
+      "tests": 31,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "3e7b734245a6718ae68bf2ce6f87d4ad60310717ef7ebf15b084c2612878726e"
+    },
+    {
+      "suite": "com.minion.core.llm.DeepSeekTelemetryBatchETest",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "455ae614beb6820f64894b522c0afc1df8d511fa06a52042df51861cad0c2c46"
+    },
+    {
+      "suite": "com.minion.core.llm.LlmExceptionTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "f23fff65ef6e155452b27dfa6b6d134ecb565dfa7526fcf3f51ab58824188607"
+    },
+    {
+      "suite": "com.minion.core.llm.MessageOriginP0CTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "d441d9a93b483d6cf1c667b08cb4eeec874e10e3b9e2336f1bc79b98500ab7cf"
+    },
+    {
+      "suite": "com.minion.core.llm.MessageTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "07dcaf44aaa9ca06400b92d56fcb354149c3bdee6584a6509cd0046c9fc33cec"
+    },
+    {
+      "suite": "com.minion.core.llm.ModelCapabilitiesBatchETest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a35ec02970c90a629b2d302cf728d202ee7c42ed970b76bbb5a85edc49df6584"
+    },
+    {
+      "suite": "com.minion.core.llm.RepetitionGuardTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "27aa2e457e1e4e3cfa393cc13fcb6a66b75d9c80454b603699817d0fa50b1b14"
+    },
+    {
+      "suite": "com.minion.core.llm.StopReviewHttpTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "09562967be4ea3792d0306266d36e7d71953ae75d6e06da3ebaee138ec616bcd"
+    },
+    {
+      "suite": "com.minion.core.llm.StreamRepetitionHttpTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "e435845bc6abfe8a93a3ab94019a05dcaacc0a04fe052bccb03c2228b0673060"
+    },
+    {
+      "suite": "com.minion.core.llm.UsageObservabilityBatchETest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "91279e6076b12cb059a3f72d08aab72992ea4aab23ea60bc2637b6f38db5fb3d"
+    },
+    {
+      "suite": "com.minion.core.llm.UsageTrackerTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "eefd18aa53456a8ac45a55fc9cfdcc8174f8d86f1d14d9ad10a5ce48f2142904"
+    },
+    {
+      "suite": "com.minion.core.mcp.AjMcpClientLegacySseTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "1f8fb312d4cdb962cddb83c4d10c5c960a730e81690b4b742725e413b699780d"
+    },
+    {
+      "suite": "com.minion.core.mcp.AjMcpClientStreamableTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "036fd91a8d4bd242fd4c8424b722ed13f68b4fa1c88f6ae88016b9b99aa94937"
+    },
+    {
+      "suite": "com.minion.core.mcp.AjMcpClientTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a857949ed2ae642f65d9e755f871b10c4a8868a6891b82dd58be1b92e6fa3ca1"
+    },
+    {
+      "suite": "com.minion.core.mcp.McpCommandsTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "94667aeac024a1ffec13f9149e1592b2fd22470eca31075895b6f94a2c069f9d"
+    },
+    {
+      "suite": "com.minion.core.mcp.McpJsonTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "9b8c43f2328621fa95a8776b3cfced1df52d9ddc51c8fb8bdbc8abba8f5164e0"
+    },
+    {
+      "suite": "com.minion.core.mcp.McpManagerTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "966fcf362fda81777ed57700de9af71df32264933b50ee7a9695b7d3ace60442"
+    },
+    {
+      "suite": "com.minion.core.mcp.McpStoreTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a02c23732db6bcb587fe1d9c6fc728584df9a0b0f39b0a5b2e29831cc0ce0172"
+    },
+    {
+      "suite": "com.minion.core.skills.SkillManagerTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "2f45d1aedd6db1fbb61a65bbe171995c8c1a510f767d5f68f1cae9b983272e09"
+    },
+    {
+      "suite": "com.minion.core.skills.SkillSetTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "6cdfca81646ad802582f3e501163ef840df300d66bc7c9f7cf0d1d674ac834e7"
+    },
+    {
+      "suite": "com.minion.core.skills.VisualDesignSkillTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "2d2afe9d2dd568039265135413d1afa3ad8d18e1482d6471a7afd5bacd00353e"
+    },
+    {
+      "suite": "com.minion.core.storage.HistoryArchiveTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "bdf46d626078e68277af2e8d61e68b648809fc9023553a6af6bb49931a9d4cc5"
+    },
+    {
+      "suite": "com.minion.core.storage.HistoryPrecisionTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "213dce929ebc18479d063fed830a5c8514762f534102135964e8eb9d2065b098"
+    },
+    {
+      "suite": "com.minion.core.storage.SessionEventJournalTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "fa744b264b78dc19ff17bd5b6ecb276d4215363d0a2d8d59c71be29a65354fa3"
+    },
+    {
+      "suite": "com.minion.core.storage.SessionStoreTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "13e7ea762454ea4a26b08f6c7c201f4d8eacfd68fb7d8140a8770849e4bcbe69"
+    },
+    {
+      "suite": "com.minion.core.tools.artwork.ArtworkToolTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "df9a924865620ab1d63872a146466a819584afef93e70b22eb23e042e510a462"
+    },
+    {
+      "suite": "com.minion.core.tools.AskUserAnswerV27Test",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "94f25fbab028061d18531a1d6217fb185925080faa69bbf2c173ad5a5a2f20b4"
+    },
+    {
+      "suite": "com.minion.core.tools.AskUserImageAnswerTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "52eb9878231eb518d5eba82987342ab4ee6e46865a08dbbde2785138ca6a90fb"
+    },
+    {
+      "suite": "com.minion.core.tools.AskUserQuestionNormalizeTest",
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "7f18ffabcb3c5b16488c5af4332d390669b63295cc0432ed3dfcf1faaf1d9eb1"
+    },
+    {
+      "suite": "com.minion.core.tools.AskUserQuestionToolTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "14bba4eb2782682532a760f5970c5e39c71d3eb9fe693d515654f36b635c9249"
+    },
+    {
+      "suite": "com.minion.core.tools.AtomicWriteConcurrencyTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "62f48ec582e6c74ccb1e883c4820d268a652c145407d1c5e5ef6492dd6b5cafc"
+    },
+    {
+      "suite": "com.minion.core.tools.BashToolTest",
+      "tests": 27,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "e87e64f56f439d2d3f004322c3d81f0560836b41948b7d11ad79a9f13f87fb7e"
+    },
+    {
+      "suite": "com.minion.core.tools.browser.BrowserDomProbeGTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "693dd4afc8d7641fadf2762e12b47b8344f25f33c25b1003a4ac3fa09d32b200"
+    },
+    {
+      "suite": "com.minion.core.tools.browser.BrowserProtocolGTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "8dabe4e8735fadb3529efd5738638ca76a824ee32526ca34d1c3f485ebb643c7"
+    },
+    {
+      "suite": "com.minion.core.tools.browser.BrowserReliabilityGTest",
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "e7ab4b5bcbfaef29ec0510dfaf6705d700e14f9dc14e68e3613816cf2d9b8394"
+    },
+    {
+      "suite": "com.minion.core.tools.browser.BrowserToolsTest",
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "0e95fcd5d029a82299fb84f3b865a1607c7509fc7f16016abcf38cb28943316c"
+    },
+    {
+      "suite": "com.minion.core.tools.browser.CdpClientTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "1f369e9d368187b7ba7df36f311a0c29fbf34d78a022b130aa83d3f012eec155"
+    },
+    {
+      "suite": "com.minion.core.tools.browser.ChromeLauncherTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "26c4a3c4152d3d4a2340fd750bbd794339939e53eea32c69167d3d3c05783a10"
+    },
+    {
+      "suite": "com.minion.core.tools.confirm.ConfirmGateTest",
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "62547876969de741d4742e515739e1cf2fdac669a4d8c0a2e39aaf558278a913"
+    },
+    {
+      "suite": "com.minion.core.tools.confirm.GuiConfirmUiTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5048d03963323d2152903620597b77cdb37b01b0afaaa1435057d76749d30217"
+    },
+    {
+      "suite": "com.minion.core.tools.context.MemoryToolGlobalTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5e8589c89d331b16eff6248e1a3bb30bab8cffb243cb1599c4fd515e2c05960f"
+    },
+    {
+      "suite": "com.minion.core.tools.context.MemoryToolHistoryTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "2a3ff4158451ad6ee507b53a5e65d38e9dd719ba877bd3c5a5070a945bc398ab"
+    },
+    {
+      "suite": "com.minion.core.tools.context.MemoryToolPrecisionTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "76ebfce3b441c39cbbb56b2153cf42c1280905ad5dab6cd97a856427b53fa8c4"
+    },
+    {
+      "suite": "com.minion.core.tools.context.MemoryToolTaskTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "eae5b4b767795439485c49cf22a09d4a026a615aed43b103bbef412edf8ebd18"
+    },
+    {
+      "suite": "com.minion.core.tools.DangerousCommandsRemoteTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "1d5dd96ae79b95d4199639bdfdad0f9179642b24fc5ff7f9f691e0ce4f0f375a"
+    },
+    {
+      "suite": "com.minion.core.tools.data.DatabaseReadOnlyTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "9ca229de8ab4cd07c99d002d0a51f2066486a61019d957e3d55362af7a1d56f7"
+    },
+    {
+      "suite": "com.minion.core.tools.data.DataToolsTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "da78a6fc2ab19cefd6054190b1362bbf1e30430f6ce9b83e022ee4d9cd5199f6"
+    },
+    {
+      "suite": "com.minion.core.tools.data.OcrIntegrationTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "sha256": "aa03f6b841365c7d4078b905f337b450ea67606b7ab84fa65cae07ed3c85a3eb"
+    },
+    {
+      "suite": "com.minion.core.tools.data.OfflineWorkflowIntegrationTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "655a6c723b1aec9c2bbdf04797734247809ae79b21973b60a726c60662b2aa72"
+    },
+    {
+      "suite": "com.minion.core.tools.data.PdfWorkflowTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "2261d7040e80f45d80c918076e8e199274921db03f418af60a1c36c63b6cbc70"
+    },
+    {
+      "suite": "com.minion.core.tools.data.TextProcessToolTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "0afcb90bf706afd14e4eb5723b60a44f68bfd96357339f996b619462db6c3138"
+    },
+    {
+      "suite": "com.minion.core.tools.db.DataSourceValidatorTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "394271b7f689e172348c58015bfeafed41505523b4dde8deba549fcbf396134f"
+    },
+    {
+      "suite": "com.minion.core.tools.db.DbAsyncJdbcP0ATest",
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "3b880cfcbbc98f5af4c238b9b55477a39542f9d7a4f6e10ba6ab3d564bfd2968"
+    },
+    {
+      "suite": "com.minion.core.tools.db.DbDriverTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "3d17445e442b6b31a7531866113b2d0412565ab9988d9e06030771cfe1e5092c"
+    },
+    {
+      "suite": "com.minion.core.tools.db.DbExportTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "6bdda35ae40b98929d85a59588b7560bc43af0fcec79a6ad346d56f231e462b4"
+    },
+    {
+      "suite": "com.minion.core.tools.db.DbToolTest",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "61ca5a5a87f3234fa09a1c92c16f07337aebb47b58087df457875aec9d4f350e"
+    },
+    {
+      "suite": "com.minion.core.tools.db.MarkdownTableTest",
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "edc22522f0b4abde668822d18108f3dd9492585960b58d38f859964c3add3c08"
+    },
+    {
+      "suite": "com.minion.core.tools.db.SqlGuardDialectTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "2ba2700f073dd63a40d62e2b5c40c9960d6f496104f951286b33928867cc3c62"
+    },
+    {
+      "suite": "com.minion.core.tools.db.SqlGuardTest",
+      "tests": 43,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "b67e29a8929bc8f7436d0f59cd0f3a322f468a6fe0202b9b2ea4e8f7042bbc63"
+    },
+    {
+      "suite": "com.minion.core.tools.dev.ArtifactVerificationGTest",
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "6aac7455e9ecbb97fe1de9ccefd84b0715f1fd4141f232deaeddf2cf002e5b61"
+    },
+    {
+      "suite": "com.minion.core.tools.dev.BuildToolTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "7d16f101fc1005a2b54db7bb67bba3a084b7d5e0d120cf5aa4294aa3ad597447"
+    },
+    {
+      "suite": "com.minion.core.tools.dev.GitReviewSnapshotFTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "53ec08be04eacf2b1830f43fbbf5a3db1302b2462f0009a076e44355a129a812"
+    },
+    {
+      "suite": "com.minion.core.tools.dev.RuntimeProcessP0ATest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "f9f2d122b810f4e877976d53904e772811301afdef60898614dbe223c1d0e272"
+    },
+    {
+      "suite": "com.minion.core.tools.dev.SourceVersionTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "f27ec794eb080621e3cf467f5c60ed71a63d332c5558e84267a383745db1d158"
+    },
+    {
+      "suite": "com.minion.core.tools.dev.ValidationBoundaryTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "7e22753ae9447158d31a13b8fd1e5d9d5821e05b1ef66a3c8949836cbc086ffa"
+    },
+    {
+      "suite": "com.minion.core.tools.dev.ValidationDiscoveryTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "7f635daca49a09a20318c5b4c33a56e86cbac4814812e2feefe545ca03d8395d"
+    },
+    {
+      "suite": "com.minion.core.tools.dev.ValidationFreshPythonTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "dbabe3897c0681ca765a9adc9092f599102c31c4ad1ca8cbeb81705b19ce9bcf"
+    },
+    {
+      "suite": "com.minion.core.tools.dev.ValidationReportsTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "869690b59d2ad2f4a8f8000bdc812fd848fe4ce91572900d562e0a7af05d68a7"
+    },
+    {
+      "suite": "com.minion.core.tools.dev.ValidationRunnerTest",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "e31c62c8c9d7e67580c8f248f357c2dd2ee9b1f4e76dd9a6c6dabf8a0debd6f1"
+    },
+    {
+      "suite": "com.minion.core.tools.EditToolsTest",
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "dacbba58055c08776dd7c7a114bf60026b3de0cfd4b7b6290635ba1deb2d7827"
+    },
+    {
+      "suite": "com.minion.core.tools.FileToolsTest",
+      "tests": 35,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "015f54f28aac7513848ba1d138b9d225185b0e70178b4559af9684ad5f67a278"
+    },
+    {
+      "suite": "com.minion.core.tools.FullReadMergeTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "16c8f3785b525ccf85f799f602306e585f5176541eb7e78623adffeabeba3db5"
+    },
+    {
+      "suite": "com.minion.core.tools.knowledge.KnowledgeToolTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "d2f80ed873bc0688e5d3b076d7495f37c689b199859e0a1d69b075b365ef5773"
+    },
+    {
+      "suite": "com.minion.core.tools.mcp.McpProxyToolTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "be14019ae40144378f445109c232739bb70ec2ed34698f147203fe652080b797"
+    },
+    {
+      "suite": "com.minion.core.tools.NativeLibraryBootstrapTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "0ec898155d222079f193a8805397408892175e75909a4eb48e7c8e5442472b65"
+    },
+    {
+      "suite": "com.minion.core.tools.NewCapabilityToolsTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "daa67942033d6ff1b3d30c5b3b0dbc3565b70eb18983c302520198a58ea768b7"
+    },
+    {
+      "suite": "com.minion.core.tools.OutputDumpTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "bca441be4d6238f8eef6e610b48003f183788fb958e8fcdf16b1b9b5bd43e928"
+    },
+    {
+      "suite": "com.minion.core.tools.PathsGuardTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "938d724055a8e7ef1cc73666608a8f0bbf237b22891f15db1a4ff07603a1610c"
+    },
+    {
+      "suite": "com.minion.core.tools.plugin.BrowserManagerTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "9ff37abb85aeae3451424cfd7b2cb431a244ad4d9284ab665c006296b0295521"
+    },
+    {
+      "suite": "com.minion.core.tools.plugin.BrowserPluginTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "ecc7be37f44e9f89acf07e6fb37dd2a7b93af86c696d16c36b3b8c65d3f40767"
+    },
+    {
+      "suite": "com.minion.core.tools.plugin.DbConfigTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "f736ab6beba52f0dbbcd39408aa5d0ac588a42202be9fff36e4f7a216e8c7959"
+    },
+    {
+      "suite": "com.minion.core.tools.plugin.DbPluginTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "ecb9a6190824700c5a43c62ce8a0ec7ea8909124d96584efa78dba42c92f3940"
+    },
+    {
+      "suite": "com.minion.core.tools.plugin.ToolPluginManagerTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5fd124fc98b0a3e67e6ff75796dfc78b0a04bddabfd199826ff3471bdf187ffe"
+    },
+    {
+      "suite": "com.minion.core.tools.plugin.ToolStoreTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "90c74a17d6041eaa7a91f223fd2f44157337b88e828cad98b0aaeea79a73df28"
+    },
+    {
+      "suite": "com.minion.core.tools.ProcessCleanupTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "c578d14a4cc3329ba2565f5275a9b5f9b350fa00c9b3e2b17e832eacc879b068"
+    },
+    {
+      "suite": "com.minion.core.tools.python.PythonToolTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "fcfd3540702b428b9f6c9bd3351197179d9b10271b6277be1d7f3402f3651880"
+    },
+    {
+      "suite": "com.minion.core.tools.SchemaGeneratorTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "fd4a3c04375e3a44bb9dd0acb4864ca1bdf6c747a27ff9330e9ea867d8195b85"
+    },
+    {
+      "suite": "com.minion.core.tools.SkillToolResidencyP0CTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "4f3b3046f34ba648b4e4aae64ee446f3c09906147653db6e0796a1171375b3a1"
+    },
+    {
+      "suite": "com.minion.core.tools.SkillToolTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "6e323956f32bc5509b290563cdc354c3fc12158a63619ec16b478cff95e853c4"
+    },
+    {
+      "suite": "com.minion.core.tools.ssh.SshAuthTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "633e2760cc1d05a5488efd128e179616fe1c445e0871c9f579ef2ce089e6ec73"
+    },
+    {
+      "suite": "com.minion.core.tools.ssh.SshConfigTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "4a40faebe61c7e885491459f25b5a695f29ce52bf5bc1aaa6b2eaf48b2017473"
+    },
+    {
+      "suite": "com.minion.core.tools.ssh.SshExecutorTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "cfb739706efaffe5f59544ec72302b801b269aeb3a3b0d89342e3e1f8ad80584"
+    },
+    {
+      "suite": "com.minion.core.tools.ssh.SshPluginTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "df22791865e0692aafaf4442093b29652319860fe9a5f01572c182485edfc01c"
+    },
+    {
+      "suite": "com.minion.core.tools.ssh.SshToolsTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "45fd83c183d325187660639465e05565b115e5f79517315da4d16e97565525bc"
+    },
+    {
+      "suite": "com.minion.core.tools.ssh.SshValidatorTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "e5acb712a54c24915be833bda01a6bef47c848a47625039311126d01c1c14685"
+    },
+    {
+      "suite": "com.minion.core.tools.TodoWriteToolTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "519a5255575b6aff3e43752100965a7ce1e18055cf08b02f5a57c7dc49c45d12"
+    },
+    {
+      "suite": "com.minion.core.tools.ToolArgumentsTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "b0aa4c67e2c66cdd5e01a3a11e7b00e518978dc17cb3e734ba6383d5340aed3a"
+    },
+    {
+      "suite": "com.minion.core.tools.ToolRegistryTest",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "1963ad640ec5ed9bce89aa5cf6a72ff0f137ab1ad6760c1cb2a47d70ca3d9ded"
+    },
+    {
+      "suite": "com.minion.core.tools.ToolResultTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "4e654aab753d0e34e2639baf12d77bbcfb0f7686cbeca96a755c8d9d202fb64f"
+    },
+    {
+      "suite": "com.minion.core.tools.TruncatedOutputTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "acd24a31afb4ec8e8a083b6e88a3fd832d5d37f2251631deb9b6e9a95fb019f3"
+    },
+    {
+      "suite": "com.minion.core.tools.ViewImageTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "2c62703ee885d69cf22d912d6fbef2a822eb772b3a60806541e33498a2f10b0e"
+    },
+    {
+      "suite": "com.minion.core.tools.WebFetchToolTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "349afcf259432a10575989901d018bf9851347c552a09785cf3e44e55166ebcb"
+    },
+    {
+      "suite": "com.minion.core.tools.WindowsAppIdentityTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "9499e38f6a9f8a0e2b3b5e0822bbe819ae643d9c8b3f40bd70c1bc69528e85c1"
+    },
+    {
+      "suite": "com.minion.core.tools.WorkspacePathTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "0362571db4385e0223007d33615a783ab5c0e33c22a80f50ad11ccda2edc77a1"
+    },
+    {
+      "suite": "com.minion.core.tools.WorkspaceTest",
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "834b0e398f87cb58f9fb7d76ef2b3d1422a1d7ae085169fda15d40bc456f167e"
+    },
+    {
+      "suite": "com.minion.gui.AppIconAssetsTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "eb9eddbc7ce528767c7b1ba2bc91f56086cb7526a2c721be354db7fbf49a7583"
+    },
+    {
+      "suite": "com.minion.gui.chat.ChatViewAskQuestionOfTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5ee6c029d984839e151f8f6da9492ccdfd5d14fc81c432b7f296797a6b295ad4"
+    },
+    {
+      "suite": "com.minion.gui.chat.ChatViewStreamBufferTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "537a6e66d212490ff35859211a6bc6df64be910857c9ce3017072f201e238995"
+    },
+    {
+      "suite": "com.minion.gui.chat.ChatViewToolBodyTest",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "769c7087d19f63e125761a12a01dda979f8417e181e948f5c6146b071ecb3730"
+    },
+    {
+      "suite": "com.minion.gui.chat.CollapsibleTextTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "cc2b3efb94af7b85e8b3e4e1098f70a5500292d77d8621f814010deb16ba6c83"
+    },
+    {
+      "suite": "com.minion.gui.chat.MarkdownRendererTest",
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "514a10c99e9de5332e29245ed6c7a602459341f671cad550b9922d7a1bdf1fca"
+    },
+    {
+      "suite": "com.minion.gui.chat.MessageTextPaneTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "78e1c9b74ca212530f6d8a74a691165a94bbef9c6e8347a7af6369a5c8741d55"
+    },
+    {
+      "suite": "com.minion.gui.chat.SimpleDiffTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "b72fe6cd70b7058cb5cdde7fb26ffd0716743d8a594e06bdb85f6714272e22b9"
+    },
+    {
+      "suite": "com.minion.gui.command.CommandDispatcherTest",
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "173ec88afe11a040dda09e46cec47f1528ef226abce678e45311db21edddf768"
+    },
+    {
+      "suite": "com.minion.gui.dialog.AboutOfflineTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a795236cb69785ca1cde4d891f09ff728bc107d2b780d9c32944d8feb321dc2b"
+    },
+    {
+      "suite": "com.minion.gui.dialog.McpFormPolicyTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "0fab709ddb7d76114d12bcc5e2b7c68fc7ef4c1d20838484fa94ae41194369b5"
+    },
+    {
+      "suite": "com.minion.gui.dialog.SettingsDialogTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "83726061d5d1057fb479202b4e4e4d47dc8646627c650cd960a8d495cff27bcf"
+    },
+    {
+      "suite": "com.minion.gui.icon.IconFactoryTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "38a60d04bb511b45a57ff75235bddc9561ed68da2df26dcc5f1fde86fcd4e5dd"
+    },
+    {
+      "suite": "com.minion.gui.input.AttachmentReaderTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "04851722bb78ab4a793a3d5633adc927d139581da63e4f7be612813b005ed623"
+    },
+    {
+      "suite": "com.minion.gui.input.CompletionParserTest",
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "ce2375d470ac3bd4b6beaf3a4997c69d20b4b58996f63fb0a66a1c3a52210be5"
+    },
+    {
+      "suite": "com.minion.gui.input.ContextRingTest",
+      "tests": 14,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "546ac9c200c6c963ce22472f9da6bc24ac8df5c90acb9b9ddf4bea8ba2915613"
+    },
+    {
+      "suite": "com.minion.gui.input.FileSuggesterTest",
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "8580fd4fad9af1c6de10ca97bcbf8e0c868e55ce44d546fc29ae124699a19dbc"
+    },
+    {
+      "suite": "com.minion.gui.input.GitignoreMatcherTest",
+      "tests": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "2828d16df317a5cb854df98ce165bd7b91af41329a3d277299a1dbc433841a65"
+    },
+    {
+      "suite": "com.minion.gui.input.InputChipTest",
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "329d92eef903699a8ff6106e94ba895f1cff04a702d8400e1484e40d4acc9265"
+    },
+    {
+      "suite": "com.minion.gui.input.InputViewButtonTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "f5f9ac9b1542b3d9d7843ea2973a9eb257e23e29fe6e2f4384546f04764f66f7"
+    },
+    {
+      "suite": "com.minion.gui.input.InputViewInlineTest",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "c5b652a08cb2e4b0e7db5415fdc7cded1125faf1f7ab9cf8cf3c238745be296a"
+    },
+    {
+      "suite": "com.minion.gui.input.InputViewKeyTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "175c97e617cd4a58bd79f4c3348f95a352c999714266226974233196872d8ff0"
+    },
+    {
+      "suite": "com.minion.gui.input.SlashSuggesterTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "9acb264e9bd93128772be6c32212b3ff7038a0223f82dac72536a20a8ad93628"
+    },
+    {
+      "suite": "com.minion.gui.input.SuggestionPopupTest",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a7b288ee89c543e8ec3186ed7fa0c24fe6b0533ed544ef4ca76d497c881cfd07"
+    },
+    {
+      "suite": "com.minion.gui.MainWindowTabStatusTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "fd0e859e2ea99c0f40567aaf371de4b22931fddf25d76c2aae5f3350db188c6d"
+    },
+    {
+      "suite": "com.minion.gui.MainWindowTabTitleTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "c9c7dc054f60811e94bef8343215dc49e1b6e9081dbb6c3ac54e5cf98125fbe4"
+    },
+    {
+      "suite": "com.minion.gui.plugin.DataSourceTimeoutP0ATest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "09a33a7123318de13e3cd3ffd276f70d06b0d1375ad9ede322778dbccdabc6c7"
+    },
+    {
+      "suite": "com.minion.gui.plugin.PluginUiTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "f279e2c707a68b5011ff32f8f856ee2723d82cb907dc36673e9f3acff06819a1"
+    },
+    {
+      "suite": "com.minion.gui.RunningIndicatorExternalWaitTest",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "b4c82b2266c32f653e5a85ca623ecb638626189ce124f55188d957a5d74b837f"
+    },
+    {
+      "suite": "com.minion.gui.RunningIndicatorTest",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "fdd3ff1e5e2a38841f6876bc205b44415b86d8ff4740b803c6592990d4689370"
+    },
+    {
+      "suite": "com.minion.gui.session.AutoScrollPolicyTest",
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "d6d2de7bbc2fd1b0923fb08c7ad992438731b5da0ee47323bc804f4b97f5f908"
+    },
+    {
+      "suite": "com.minion.gui.session.EventListTest",
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "cf2a2f014478d614bae3bde2ce6101c89376b44cfe51491c172688245d672f5f"
+    },
+    {
+      "suite": "com.minion.gui.session.QueueEditingTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "d2f7b6afa12ddd19a6287cdc7c498201fe33276c41d87e5e9d2ca12575c37d45"
+    },
+    {
+      "suite": "com.minion.gui.session.SessionControllerTest",
+      "tests": 25,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "3e28cffdbe43c4058e0bd2e053ca43ae47bb349ff7aab18c1c0bc69be85e2866"
+    },
+    {
+      "suite": "com.minion.gui.session.SessionManagerTest",
+      "tests": 70,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "5f385ffd42676d2ede0556cb709f8f05a788130727bcc5a347eb3650ae294bd6"
+    },
+    {
+      "suite": "com.minion.gui.session.StartupLazyTest",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "d36e18c8dc71a2251deaec1487945bca11318ea55b9c385d0afe314d675a1c6e"
+    },
+    {
+      "suite": "com.minion.gui.sidebar.TimeFormatterTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "82dfb62e982dc834f2dcad0194443d159d139bc687d81c7496103ec5afb90780"
+    },
+    {
+      "suite": "com.minion.gui.SidebarSplitTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "738280a85a78b454bd7fd5cfa0deef169d65c4f721d1e6c9e0536b676a978aa7"
+    },
+    {
+      "suite": "com.minion.gui.TitleBarTest",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "133250f129b9fd9d449f1edf31e0a6d603563f1ca24f690b36b24f3c80a597c5"
+    },
+    {
+      "suite": "com.minion.gui.WheelScrollAcceleratorTest",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "039b6504dea832678c52ebe24a7b03e9ec263e7392e4895939264059e17d2735"
+    },
+    {
+      "suite": "com.minion.JdkResolverBuildCommandTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "63b58190b2785a38101ca7bf688ea1c04a00084eda955c3962922fa6b71984ca"
+    },
+    {
+      "suite": "com.minion.JdkResolverTest",
+      "tests": 25,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "92bf85f9ccb4118a550ac89fec35dff60ba2cebd1e69928bd90ba76b6231c76e"
+    }
+  ],
+  "environment_retest": {
+    "initial_log": "target/zcode-v47-acceptance-regression-20261106.log",
+    "initial_log_sha256": "19e21185320787eff95a6df2a73628162d1c658a8dca63348e49aff78828d932",
+    "initial_failures": 1,
+    "cause": "Inherited PYTHONDONTWRITEBYTECODE=1 prevented warmup .pyc in ValidationFreshPythonTest",
+    "source_changes_for_retest": false,
+    "isolated_retest_log": "target/zcode-v47-python-cache-env-retest-20261106.log",
+    "isolated_retest_log_sha256": "c43cb1dfc27baf4e2da9bd0f1f51e7cd638d2df305e2b0ad1fd9087e21b11383"
+  },
+  "build": {
+    "log": "target/zcode-v47-development-build-20261106.log",
+    "log_sha256": "f4da333a7c85b99ff5000b66b81cfedda9ed1105a3bc8bb4e8877ecc1c8e2159",
+    "artifact": "target/minion-0.1.0.jar",
+    "bytes": 25166263,
+    "sha256": "c77705d0ba37f4569243e62e5be348ffb40d8c289eb7d3f2f2b497680f175249",
+    "application_class_major_versions": {
+      "52": 531
+    },
+    "all_class_major_versions": {
+      "52": 8029,
+      "50": 1228,
+      "51": 446,
+      "53": 5,
+      "46": 28,
+      "55": 4,
+      "61": 2,
+      "65": 2,
+      "66": 2,
+      "49": 46,
+      "54": 1,
+      "59": 4,
+      "60": 1,
+      "63": 1,
+      "67": 37,
+      "68": 3
+    }
+  },
+  "auto_full_compact_target_tokens": 150000,
+  "not_verified": [
+    "Actual Windows 7 execution",
+    "Actual Python 3.7.6 Anaconda data libraries",
+    "Real DeepSeek/Qwen gateway and 1M-context quality",
+    "Real database and MaxCompute service",
+    "Browser/subagent migration to unified runtime job ledger",
+    "Performance improvement percentage"
+  ],
+  "delivery": {
+    "update_zip_created": false,
+    "github_pushed": false,
+    "existing_installation_updated": false
+  }
+}

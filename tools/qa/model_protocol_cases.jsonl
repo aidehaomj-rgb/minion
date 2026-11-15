@@ -1,0 +1,3 @@
+{"id":"synthetic_latest_format","messages":[{"role":"system","content":"Follow the latest explicit user format. This is a synthetic string-format probe only."},{"role":"user","content":"Old format: reply as XML."},{"role":"assistant","content":"<old>sample</old>"},{"role":"user","content":"Replace the old format. Reply with exactly: LATEST_FORMAT_OK"}],"contains":["LATEST_FORMAT_OK"],"not_contains":["<old>"]}
+{"id":"synthetic_json_text","messages":[{"role":"user","content":"Return only the JSON text {\"status\":\"synthetic_ok\"}. Do not call tools."}],"contains":["synthetic_ok"],"not_contains":["```"]}
+{"id":"synthetic_chinese_format","messages":[{"role":"user","content":"这是合成协议案例，不是业务验收。仅回复：格式确认"}],"contains":["格式确认"],"not_contains":["业务验收通过"]}

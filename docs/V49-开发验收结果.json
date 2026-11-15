@@ -1,0 +1,96 @@
+{
+  "version": "V49 development",
+  "date": "2026-11-08",
+  "fullRegression": {
+    "tests": 2150,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4,
+    "log": "target/v49-final-regression.log"
+  },
+  "coreFollowup": {
+    "tests": 371,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1,
+    "log": "target/v49-last-integration.log"
+  },
+  "finalWiring": {
+    "tests": 59,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "log": "target/v49-final-wiring.log"
+  },
+  "latestDistinctReports": {
+    "tests": 2156,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4,
+    "suites": 254,
+    "missing": [],
+    "skips": [
+      {
+        "class": "com.minion.core.agent.ToolResourceScopeTest",
+        "test": "symbolicAliasesOfNewFilesShareCanonicalIdentityWhenOsPermitsLinks",
+        "reason": "got: <java.nio.file.FileSystemException: C:\\Users\\59809\\AppData\\Local\\Temp\\junit8308358764260778680\\junit6971475274638639033\\alias: 客户端没有所需的特权。\n>, expected: null"
+      },
+      {
+        "class": "com.minion.core.context.SourceFingerprintBatchTest",
+        "test": "replacingFileWithSameTimestampAndLengthChecksFileIdentity",
+        "reason": "filesystem must expose distinct file identities"
+      },
+      {
+        "class": "com.minion.core.tools.data.OcrIntegrationTest",
+        "test": "localEngineReturnsCoordinatesOnSyntheticImage",
+        "reason": "requires installed OCR"
+      },
+      {
+        "class": "com.minion.core.tools.dev.CodeIndexToolTest",
+        "test": "symlinkEscapeWhenSupported",
+        "reason": "got: <java.nio.file.FileSystemException: C:\\Users\\59809\\AppData\\Local\\Temp\\junit7325931154489074651\\linked: 客户端没有所需的特权。\n>, expected: null"
+      }
+    ]
+  },
+  "build": {
+    "files": 567,
+    "sourceSha256": "7e36743684e70f49ecd4aef4da0094cb99a95770343c7a350d9fa5b722dd9ce2",
+    "sourceUnchangedSinceFinalWiring": true,
+    "jarBytes": 25341489,
+    "jarSha256": "da99eec72680267f2afb446e531ed6a8d34de53e84f22686f9ec157a933eb6b9",
+    "appClasses": 586,
+    "classMajorVersions": [
+      52
+    ]
+  },
+  "python376": {
+    "version": "3.7.6",
+    "replayTests": 7,
+    "protocolMockTests": 16,
+    "externalModelCalls": 0,
+    "logs": [
+      "target/v49-replay-python376.log",
+      "target/v49-probe-python376.log"
+    ]
+  },
+  "nativeJavaFx": {
+    "finalJarOnly": true,
+    "tabs": 9,
+    "readMemoryDetails": true,
+    "refreshAgentReview": true,
+    "readFullHooksConfig": true,
+    "hooksStayedDisabled": true,
+    "modelCalls": 0,
+    "log": "target/v49-final-jar-ui.log"
+  },
+  "deliveredUpdateZip": false,
+  "pushedGitHub": false,
+  "limits": [
+    "No actual Win7 SP1 certification",
+    "No actual intranet DeepSeek/Qwen long-task evaluation",
+    "CodeIndex is lexical approximation, not LSP",
+    "Office assertions are not Word pagination or Excel recalculation",
+    "Runtime recovery observes evidence only; no MaxCompute provider reconnect",
+    "Original root/child inference loops not wholly replaced; shared tool lifecycle and response rules integrated"
+  ]
+}

@@ -1,0 +1,4 @@
+{"fixtureType":"synthetic_saved_TaskEvaluation_format_not_business_gold","runs":[
+{"taskId":"case-a","workflowRevision":2,"attempt":1,"status":"completed","taskInputTokens":60,"taskOutputTokens":40,"activeMillis":1500,"taskTokenScope":"current_task_parent_session_delta; child usage listed separately","duplicateToolArguments":1,"manualBusinessReview":{"accepted":true,"expectedItems":10,"omittedItems":0,"duplicateItems":0,"incorrectItems":0,"latestInstructionFollowed":true,"prematureStop":false,"crossProjectLeak":false}},
+{"taskId":"case-b","workflowRevision":1,"attempt":1,"status":"unknown","sessionInputTokens":600}
+]}

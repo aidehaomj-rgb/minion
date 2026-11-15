@@ -1,0 +1,90 @@
+{
+  "version": "V50 development",
+  "date": "2026-11-08",
+  "fullRegression": {
+    "tests": 2163,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 36,
+    "log": "target/v50-full-regression.log"
+  },
+  "finalIntegrationAndPackage": {
+    "tests": 147,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 18,
+    "log": "target/v50-final-integration-package.log"
+  },
+  "pythonValidationFollowup": {
+    "tests": 27,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "log": "target/v50-validation-python.log"
+  },
+  "latestDistinctReports": {
+    "tests": 2166,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4,
+    "suites": 258,
+    "missing": [],
+    "skips": [
+      {
+        "class": "com.minion.core.agent.ToolResourceScopeTest",
+        "test": "symbolicAliasesOfNewFilesShareCanonicalIdentityWhenOsPermitsLinks",
+        "reason": "got: <java.nio.file.FileSystemException: C:\\Users\\59809\\AppData\\Local\\Temp\\junit3803898021130689772\\junit8821613885453653690\\alias: 客户端没有所需的特权。\n>, expected: null"
+      },
+      {
+        "class": "com.minion.core.context.SourceFingerprintBatchTest",
+        "test": "replacingFileWithSameTimestampAndLengthChecksFileIdentity",
+        "reason": "filesystem must expose distinct file identities"
+      },
+      {
+        "class": "com.minion.core.tools.data.OcrIntegrationTest",
+        "test": "localEngineReturnsCoordinatesOnSyntheticImage",
+        "reason": "requires installed OCR"
+      },
+      {
+        "class": "com.minion.core.tools.dev.CodeIndexToolTest",
+        "test": "symlinkEscapeWhenSupported",
+        "reason": "got: <java.nio.file.FileSystemException: C:\\Users\\59809\\AppData\\Local\\Temp\\junit2883823124986927831\\linked: 客户端没有所需的特权。\n>, expected: null"
+      }
+    ]
+  },
+  "build": {
+    "sourceFiles": 574,
+    "sourceSha256": "c8a416004172dabcf3bc6584c669496549e4ab1fad9c42e23ea406025599d571",
+    "sourceAlgorithm": "SHA256 of sorted src path + NUL + bytes + NUL",
+    "jarBytes": 25365391,
+    "jarSha256": "d5de876bf2df6daf768ded73364f44dc0cc8ed9587f1b8cf83ae928ea96beb8f",
+    "appClasses": 594,
+    "appClassMajors": [
+      52
+    ]
+  },
+  "nativeJavaFx": {
+    "assertions": 169,
+    "log": "target/v50-native-jar-final.log",
+    "classpath": "target/v50-qa-classes;target/minion-0.1.0.jar (no target/classes)",
+    "fixturesOnly": true,
+    "realModelRequests": false,
+    "screenshots": [
+      "target/v50-native-jar-final/project-conversations.png",
+      "target/v50-native-jar-final/project-sidebar-narrow.png",
+      "target/v50-native-jar-final/legacy-sidebar.png"
+    ]
+  },
+  "scope": {
+    "singleMainAgent": true,
+    "storageMigration": false,
+    "newUpdateZip": false,
+    "githubPush": false,
+    "intranetWin7Certified": false
+  },
+  "notes": [
+    "Full regression preceded the final project-plus-button minimum-width refinement; followup integration and native JAR verification cover the final UI.",
+    "Counts overlap and must not be summed.",
+    "Python data integration used the existing 3.7.9 runtime; this is not a claim of new Python 3.7.6 or real Win7 certification."
+  ]
+}
