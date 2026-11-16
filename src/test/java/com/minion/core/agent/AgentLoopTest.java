@@ -1460,6 +1460,20 @@ public class AgentLoopTest {
         assertTrue(ui.errors.isEmpty());
     }
 
+    /** Retry-After 大于策略延迟时取大值：按服务端要求等待后恢复 */
+    @Test
+    public void rateLimit_retryAfterHonored_overPolicyDelay() {
+        llm.addTurnThrow(new LlmException(LlmException.Type.RATE_LIMIT, "请求过于频繁(429)", true, 429, null, 300));
+        llm.addTurn("最终回复");
+        AgentLoop loop = newLoop();
+        loop.retryPolicy = new RetryPolicy(10, 0, 10, 60000); // 策略仅 10ms，Retry-After 300ms 应取大值
+        long start = System.currentTimeMillis();
+        loop.runUserTurn("任务");
+        assertTrue("应按 Retry-After 等待", System.currentTimeMillis() - start >= 280);
+        assertEquals(2, llm.requests.size());
+        assertEquals("最终回复", loop.messages().get(1).content);
+    }
+
     /** 429 重试成功但流中断（onError 回调路径）：错误由检查点提示，指示器复位 */
     @Test
     public void rateLimit_thenStreamError_noFalseRecovery() {

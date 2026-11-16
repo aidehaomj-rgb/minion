@@ -10,25 +10,36 @@ public class LlmException extends Exception {
     public final int httpCode;
     /** 原始响应体（非 HTTP 错误或未捕获为 null；429/500/502 指示器展示用） */
     public final String body;
+    /** 服务端 Retry-After 头折算的毫秒数（0=无/非法/超上限；重试延迟取其与策略延迟的较大值） */
+    public final long retryAfterMs;
 
     public LlmException(Type type, String message, boolean retryable) {
         this(type, message, retryable, 0, null);
     }
 
     public LlmException(Type type, String message, boolean retryable, int httpCode, String body) {
+        this(type, message, retryable, httpCode, body, 0);
+    }
+
+    public LlmException(Type type, String message, boolean retryable, int httpCode, String body, long retryAfterMs) {
         super(message);
         this.type = type;
         this.retryable = retryable;
         this.httpCode = httpCode;
         this.body = body;
+        this.retryAfterMs = retryAfterMs;
     }
 
     public static LlmException of(int httpCode, String body) {
+        return of(httpCode, body, 0);
+    }
+
+    public static LlmException of(int httpCode, String body, long retryAfterMs) {
         if (httpCode == 401 || httpCode == 403) {
-            return new LlmException(Type.AUTH, "认证失败(" + httpCode + ")，请检查 config.properties 的 model.key", false, httpCode, body);
+            return new LlmException(Type.AUTH, "认证失败(" + httpCode + ")，请检查 config.properties 的 model.key", false, httpCode, body, retryAfterMs);
         }
         if (httpCode == 429) {
-            return new LlmException(Type.RATE_LIMIT, "请求过于频繁(" + httpCode + ")，限流中，请稍后重试", true, httpCode, body);
+            return new LlmException(Type.RATE_LIMIT, "请求过于频繁(" + httpCode + ")，限流中，请稍后重试", true, httpCode, body, retryAfterMs);
         }
         if (httpCode == 400 || httpCode == 413) {
             // 带 body：400 根因（如上下文超限、tool_call 配对）只在响应体里，
@@ -36,9 +47,9 @@ public class LlmException extends Exception {
             String detail = truncate(body);
             String msg = "请求被拒绝(" + httpCode + ")";
             if (!detail.isEmpty()) msg += "：\n" + detail;
-            return new LlmException(Type.BAD_REQUEST, msg, false, httpCode, body);
+            return new LlmException(Type.BAD_REQUEST, msg, false, httpCode, body, retryAfterMs);
         }
-        return new LlmException(Type.OTHER, "API 错误(" + httpCode + "): " + truncate(body), httpCode >= 500, httpCode, body);
+        return new LlmException(Type.OTHER, "API 错误(" + httpCode + "): " + truncate(body), httpCode >= 500, httpCode, body, retryAfterMs);
     }
 
     private static String truncate(String s) {

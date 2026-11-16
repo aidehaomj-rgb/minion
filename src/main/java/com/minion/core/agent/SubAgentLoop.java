@@ -266,7 +266,7 @@ public class SubAgentLoop {
                         while (true) {
                             attempts++;
                             ui.onRetryProgress(RetryProgress.from(attempts, last)); // 尝试前立即更新指示器
-                            long delay = retryPolicy.delayMs(attempts);
+                            long delay = Math.max(retryPolicy.nextDelayMs(attempts), last.retryAfterMs);
                             if (!sleepWithInterruptCheck(delay)) break; // 中断
                             elapsed = System.currentTimeMillis() - retryStart;
                             if (retryPolicy.isExhausted(elapsed)) {

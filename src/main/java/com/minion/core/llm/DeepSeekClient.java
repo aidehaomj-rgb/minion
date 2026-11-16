@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.minion.core.diagnostics.DiagnosticLog;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -387,7 +388,7 @@ public class DeepSeekClient implements LlmClient {
         metric.networkStart();
         try (Response response = call.execute()) {
             metric.headers();
-            if (!response.isSuccessful()) throw LlmException.of(response.code(), responseBody(response));
+            if (!response.isSuccessful()) throw httpFailure(response);
             if (response.body() == null) throw new LlmException(LlmException.Type.OTHER, "空响应", false);
             BufferedSource source = response.body().source();
             String line;
@@ -527,7 +528,7 @@ public class DeepSeekClient implements LlmClient {
         metric.networkStart();
         try (Response response = call.execute()) {
             metric.headers();
-            if (!response.isSuccessful()) throw LlmException.of(response.code(), responseBody(response));
+            if (!response.isSuccessful()) throw httpFailure(response);
             if (response.body() == null) throw new LlmException(LlmException.Type.OTHER, "空响应", false);
             BufferedSource source = response.body().source();
             String line;
@@ -776,5 +777,33 @@ public class DeepSeekClient implements LlmClient {
     private String responseBody(Response r) {
         try { return r.body() != null ? r.body().string() : ""; }
         catch (IOException e) { return ""; }
+    }
+
+    /** 非 2xx 统一出口：响应体全文落诊断日志（400 偶发根因排查），解析 Retry-After 供重试延迟取大值。 */
+    private LlmException httpFailure(Response response) {
+        String body = responseBody(response);
+        String logBody = body.length() > 65536 ? body.substring(0, 65536) + "...(截断)" : body;
+        DiagnosticLog.warn("llm", "HTTP " + response.code() + " "
+                + response.request().url().newBuilder().query(null).build()
+                + " body=" + logBody);
+        return LlmException.of(response.code(), body, retryAfterMs(response));
+    }
+
+    /** Retry-After 头：秒数或 HTTP-date；非法/负值/超过 5 分钟一律忽略（防异常值把重试挂死）。 */
+    static long retryAfterMs(Response response) {
+        String v = response.header("Retry-After");
+        if (v == null || v.trim().isEmpty()) return 0;
+        v = v.trim();
+        long ms;
+        try {
+            ms = Long.parseLong(v) * 1000L;
+        } catch (NumberFormatException e) {
+            try {
+                java.util.Date d = new java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US).parse(v);
+                ms = d.getTime() - System.currentTimeMillis();
+            } catch (java.text.ParseException pe) { return 0; }
+        }
+        if (ms <= 0 || ms > 300000L) return 0;
+        return ms;
     }
 }

@@ -711,4 +711,50 @@ public class DeepSeekClientTest {
         }
     }
 
+    /** 400 响应体全文落诊断日志（根因排查），Retry-After 头折算毫秒随异常携带 */
+    @org.junit.Test public void http400_fullBodyLogged_andRetryAfterParsed() throws Exception {
+        java.nio.file.Path logDir = java.nio.file.Files.createTempDirectory("minion-llm-log");
+        com.minion.core.diagnostics.DiagnosticLog.initialize(logDir);
+        String body = "{\"error\":{\"message\":\"root-cause-400-detail\",\"code\":1210}}";
+        server.enqueue(new MockResponse().setResponseCode(400).setHeader("Retry-After", "7").setBody(body));
+        try {
+            newClient().streamChat(Collections.<Message>singletonList(Message.user("hi")), null, new StreamHandler() {
+                @Override public void onFinish(String finishReason, Usage usage, List<ToolCall> toolCalls) { }
+            });
+            fail("400 应抛 LlmException");
+        } catch (LlmException e) {
+            assertEquals(400, e.httpCode);
+            assertEquals(7000, e.retryAfterMs);
+            assertTrue(e.body.contains("root-cause-400-detail"));
+        }
+        String log = new String(java.nio.file.Files.readAllBytes(
+                logDir.resolve(".minion").resolve("logs").resolve("minion.log")), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(log.contains("HTTP 400"));
+        assertTrue("响应体全文应落日志", log.contains("root-cause-400-detail"));
+    }
+
+    /** Retry-After：秒数/HTTP-date 均解析；非法、负值、超 5 分钟上限一律忽略 */
+    @org.junit.Test public void retryAfterMs_parsesSecondsAndHttpDate() {
+        assertEquals(12000, DeepSeekClient.retryAfterMs(responseWithRetryAfter("12")));
+        assertEquals(0, DeepSeekClient.retryAfterMs(responseWithRetryAfter("abc")));
+        assertEquals(0, DeepSeekClient.retryAfterMs(responseWithRetryAfter("-3")));
+        assertEquals(0, DeepSeekClient.retryAfterMs(responseWithRetryAfter("0")));
+        assertEquals(0, DeepSeekClient.retryAfterMs(responseWithRetryAfter("9999")));
+        assertEquals(0, DeepSeekClient.retryAfterMs(responseWithRetryAfter(null)));
+        java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US);
+        String past = fmt.format(new java.util.Date(System.currentTimeMillis() - 60000));
+        assertEquals(0, DeepSeekClient.retryAfterMs(responseWithRetryAfter(past)));
+        String future = fmt.format(new java.util.Date(System.currentTimeMillis() + 60000));
+        long ms = DeepSeekClient.retryAfterMs(responseWithRetryAfter(future));
+        assertTrue("HTTP-date 折算约 60s: " + ms, ms >= 50000 && ms <= 61000);
+    }
+
+    private static okhttp3.Response responseWithRetryAfter(String v) {
+        okhttp3.Response.Builder b = new okhttp3.Response.Builder()
+                .request(new okhttp3.Request.Builder().url("http://localhost/").build())
+                .protocol(okhttp3.Protocol.HTTP_1_1).code(429).message("Too Many Requests");
+        if (v != null) b.header("Retry-After", v);
+        return b.build();
+    }
+
 }
