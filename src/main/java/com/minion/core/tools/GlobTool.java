@@ -89,6 +89,21 @@ public class GlobTool implements Tool {
         }
         for (final Path root : roots) {
             final Path rootAbs = root.toAbsolutePath().normalize();
+            // ripgrep 旁路：rg 负责快速枚举+gitignore 过滤，Java matcher 后置过滤保证 glob 语义一致；
+            // 失败丢弃本根已收集结果，回退 Java 遍历
+            String rg = com.minion.core.tools.search.RipgrepSidecar.resolve();
+            boolean rgDone = false;
+            if (rg != null && Files.isDirectory(root)) {
+                int before = found.size();
+                rgDone = tryRipgrep(rg, root, rootAbs, workRootAbs, matchers, found);
+                if (!rgDone) {
+                    while (found.size() > before) found.remove(found.size() - 1);
+                }
+            }
+            if (rgDone) {
+                if (found.size() >= MAX_RESULTS) break;
+                continue;
+            }
             final com.minion.core.tools.search.GitignoreFilter ignore =
                     new com.minion.core.tools.search.GitignoreFilter(root);
             try {
@@ -131,6 +146,58 @@ public class GlobTool implements Tool {
         if (found.size() >= MAX_RESULTS) sb.append("... 结果超过 ").append(MAX_RESULTS).append(" 条，已截断\n");
         return ToolResult.success(sb.toString().trim().isEmpty()
                 ? "未找到匹配文件: " + pattern : sb.toString());
+    }
+
+    /** ripgrep 枚举旁路。退出码 0/1 视为成功；失败返回 false（调用方丢弃部分结果回退 Java 遍历）。
+     *  达到 MAX_RESULTS 提前 destroy 进程，同样视为成功（截断语义与 Java 遍历一致）。 */
+    private boolean tryRipgrep(String rg, Path root, Path rootAbs, Path workRootAbs,
+            List<PathMatcher> matchers, List<String> found) {
+        Process proc = null;
+        try {
+            proc = new ProcessBuilder(rg, "--files",
+                    "--no-config", "--no-require-git",
+                    "--no-ignore-parent", "--no-ignore-dot", "--no-ignore-exclude",
+                    "--hidden", "--no-messages", "--sort", "path", "-g", "!.git", ".")
+                    .directory(root.toFile()).start();
+            final Process fp = proc;
+            Thread drain = new Thread(new Runnable() {
+                @Override public void run() {
+                    byte[] buf = new byte[4096];
+                    try { while (fp.getErrorStream().read(buf) >= 0) { /* 排空防管道阻塞 */ } }
+                    catch (IOException ignored) { }
+                }
+            });
+            drain.setDaemon(true);
+            drain.start();
+            java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(proc.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isEmpty()) continue;
+                Path abs = root.resolve(line).toAbsolutePath().normalize();
+                // .git 恒不进入（与 Java 遍历一致，不依赖 rg 版本行为）
+                boolean inGitDir = false;
+                for (Path part : rootAbs.relativize(abs)) {
+                    if (part.toString().equals(".git")) { inGitDir = true; break; }
+                }
+                if (inGitDir) continue;
+                if (matchesAny(matchers, abs, rootAbs, workRootAbs)) {
+                    found.add(abs.startsWith(workRootAbs)
+                            ? workRootAbs.relativize(abs).toString().replace('\\', '/')
+                            : abs.toString().replace('\\', '/'));
+                    if (found.size() >= MAX_RESULTS) return true;
+                }
+            }
+            int exit = proc.waitFor();
+            return exit == 0 || exit == 1;
+        } catch (IOException e) {
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } finally {
+            if (proc != null) proc.destroyForcibly();
+        }
     }
 
     /** 工作空间相对、搜索根相对、绝对路径三种写法都可匹配。 */

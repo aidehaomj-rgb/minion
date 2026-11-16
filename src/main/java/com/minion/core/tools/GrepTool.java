@@ -1,10 +1,14 @@
 package com.minion.core.tools;
 
 import com.google.gson.JsonObject;
+import com.minion.core.diagnostics.DiagnosticLog;
 import com.minion.core.tools.confirm.ConfirmGate;
+import com.minion.core.tools.search.RipgrepSidecar;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -12,6 +16,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -62,11 +67,10 @@ public class GrepTool implements Tool {
     public ToolResult execute(JsonObject args) throws IOException {
         String pattern = args.has("pattern") ? args.get("pattern").getAsString() : "";
         if (pattern.isEmpty()) return ToolResult.error("缺少 pattern 参数");
+        final boolean ignoreCase = args.has("ignoreCase") && args.get("ignoreCase").getAsBoolean();
         final Pattern p;
         try {
-            int flags = (args.has("ignoreCase") && args.get("ignoreCase").getAsBoolean())
-                    ? Pattern.CASE_INSENSITIVE : 0;
-            p = Pattern.compile(pattern, flags);
+            p = Pattern.compile(pattern, ignoreCase ? Pattern.CASE_INSENSITIVE : 0);
         } catch (PatternSyntaxException e) {
             return ToolResult.error("正则语法错误: " + e.getMessage());
         }
@@ -92,10 +96,10 @@ public class GrepTool implements Tool {
         }
         if (max < 0) return ToolResult.error("参数 maxResults 不能为负: " + max);
 
-        // 落盘：全量匹配流式写入；失败降级（dumpWriter == null 纯内存截断，不阻断执行）
+        // 落盘：全量匹配流式写入；失败降级（dumpWriter[0] == null 纯内存截断，不阻断执行）
         final Path dumpPath = OutputDump.write(tmpDir, "grep", "");
-        final BufferedWriter dumpWriter = dumpPath == null ? null
-                : Files.newBufferedWriter(dumpPath, StandardCharsets.UTF_8);
+        final BufferedWriter[] dumpWriter = { dumpPath == null ? null
+                : Files.newBufferedWriter(dumpPath, StandardCharsets.UTF_8) };
         // 跳过落盘目录：jar 目录可能嵌套/重叠工作空间（如 jar 放在项目目录运行），
         // dump 文件内容本身含匹配文本，遍历到会自噬（自身被匹配再写入自身）
         final Path dumpDirPath = tmpDir == null ? null : tmpDir.toAbsolutePath().normalize();
@@ -108,7 +112,14 @@ public class GrepTool implements Tool {
                 new com.minion.core.tools.search.GitignoreFilter(root);
         final Path rootNormalized = root.toAbsolutePath().normalize();
 
-        Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
+        // ripgrep 旁路：命中则显示/落盘状态已填好；失败自动重置并回退 Java 遍历
+        boolean rgDone = false;
+        String rg = RipgrepSidecar.resolve();
+        if (rg != null && rgSafePattern(pattern) && Files.isDirectory(root)) {
+            rgDone = tryRipgrep(rg, pattern, ignoreCase, root, rootInWork, rootNormalized,
+                    dumpPath, dumpWriter, dumpDirPath, disp, dispCount, totalCount, dispFull, max);
+        }
+        if (!rgDone) Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
                 boolean isDumpDir = dumpDirPath != null
@@ -151,8 +162,8 @@ public class GrepTool implements Tool {
                             totalCount[0]++;
                             String entry = rel.toString().replace('\\', '/') + ":" + (i + 1)
                                     + ": " + truncateLine(line.trim()) + "\n";
-                            if (dumpWriter != null) {
-                                try { dumpWriter.write(entry); } catch (IOException ignored) { }
+                            if (dumpWriter[0] != null) {
+                                try { dumpWriter[0].write(entry); } catch (IOException ignored) { }
                             }
                             if (!dispFull[0]) {
                                 // 先检查后 append：max=0 时显示 0 条（旧实现先 append 后检查会多显示 1 条）
@@ -169,8 +180,8 @@ public class GrepTool implements Tool {
                 return FileVisitResult.CONTINUE;
             }
         });
-        if (dumpWriter != null) {
-            try { dumpWriter.close(); } catch (IOException ignored) { }
+        if (dumpWriter[0] != null) {
+            try { dumpWriter[0].close(); } catch (IOException ignored) { }
         }
 
         boolean truncated = totalCount[0] > max || disp.length() >= DISPLAY_CHARS;
@@ -189,6 +200,130 @@ public class GrepTool implements Tool {
                         + dumpPath.toAbsolutePath()
                         + "，可用 Read 查看\n";
         return ToolResult.success(disp.toString() + note);
+    }
+
+    /** .git 目录恒不进入（与 Java 遍历一致；--no-require-git 下 rg 不再特判 .git，双保险） */
+    private static boolean inGitDir(Path root, Path file) {
+        for (Path part : root.relativize(file)) {
+            if (part.toString().equals(".git")) return true;
+        }
+        return false;
+    }
+
+    /** rg 输出行解析：路径:行号:内容（路径取到第一个 ":数字:" 为止） */
+    private static final Pattern RG_LINE = Pattern.compile("^(.*?):(\\d+):(.*)$");
+
+    /** 旁路适用性：非 ASCII 模式回退（rg 按 UTF-8 搜索，GBK 文件中文会漏配，Java 遍历有 GBK 回退）；
+     *  \b\w\d\s 类转义回退（Java 默认 ASCII 语义，rg 是 Unicode 语义，中文邻接处行为不同）。
+     *  rg 不支持的语法（环视/反向引用等）会退出码 2，运行时自动回退。 */
+    public static boolean rgSafePattern(String pattern) {
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+            if (c > 127) return false;
+            if (c == '\\') {
+                if (i + 1 >= pattern.length()) return true;
+                char n = pattern.charAt(i + 1);
+                if ("bBwWdDsS".indexOf(n) >= 0) return false;
+                i++;
+            }
+        }
+        return true;
+    }
+
+    /** ripgrep 旁路。成功（退出码 0/1）返回 true；任何失败重置显示/计数/落盘状态后返回 false。 */
+    private boolean tryRipgrep(String rg, String pattern, boolean ignoreCase, Path root,
+            boolean rootInWork, Path rootNormalized, Path dumpPath, BufferedWriter[] dumpWriter,
+            Path dumpDirPath, StringBuilder disp, int[] dispCount, int[] totalCount,
+            boolean[] dispFull, int max) {
+        Process proc = null;
+        try {
+            java.util.List<String> cmd = new java.util.ArrayList<String>();
+            cmd.add(rg);
+            // 与 Java 遍历对齐：不读全局/父目录/.ignore/exclude 规则；含隐藏文件
+            cmd.add("--no-config"); cmd.add("--no-require-git");
+            cmd.add("--no-ignore-parent"); cmd.add("--no-ignore-dot"); cmd.add("--no-ignore-exclude");
+            cmd.add("--hidden"); cmd.add("--no-messages");
+            cmd.add("--no-heading"); cmd.add("--with-filename"); cmd.add("--line-number");
+            cmd.add("--sort"); cmd.add("path"); cmd.add("--color"); cmd.add("never");
+            if (ignoreCase) cmd.add("-i");
+            // .git 恒不进入：--no-require-git 下 rg 不再特判 .git，需显式排除
+            cmd.add("-g"); cmd.add("!.git");
+            // 落盘目录防自噬：与 Java 遍历同语义（root==dumpDir 时只排除落盘文件本身）
+            if (dumpPath != null && dumpDirPath != null) {
+                if (dumpDirPath.equals(rootNormalized)) {
+                    cmd.add("-g"); cmd.add("!" + dumpPath.getFileName().toString());
+                } else if (dumpDirPath.startsWith(rootNormalized)) {
+                    cmd.add("-g"); cmd.add("!" + rootNormalized.relativize(dumpDirPath).toString().replace('\\', '/') + "/");
+                }
+            }
+            cmd.add("-e"); cmd.add(pattern);
+            cmd.add(".");
+            // cwd=root：输出相对路径，避免 Windows 盘符冒号与 文件:行号 格式歧义
+            proc = new ProcessBuilder(cmd).directory(root.toFile()).start();
+            final Process fp = proc;
+            final StringBuilder err = new StringBuilder();
+            Thread drain = new Thread(new Runnable() {
+                @Override public void run() {
+                    byte[] buf = new byte[4096];
+                    try {
+                        int n;
+                        while ((n = fp.getErrorStream().read(buf)) >= 0) {
+                            if (err.length() < 2048) err.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+                        }
+                    } catch (IOException ignored) { }
+                }
+            });
+            drain.setDaemon(true);
+            drain.start();
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                Matcher m = RG_LINE.matcher(line);
+                if (!m.matches()) continue;
+                Path file = root.resolve(m.group(1)).normalize();
+                if (inGitDir(rootNormalized, file)) continue;
+                Path rel = rootInWork ? workspace.cwd().relativize(file) : file;
+                totalCount[0]++;
+                String entry = rel.toString().replace('\\', '/') + ":" + m.group(2)
+                        + ": " + truncateLine(m.group(3).trim()) + "\n";
+                if (dumpWriter[0] != null) {
+                    try { dumpWriter[0].write(entry); } catch (IOException ignored) { }
+                }
+                if (!dispFull[0]) {
+                    if (dispCount[0] >= max || disp.length() >= DISPLAY_CHARS) {
+                        dispFull[0] = true;
+                    } else {
+                        disp.append(entry);
+                        dispCount[0]++;
+                    }
+                }
+            }
+            int exit = proc.waitFor();
+            drain.join(2000);
+            if (exit == 0 || exit == 1) return true;
+            DiagnosticLog.warn("grep", "rg 退出码 " + exit + "，回退 Java 遍历: " + err);
+        } catch (IOException e) {
+            DiagnosticLog.warn("grep", "rg 执行失败，回退 Java 遍历: " + e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            if (proc != null) proc.destroyForcibly();
+        }
+        // 失败重置：显示层/计数清零，落盘文件重建，保证 Java 回退从零开始
+        disp.setLength(0); dispCount[0] = 0; totalCount[0] = 0; dispFull[0] = false;
+        if (dumpWriter[0] != null) {
+            try { dumpWriter[0].close(); } catch (IOException ignored) { }
+        }
+        if (dumpPath != null) {
+            try {
+                Files.deleteIfExists(dumpPath);
+                dumpWriter[0] = Files.newBufferedWriter(dumpPath, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                dumpWriter[0] = null;
+            }
+        }
+        return false;
     }
 
     /** 单行截断：>1000 字符截断并加省略号（落盘与显示同格式，文件大小可控） */
