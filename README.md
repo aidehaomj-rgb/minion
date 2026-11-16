@@ -1,5 +1,7 @@
 # minion
 
+2026-11-16 第一批主流对齐优化（开发完成，未打包）：[设计文档](docs/superpowers/specs/2026-11-16-第一批主流对齐优化-design.md)。系统提示词领域规则迁为内置技能按需加载；瞬时错误重试改指数退避+抖动并尊重 Retry-After，非 2xx 响应体全文落诊断日志；Edit 匹配失败附最近匹配行号提示。全量回归通过。
+
 V48 本地开发完成：[成果预览、文件交付与引导回执](docs/V48-成果预览与文件交付-开发说明.md)、[验收结果](docs/V48-开发验收结果.md)。MD/DOCX离线内容预览、多成果切换、可点击文件链接及定位/复制/另存为；立即引导提供未读/已读及发送阶段，已读仅表示特定主请求收到有效响应。完整回归2070项，0失败、3跳过；尚未制作V48更新包或进行真实Win7验收，原V47交付ZIP未变。
 
 已打包：[V47任务运行与上下文优化小更新](docs/releases/V47-任务运行与上下文优化小更新.md)，支持V40–V46直接更新；保留配置、会话、项目及Java/Python环境。包约6.8MiB，包含更新程序与安装说明，七种基线、回退和最终ZIP解压更新已验证。
@@ -158,7 +160,7 @@ jar 同目录 `session/<workSpaceName>/`，每会话一个 JSON 文件（每轮�
 - `Knowledge`：项目知识库保存在 `<工作区>/.minion/knowledge/`；可在基础设置中指定共享目录，或让 Minion 用 `Knowledge.connect` 连接用户指定的绝对目录（需确认）。所有项目的 search/list 都会直接读取共享目录及子目录中的 `.md` 文件，修改后下次查询即生效，无需逐项目导入。共享条目以 `shared/相对路径` 显示，可用此名称 read；add/import/sync/delete 仍只修改当前项目知识库。`disconnect` 可取消共享连接，不删除文件。目录不存在时会提示，不会自动新建或清空它。不依赖云端向量服务。
 - 设置 → 基础设置 → `Python/Anaconda` 可选择内网解释器，例如 `C:\ProgramData\Anaconda3\python.exe`
 
-内置技能包含：`data-analysis`、`sql-database`、`knowledge-base`、`browser-automation`、`web-development`、`windows-packaging`、`app-development`。外部技能同名时覆盖内置技能。
+内置技能包含：`visual-design`、`image-reading`、`document-materials`、`ofd-gd-documents`、`data-analysis`、`skill-creator`、`sql-database`、`knowledge-base`、`browser-automation`、`web-development`、`windows-packaging`、`app-development`。外部技能同名时覆盖内置技能。绘图/读图/PDF-Excel-DOCX 材料/OFD-书生GD 等领域工作流规则放在对应技能正文中，模型按技能描述匹配后经 Skill 工具按需加载，不再每轮常驻系统提示词（读图保留一行兜底规则）。
 
 ## 浏览器工具(登录、点击、查询、调试网页)
 
