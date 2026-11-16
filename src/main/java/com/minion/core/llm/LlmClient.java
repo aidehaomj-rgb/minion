@@ -37,6 +37,10 @@ public interface LlmClient {
     /** 中断进行中的请求（Ctrl+C / 用户打断） */
     default void cancel() { }
 
+    /** 运行期图片抑制（上游拒绝图片输入时的自愈）：true 时后续请求把历史图片全部降级为纯文本。
+     *  默认空实现——不支持视觉协议的客户端可忽略。 */
+    default void setSuppressImages(boolean suppress) { }
+
     /** 释放底层资源（HTTP 连接池/线程）；默认无操作。关闭后不可再发起请求 */
     default void close() { }
 }

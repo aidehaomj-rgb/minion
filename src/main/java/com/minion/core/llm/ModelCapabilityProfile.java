@@ -29,6 +29,29 @@ public final class ModelCapabilityProfile {
         return new ModelCapabilityProfile(fingerprint, "", 0, 0, 0, null);
     }
 
+    /** 运行期证据合并：在现有 profile 基础上覆盖一项能力状态（其余状态与有效期保留）。
+     *  上游明确拒绝图片输入（如 400/1210）时用它把 VISION 标记为 UNSUPPORTED——
+     *  是真实生产证据，有效期等同显式探测。基础 profile 为 unknown（无探测指纹）时
+     *  生成确定性 SHA-256 指纹，保证存储层 load 校验（64 位 hex）能读回。 */
+    public ModelCapabilityProfile withCapability(Capability capability, State state) {
+        java.util.EnumMap<Capability, State> merged = new java.util.EnumMap<Capability, State>(evidence);
+        merged.put(capability, state);
+        long now = System.currentTimeMillis();
+        long expires = isCurrent(now) ? expiresAt : now + DEFAULT_TTL_MS;
+        String probe = probeFingerprint;
+        if (probe == null || !probe.matches("[0-9a-f]{64}")) {
+            try {
+                java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+                byte[] d = md.digest((fingerprint + "|runtime|" + capability + "|" + now).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                StringBuilder sb = new StringBuilder();
+                for (byte b : d) sb.append(String.format("%02x", b));
+                probe = sb.toString();
+            } catch (java.security.NoSuchAlgorithmException impossible) { probe = null; }
+        }
+        return new ModelCapabilityProfile(fingerprint, probe,
+                Math.max(observedAt, now), expires, 0, merged);
+    }
+
     public boolean isCurrent(long now) {
         return observedAt > 0 && observedAt <= now && now < expiresAt && invalidatedAt == 0;
     }

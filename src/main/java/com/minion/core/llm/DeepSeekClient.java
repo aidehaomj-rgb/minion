@@ -119,7 +119,19 @@ public class DeepSeekClient implements LlmClient {
      *  实证（内网 1210 报错根因）：pdf_view 逐页视觉检查一次任务累积 38 张页面图，
      *  全量随每次请求发送，触发上游 400(1210 图片输入格式/解析错误) 并持续膨胀上下文。 */
     static final int MAX_REQUEST_IMAGES = 4;
+    /** 运行期图片抑制：上游明确拒绝图片输入（如 400/1210）后置位，后续请求全部降级纯文本 */
+    private volatile boolean suppressImages;
+    @Override public void setSuppressImages(boolean suppress) { this.suppressImages = suppress; }
     static List<Message> clampImages(List<Message> messages) {
+        return clampImages(messages, false);
+    }
+    static List<Message> clampImages(List<Message> messages, boolean suppressAll) {
+        if (suppressAll) {   // 自愈模式：全部历史图片降级（正文描述保留）
+            List<Message> out = new ArrayList<Message>(messages.size());
+            for (Message m : messages)
+                out.add(m.role == Message.Role.USER && m.images != null && !m.images.isEmpty() ? textOnly(m) : m);
+            return out;
+        }
         int budget = MAX_REQUEST_IMAGES;
         List<Message> out = new ArrayList<Message>(messages.size());
         for (int i = messages.size() - 1; i >= 0; i--) {
@@ -184,7 +196,7 @@ public class DeepSeekClient implements LlmClient {
             body.add("stream_options", so);
         }
         JsonArray msgs = new JsonArray();
-        for (Message m : clampImages(messages)) msgs.add(m.toApiJson());
+        for (Message m : clampImages(messages, suppressImages)) msgs.add(m.toApiJson());
         body.add("messages", msgs);
         if (tools != null && !tools.isEmpty()) {
             JsonArray arr = new JsonArray();

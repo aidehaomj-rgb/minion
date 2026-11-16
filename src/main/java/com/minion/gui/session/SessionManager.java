@@ -760,6 +760,22 @@ public class SessionManager {
                 return new com.minion.core.llm.ModelCapabilityStore(root).load(fingerprint);
             }catch(Exception unavailable){return null;}
         });
+        // 视觉拒绝自愈：上游 400 拒图（如 1210）时把 VISION=UNSUPPORTED 写入能力存储，
+        // 本会话立即剥图重试，重启/新会话由注入前检查直接跳过图片
+        loop.setVisionRejectionSink(mark -> {
+            if (mark == null || !mark) return;
+            try {
+                ModelConfig current=parent.runtimeModelConfig==null?modelForSession(parent):parent.runtimeModelConfig;
+                String fingerprint=com.minion.core.agent.ModelProbe.fingerprint(current.copy());
+                Path root=Paths.get(loop.workspace().workDir()).resolve(".minion/model-capabilities");
+                if(!com.minion.core.tools.PathsGuard.inside(loop.workspace().workDir(),root))return;
+                com.minion.core.llm.ModelCapabilityStore store=new com.minion.core.llm.ModelCapabilityStore(root);
+                com.minion.core.llm.ModelCapabilityProfile profile=store.load(fingerprint);
+                store.save(profile.withCapability(
+                        com.minion.core.llm.ModelCapabilityProfile.Capability.VISION,
+                        com.minion.core.llm.ModelCapabilityProfile.State.UNSUPPORTED));
+            }catch(Exception unavailable){/* 能力存储写失败不影响当前会话的运行期抑制 */}
+        });
         loop.setRootedRuntimeFactory((name,id,executionRoot) -> {
             ModelConfig mc=name==null||name.trim().isEmpty()
                     ? (parent.runtimeModelConfig==null?modelForSession(parent):parent.runtimeModelConfig.copy())

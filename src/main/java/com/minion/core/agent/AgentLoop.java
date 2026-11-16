@@ -153,6 +153,36 @@ public class AgentLoop {
         try { return toolProfileSupplier==null?null:toolProfileSupplier.get(); }
         catch(RuntimeException unavailable){return null;}
     }
+    /** 视觉能力拒绝回调：上游明确拒绝图片输入时回调，由 SessionManager 写入模型能力存储，
+     *  重启/换会话后注入前检查立即生效 */
+    private volatile java.util.function.Consumer<Boolean> visionRejectionSink;
+    public void setVisionRejectionSink(java.util.function.Consumer<Boolean> sink) { this.visionRejectionSink = sink; }
+    private void markVisionUnsupported() {
+        java.util.function.Consumer<Boolean> sink = visionRejectionSink;
+        if (sink != null) try { sink.accept(true); } catch (RuntimeException ignored) { }
+    }
+    /** 上游对图片输入的明确拒绝（内网实证：400 + code 1210「图片输入格式/解析错误」） */
+    static boolean isImageRejection(LlmException e) {
+        if (e == null || e.httpCode != 400) return false;
+        String text = ((e.getMessage() == null ? "" : e.getMessage()) + " " + (e.body == null ? "" : e.body))
+                .toLowerCase(java.util.Locale.ROOT);
+        return text.contains("1210") || text.contains("图片输入") || text.contains("图片格式")
+                || text.contains("图片解析") || text.contains("image input")
+                || text.contains("invalid image") || text.contains("image format");
+    }
+    private boolean historyHasImages() {
+        for (Message m : session.messages)
+            if (m.role == Message.Role.USER && m.images != null && !m.images.isEmpty()) return true;
+        return false;
+    }
+    /** 图片被拒自愈：抑制后续请求的全部图片输入并持久化 UNSUPPORTED 证据；提示模型改用文字路径 */
+    private boolean recoverFromImageRejection() {
+        markVisionUnsupported();
+        llm.setSuppressImages(true);
+        ui.onWarning("模型接口拒绝图片输入，已自动切换为纯文本模式（跳过页面/截图图像，文字结果保留），继续当前任务");
+        appendLive(Message.user("[系统提示] 上游模型接口拒绝了图片输入，本轮起不再附图；工具结果中的文字描述仍然完整，请依据文字继续，不要重试图像类调用。"));
+        return true;
+    }
     private long taskTokenLimit;
     private transient ContinuationBudget boundProgressBudget;
     private volatile RuntimeJobRegistry runtimeJobs;
@@ -1555,6 +1585,9 @@ public class AgentLoop {
                         slowContextRecoveryAttempted = true;
                         if (recoverFromSilentResponses("首个模型输出超时")) continue;
                     }
+                    if (isImageRejection(e) && historyHasImages() && recoverFromImageRejection()) {
+                        continue;
+                    }
                     if (isContextOverflow(e) && noOutputYet(content, thinking)
                             && recoverFromContextOverflow(contextRecoveryAttempts++)) {
                         continue;
@@ -1656,6 +1689,10 @@ public class AgentLoop {
                     continue;
                 }
                 if ("error".equals(finish[0])) {
+                    if (err[0] != null && isImageRejection(err[0]) && historyHasImages()
+                            && recoverFromImageRejection()) {
+                        continue;
+                    }
                     if (err[0] != null && isContextOverflow(err[0])
                             && noOutputYet(content, thinking)
                             && recoverFromContextOverflow(contextRecoveryAttempts++)) {
@@ -2132,7 +2169,18 @@ public class AgentLoop {
                                     : result.imageContext());
                         }
                     }
-                    if (!interrupted) for (Message imageContext : imageContexts) appendLive(imageContext);
+                    if (!interrupted) {
+                        // 注入前降级：探测证据表明模型不支持视觉时跳过图片（文字描述保留），避免必然失败的请求
+                        com.minion.core.llm.ModelCapabilityProfile vp = currentToolProfile();
+                        boolean noVision = vp != null && vp.state(com.minion.core.llm.ModelCapabilityProfile.Capability.VISION, System.currentTimeMillis())
+                                == com.minion.core.llm.ModelCapabilityProfile.State.UNSUPPORTED;
+                        boolean skippedImages = false;
+                        for (Message imageContext : imageContexts) {
+                            if (noVision && imageContext.images != null && !imageContext.images.isEmpty()) { skippedImages = true; continue; }
+                            appendLive(imageContext);
+                        }
+                        if (skippedImages) appendLive(Message.user("[系统提示] 当前模型不支持图片输入，工具返回的页面/图像未注入（文字结果保留）；请依据文字描述继续，不要重试图像类调用。"));
+                    }
                     if(!interrupted) {
                         com.minion.core.llm.ModelCapabilityProfile current=currentToolProfile();
                         boolean sameProfile=requestToolProfile!=null&&current!=null&&requestToolProfile.fingerprint.equals(current.fingerprint);

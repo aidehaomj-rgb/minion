@@ -693,4 +693,22 @@ public class DeepSeekClientTest {
         assertNotNull(clamped.get(5).images);                            // 最近一页保留
         assertEquals("最新问题", clamped.get(6).content);                 // 无图消息原样
     }
+
+    /** 自愈模式：suppressImages=true 时全部历史图片降级（1210 后的剥图重试路径） */
+    @org.junit.Test public void suppressImagesStripsAllHistoryImages() {
+        java.util.List<Message> msgs = new java.util.ArrayList<Message>();
+        for (int i = 1; i <= 3; i++) {
+            Message m = Message.user("页" + i);
+            ImagePart img = new ImagePart(); img.mime = "image/png"; img.base64 = "P" + i; img.name = "p" + i + ".png";
+            m.images = java.util.Collections.singletonList(img);
+            msgs.add(m);
+        }
+        java.util.List<Message> clamped = DeepSeekClient.clampImages(msgs, true);
+        for (int i = 0; i < 3; i++) {
+            assertNull(clamped.get(i).images);
+            assertEquals("页" + (i + 1), clamped.get(i).content);  // 正文描述保留
+            assertNotNull(msgs.get(i).images);                      // 原列表不受影响
+        }
+    }
+
 }
