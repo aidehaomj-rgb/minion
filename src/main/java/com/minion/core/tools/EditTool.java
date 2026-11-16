@@ -103,7 +103,8 @@ public class EditTool implements Tool {
 
         int count = countOccurrences(matchContent, matchOld);
         if (count == 0) {
-            return ToolResult.error("未找到待替换内容，请先 Read 确认当前内容。oldString=" + preview(oldString));
+            return ToolResult.error("未找到待替换内容，请先 Read 确认当前内容。oldString=" + preview(oldString)
+                    + nearestMatchHint(matchContent, matchOld));
         }
         boolean replaceAll = args.has("replaceAll") && args.get("replaceAll").getAsBoolean();
         if (count > 1 && !replaceAll) {
@@ -134,6 +135,36 @@ public class EditTool implements Tool {
             idx += sub.length();
         }
         return count;
+    }
+
+    /** 匹配失败时定位仅缩进/空白差异的候选，附行号提示省一次全文件 Read；不做模糊替换。 */
+    static String nearestMatchHint(String content, String old) {
+        String[] fileLines = content.split("\n", -1);
+        String[] oldLines = old.split("\n", -1);
+        if (fileLines.length > 20000 || oldLines.length > 100) return "";
+        String[] target = new String[oldLines.length];
+        for (int i = 0; i < oldLines.length; i++) target[i] = oldLines[i].trim();
+        int hits = 0;
+        int firstStart = -1;
+        for (int start = 0; start + oldLines.length <= fileLines.length; start++) {
+            boolean match = true;
+            for (int i = 0; i < oldLines.length; i++) {
+                if (!fileLines[start + i].trim().equals(target[i])) { match = false; break; }
+            }
+            if (match) {
+                hits++;
+                if (firstStart < 0) firstStart = start;
+            }
+        }
+        if (hits == 0) return "";
+        if (hits > 1) {
+            return "\n有 " + hits + " 处仅空白差异的相似内容（首处第 " + (firstStart + 1) + " 行），请提供更精确的 oldString。";
+        }
+        String sample = fileLines[firstStart];
+        if (sample.length() > 120) sample = sample.substring(0, 120) + "...";
+        int endLine = firstStart + oldLines.length;
+        return "\n第 " + (firstStart + 1) + "-" + endLine + " 行存在仅缩进/空白差异的相似内容：" + sample
+                + "\n请按文件实际缩进修正 oldString 后重试。";
     }
 
     private static String preview(String s) {

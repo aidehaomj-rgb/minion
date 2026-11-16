@@ -158,6 +158,49 @@ public class EditToolsTest {
         ToolResult r = edit.execute(args("{\"path\":\"b.txt\",\"oldString\":\"zzz\",\"newString\":\"x\"}"));
         assertFalse(r.ok);
         assertTrue(r.output.contains("未找到"));
+        assertFalse("无相似内容时不附加定位提示", r.output.contains("相似内容"));
+    }
+
+    @Test
+    public void edit_indentMismatch_uniqueCandidate_hintWithLineNumber() throws Exception {
+        Files.write(p("b.txt"), "public void a() {\n    int x = 1;\n}\n".getBytes(StandardCharsets.UTF_8));
+        ToolResult r = edit.execute(args("{\"path\":\"b.txt\",\"oldString\":\"public void a() {\\nint x = 1;\\n}\",\"newString\":\"y\"}"));
+        assertFalse(r.ok);
+        assertTrue(r.output, r.output.contains("未找到"));
+        assertTrue("应提示行号: " + r.output, r.output.contains("第 1-3 行"));
+        assertTrue(r.output.contains("相似内容"));
+        assertTrue(r.output.contains("int x = 1;"));
+    }
+
+    @Test
+    public void edit_trailingWhitespaceMismatch_hint() throws Exception {
+        Files.write(p("b.txt"), "alpha   \nbeta\n".getBytes(StandardCharsets.UTF_8));
+        ToolResult r = edit.execute(args("{\"path\":\"b.txt\",\"oldString\":\"alpha\\nbeta\",\"newString\":\"y\"}"));
+        assertFalse(r.ok);
+        assertTrue(r.output, r.output.contains("第 1-2 行"));
+    }
+
+    @Test
+    public void edit_multipleWhitespaceCandidates_reportsCount() throws Exception {
+        Files.write(p("b.txt"), "start\n    v=1\nend\nstart\n\tv=1\nend\n".getBytes(StandardCharsets.UTF_8));
+        ToolResult r = edit.execute(args("{\"path\":\"b.txt\",\"oldString\":\"start\\nv=1\\nend\",\"newString\":\"y\"}"));
+        assertFalse(r.ok);
+        assertTrue(r.output, r.output.contains("有 2 处"));
+        assertTrue(r.output.contains("首处第 1 行"));
+    }
+
+    @Test
+    public void nearestMatchHint_oversizedFile_skipsScan() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 20001; i++) sb.append("line\n");
+        assertEquals("", EditTool.nearestMatchHint(sb.toString(), "line"));
+        assertEquals("", EditTool.nearestMatchHint("a\nb\n", repeat("x\n", 101)));
+    }
+
+    private static String repeat(String s, int n) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < n; i++) sb.append(s);
+        return sb.toString();
     }
 
     @Test
