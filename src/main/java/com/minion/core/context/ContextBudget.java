@@ -33,7 +33,7 @@ public final class ContextBudget {
             else if(m.role==Message.Role.TOOL) tools+=text;
             else history+=text;
             reasoning+=TokenCounter.estimate(m.reasoningContent);
-            if(m.images!=null) images+=m.images.size()*com.minion.core.llm.ImagePart.IMAGE_TOKENS;
+            if(m.images!=null) for(com.minion.core.llm.ImagePart ip:m.images) images+=com.minion.core.llm.ImageTokens.estimate(ip);
             if(m.toolCalls!=null) for(com.minion.core.llm.ToolCall call:m.toolCalls) args+=TokenCounter.estimate(call.name)+TokenCounter.estimate(call.arguments);
         }
         if(schemas!=null) for(JsonObject s:schemas) schema+=TokenCounter.estimate(s.toString());

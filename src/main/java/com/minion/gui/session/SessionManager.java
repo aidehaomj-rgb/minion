@@ -984,10 +984,22 @@ public class SessionManager {
      * 若服务端实际窗口更小，
      * AgentLoop 只从明确的 HTTP 上下文超限学习，并把结果保存在 session.observedContextLimit。
      */
-    private static void configureSafeContext(ContextManager cm, ModelConfig mc, Session session) {
+    private void configureSafeContext(ContextManager cm, ModelConfig mc, Session session) {
         cm.setOutputReserveTokens(mc.maxOutputTokens);
         cm.setStableContextTokens(mc.stableContextTokens);
         cm.setInitialSafeMax(safeContextLimit(mc, session));
+        cm.enableCalibration(com.minion.core.context.TokenCalibrationStore.key(mc.provider, mc.url, mc.modelName),
+                tokenCalibrationStore());
+    }
+
+    private com.minion.core.context.TokenCalibrationStore tokenCalibrationStore;
+
+    private com.minion.core.context.TokenCalibrationStore tokenCalibrationStore() {
+        if (tokenCalibrationStore == null) {
+            tokenCalibrationStore = new com.minion.core.context.TokenCalibrationStore(
+                    jarDir.resolve(".session").resolve("token-calibration.json"));
+        }
+        return tokenCalibrationStore;
     }
 
     private static int safeContextLimit(ModelConfig mc, Session session) {

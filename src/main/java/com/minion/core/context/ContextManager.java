@@ -60,6 +60,9 @@ public class ContextManager {
      *  true = 已尝试但 LLM 调用失败原样返回。供 AgentLoop 区分"暂无可压缩"与"压缩失败"提示 */
     private volatile boolean lastCompressAttempted;
     private volatile double inputTokenScale = 1.0;
+    private volatile long calibrationSamples;
+    private volatile String calibrationKey;
+    private volatile TokenCalibrationStore calibrationStore;
     // Fixed request overhead must be additive: tools must not be learnt as tokens per history character.
     private volatile int requestSchemaTokens, requestFixedOffset;
     private volatile String calibration = "usage校准=unknown";
@@ -86,8 +89,42 @@ public class ContextManager {
 
     /** 换 LLM 客户端（模型切换后调用；压缩请求走新客户端） */
     public void setLlm(LlmClient llm) {
-        this.llm = llm; inputTokenScale = 1.0; requestSchemaTokens=0;requestFixedOffset=0;
+        this.llm = llm; inputTokenScale = 1.0; calibrationSamples = 0; requestSchemaTokens=0;requestFixedOffset=0;
         calibration="usage校准=unknown（模型已切换）";
+    }
+
+    /** 启用按模型指纹的持久化校准：换指纹时载入先验；同指纹且已有样本时保留会话内学习值。
+     *  不修改配置窗口或 150K 压缩目标。 */
+    public void enableCalibration(String key, TokenCalibrationStore store) {
+        if (key == null || store == null) { calibrationKey = null; calibrationStore = null; return; }
+        boolean sameKey = key.equals(calibrationKey) && store == calibrationStore;
+        calibrationKey = key;
+        calibrationStore = store;
+        if (sameKey && calibrationSamples > 0) return;
+        TokenCalibrationStore.Entry prior = store.entry(key);
+        if (prior != null) {
+            inputTokenScale = prior.scale;
+            calibrationSamples = prior.samples;
+            calibration = "usage校准=先验" + String.format(java.util.Locale.ROOT, "%.3f", prior.scale)
+                    + "（样本" + prior.samples + "，按模型指纹持久化）；向上立即、向下平滑；不修改150K/用户压缩线";
+        } else if (!sameKey) {
+            inputTokenScale = 1.0;
+            calibrationSamples = 0;
+        }
+    }
+
+    /** 向上立即（服务端总量是事实，压缩不能滞后）、向下平滑（防图片滚出窗口等单样本抖动）。 */
+    private double nextScale(double sample) {
+        double prev = inputTokenScale;
+        double next = calibrationSamples == 0 || sample >= prev ? sample : 0.7 * prev + 0.3 * sample;
+        calibrationSamples++;
+        return Math.max(1.0, next);
+    }
+
+    private void persistCalibration() {
+        TokenCalibrationStore store = calibrationStore;
+        String key = calibrationKey;
+        if (store != null && key != null) store.observe(key, inputTokenScale, calibrationSamples);
     }
 
     /** 上下文窗口上限（AgentLoop 压缩百分比计算用） */
@@ -178,7 +215,10 @@ public class ContextManager {
     /** API 的 prompt_tokens 包含工具定义等开销；用当前请求对应的本地统计校准后续预估。 */
     public void observeInputTokens(List<Message> messages, int actualTokens) {
         int local = systemTokens + taskAnchorTokens + TokenCounter.estimateMessages(messages);
-        if (local > 0 && actualTokens > 0) inputTokenScale = Math.max(1.0, (double) actualTokens / local);
+        if (local > 0 && actualTokens > 0) {
+            inputTokenScale = nextScale((double) actualTokens / local);
+            persistCalibration();
+        }
     }
 
     /** Snapshot the actual wire projection, not raw history. Schemas can change without changing text scale.
@@ -194,9 +234,11 @@ public class ContextManager {
         requestOverhead(request,projectedHistory,schemaTokens);
         long local=(long)TokenCounter.estimateMessages(request)+Math.max(0,schemaTokens);
         if(local<=0||actualTokens<=0)return;
-        inputTokenScale=Math.max(1.0,(double)actualTokens/local);
+        inputTokenScale=nextScale((double)actualTokens/local);
+        persistCalibration();
         calibration="同请求usage校准：本地总输入="+local+"，服务端总输入="+actualTokens
                 +"，总量比例="+String.format(java.util.Locale.ROOT,"%.3f",inputTokenScale)
+                +"（样本"+calibrationSamples+"，向上立即、向下平滑）"
                 +"；工具定义以加项计入，分项实际token=unknown；不修改150K/用户压缩线";
     }
     public String calibrationStatus(){return calibration;}

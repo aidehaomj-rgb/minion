@@ -20,6 +20,8 @@ public class ImagePart {
     public String mime;    // image/png 等
     public String base64;  // 纯 base64（不含 data: 前缀）
     public String name;    // 原始文件名（占位展示）
+    /** ImageTokens 估算缓存（transient：不进会话存档，重启后重算） */
+    public transient int tokenHint;
 
     /** 聊天区占位展示文本：附件正文折叠为文件名，图片也只展示文件名。 */
     public static String displayText(List<ImagePart> images, String text) {

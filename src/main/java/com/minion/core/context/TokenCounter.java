@@ -1,6 +1,6 @@
 package com.minion.core.context;
 
-import com.minion.core.llm.ImagePart;
+import com.minion.core.llm.ImageTokens;
 import com.minion.core.llm.Message;
 import com.minion.core.llm.ToolCall;
 
@@ -29,8 +29,8 @@ public class TokenCounter {
         for (Message m : messages) {
             total += MSG_OVERHEAD;
             total += estimate(m.content);
-            // 图片粗估：每张固定 500 token（base64 编码文本未计入 content）
-            if (m.images != null) total += ImagePart.IMAGE_TOKENS * m.images.size();
+            // 图片粗估：按真实尺寸（ImageTokens），解析失败回退每张 500
+            if (m.images != null) for (com.minion.core.llm.ImagePart ip : m.images) total += ImageTokens.estimate(ip);
             if (m.reasoningContent != null) total += estimate(m.reasoningContent);
             if (m.toolCalls != null) {
                 for (ToolCall tc : m.toolCalls) {
