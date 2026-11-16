@@ -89,10 +89,29 @@ public class GlobTool implements Tool {
         }
         for (final Path root : roots) {
             final Path rootAbs = root.toAbsolutePath().normalize();
+            final com.minion.core.tools.search.GitignoreFilter ignore =
+                    new com.minion.core.tools.search.GitignoreFilter(root);
             try {
                 Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
                     @Override
+                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                        if (com.minion.core.tools.search.GitignoreFilter.isAlwaysSkippedDirectory(dir)) {
+                            return FileVisitResult.SKIP_SUBTREE;
+                        }
+                        if (ignore.isIgnored(dir, true)) return FileVisitResult.SKIP_SUBTREE;
+                        if (!dir.toAbsolutePath().normalize().equals(rootAbs)) ignore.enterDirectory(dir);
+                        return FileVisitResult.CONTINUE;
+                    }
+
+                    @Override
+                    public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
+                        ignore.leaveDirectory();
+                        return FileVisitResult.CONTINUE;
+                    }
+
+                    @Override
                     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                        if (ignore.isIgnored(file, false)) return FileVisitResult.CONTINUE;
                         Path abs = file.toAbsolutePath().normalize();
                         if (matchesAny(matchers, abs, rootAbs, workRootAbs)) {
                             found.add(abs.startsWith(workRootAbs)

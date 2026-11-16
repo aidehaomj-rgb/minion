@@ -104,6 +104,9 @@ public class GrepTool implements Tool {
         final int[] dispCount = {0};   // 已入显示层条数
         final int[] totalCount = {0};  // 全量匹配条数（含落盘）
         final boolean[] dispFull = {false}; // 显示层已满：继续遍历落盘，不再 append
+        final com.minion.core.tools.search.GitignoreFilter ignore =
+                new com.minion.core.tools.search.GitignoreFilter(root);
+        final Path rootNormalized = root.toAbsolutePath().normalize();
 
         Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
             @Override
@@ -115,6 +118,17 @@ public class GrepTool implements Tool {
                 if (isDumpDir && !dir.toAbsolutePath().normalize().equals(root.toAbsolutePath().normalize())) {
                     return FileVisitResult.SKIP_SUBTREE;
                 }
+                if (com.minion.core.tools.search.GitignoreFilter.isAlwaysSkippedDirectory(dir)) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                if (ignore.isIgnored(dir, true)) return FileVisitResult.SKIP_SUBTREE;
+                if (!dir.toAbsolutePath().normalize().equals(rootNormalized)) ignore.enterDirectory(dir);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
+                ignore.leaveDirectory();
                 return FileVisitResult.CONTINUE;
             }
 
@@ -125,6 +139,8 @@ public class GrepTool implements Tool {
                         && file.toAbsolutePath().normalize().equals(dumpPath.toAbsolutePath().normalize())) {
                     return FileVisitResult.CONTINUE;
                 }
+                if (ignore.isIgnored(file, false)) return FileVisitResult.CONTINUE;
+                if (com.minion.core.tools.search.GitignoreFilter.isBinary(file)) return FileVisitResult.CONTINUE;
                 Path rel = rootInWork ? workspace.cwd().relativize(file) : file;
                 try {
                     java.util.List<String> lines = TextFiles.readAllLines(file).lines;
