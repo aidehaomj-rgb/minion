@@ -666,4 +666,31 @@ public class DeepSeekClientTest {
             c.close();
         }
     }
+
+    /** 视觉滚动窗口（内网 1210 根因修复）：历史图片只随请求携带最近 N 张，更早的降级纯文本 */
+    @org.junit.Test public void requestImageWindowKeepsOnlyRecentImages() {
+        com.google.gson.JsonObject blank = new com.google.gson.JsonObject();
+        java.util.List<Message> msgs = new java.util.ArrayList<Message>();
+        for (int i = 1; i <= 6; i++) {   // 6 条带图历史（模拟 pdf_view 逐页注入）
+            Message m = Message.user("第" + i + "页 [工具图像资料]");
+            ImagePart img = new ImagePart(); img.mime = "image/png"; img.base64 = "PAGE" + i; img.name = "p" + i + ".png";
+            m.images = java.util.Collections.singletonList(img);
+            msgs.add(m);
+        }
+        Message tail = Message.user("最新问题");
+        msgs.add(tail);
+        java.util.List<Message> clamped = DeepSeekClient.clampImages(msgs);
+        assertEquals(msgs.size(), clamped.size());                       // 消息条数不变
+        int withImages = 0;
+        for (int i = 0; i < clamped.size(); i++) {
+            boolean had = msgs.get(i).images != null && !msgs.get(i).images.isEmpty();
+            boolean kept = clamped.get(i).images != null && !clamped.get(i).images.isEmpty();
+            if (had && !kept) assertTrue(clamped.get(i).content.contains("页")); // 降级保留正文描述
+            if (kept) withImages++;
+        }
+        assertEquals(4, withImages);                                     // 只保留最近 4 张
+        assertNull(clamped.get(0).images);                               // 最早的第1页已降级
+        assertNotNull(clamped.get(5).images);                            // 最近一页保留
+        assertEquals("最新问题", clamped.get(6).content);                 // 无图消息原样
+    }
 }

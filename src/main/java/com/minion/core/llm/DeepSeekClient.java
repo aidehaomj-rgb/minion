@@ -113,6 +113,35 @@ public class DeepSeekClient implements LlmClient {
         return buildRequest(messages, tools, disableThinking, false);
     }
 
+    /** 视觉滚动窗口：请求只携带最近 {@link #MAX_REQUEST_IMAGES} 张历史图片（从末尾向前数），
+     *  更早的带图消息降级为纯文本（正文描述保留——模型仍知道看过哪些页/图）。
+     *  只影响请求体：会话存储、事件流、门禁判定不变。
+     *  实证（内网 1210 报错根因）：pdf_view 逐页视觉检查一次任务累积 38 张页面图，
+     *  全量随每次请求发送，触发上游 400(1210 图片输入格式/解析错误) 并持续膨胀上下文。 */
+    static final int MAX_REQUEST_IMAGES = 4;
+    static List<Message> clampImages(List<Message> messages) {
+        int budget = MAX_REQUEST_IMAGES;
+        List<Message> out = new ArrayList<Message>(messages.size());
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Message m = messages.get(i);
+            boolean hasImages = m.role == Message.Role.USER && m.images != null && !m.images.isEmpty();
+            if (!hasImages) { out.add(0, m); continue; }
+            if (budget <= 0) { out.add(0, textOnly(m)); continue; } // 预算耗尽：历史图片降级为纯文本
+            budget -= m.images.size();                              // 最新一条允许透支（整体保留多页对比）
+            out.add(0, m);
+        }
+        return out;
+    }
+    private static Message textOnly(Message m) {
+        Message copy = new Message();
+        copy.role = m.role; copy.content = m.content; copy.reasoningContent = m.reasoningContent;
+        copy.toolCalls = m.toolCalls; copy.toolCallId = m.toolCallId; copy.name = m.name;
+        copy.summary = m.summary; copy.pinned = m.pinned; copy.supplement = m.supplement;
+        copy.userAuthored = m.userAuthored; copy.toolImage = m.toolImage;
+        copy.replyToToolCallId = m.replyToToolCallId; copy.steeringId = m.steeringId; copy.ts = m.ts;
+        return copy;   // images 置空即降级；其余字段原样
+    }
+
     private Request buildRequest(List<Message> messages, List<JsonObject> tools,
                                  boolean disableThinking, boolean requireAction) {
         return buildRequest(messages, tools, disableThinking, requireAction, false);
@@ -155,7 +184,7 @@ public class DeepSeekClient implements LlmClient {
             body.add("stream_options", so);
         }
         JsonArray msgs = new JsonArray();
-        for (Message m : messages) msgs.add(m.toApiJson());
+        for (Message m : clampImages(messages)) msgs.add(m.toApiJson());
         body.add("messages", msgs);
         if (tools != null && !tools.isEmpty()) {
             JsonArray arr = new JsonArray();
