@@ -93,10 +93,7 @@ public class ConfirmGate {
         String toolName = tool.name().toLowerCase();
         if (config.whitelistTools().contains(toolName)) return true;
         if (tool instanceof BashTool && args.has("command")) {
-            String first = DangerousCommands.firstToken(args.get("command").getAsString());
-            for (String w : config.whitelistCommands()) {
-                if (first.equals(w)) return true;
-            }
+            return CommandWhitelist.matches(args.get("command").getAsString(), config.whitelistCommands());
         }
         return false;
     }

@@ -107,6 +107,54 @@ public class ConfirmGateTest {
         assertTrue(ui.asked.isEmpty());
     }
 
+    // ---- 前缀规则（多词条目）：窄化危险命令，链式命令重新确认 ----
+
+    private com.minion.core.tools.Tool bashTool() {
+        return new com.minion.core.tools.BashTool(
+                new com.minion.core.tools.Workspace(tmp.getRoot().getAbsolutePath()));
+    }
+
+    @Test
+    public void prefixWhitelist_noAsk() throws Exception {
+        config.appendWhitelist("confirm.whitelist.commands", "del /q");
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        FakeConfirmUi ui = new FakeConfirmUi();
+        ConfirmGate g = gate(ui);
+        assertTrue(g.check(bashTool(), args("{\"command\":\"del /q output\\\\*.tmp\"}")));
+        assertTrue(ui.asked.isEmpty());
+    }
+
+    @Test
+    public void prefixWhitelist_otherFlags_stillAsks() throws Exception {
+        config.appendWhitelist("confirm.whitelist.commands", "del /q");
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.REJECT);
+        ConfirmGate g = gate(ui);
+        assertFalse(g.check(bashTool(), args("{\"command\":\"del /s x\"}")));
+        assertEquals(1, ui.asked.size());
+    }
+
+    @Test
+    public void prefixWhitelist_chainCommand_stillAsks() throws Exception {
+        config.appendWhitelist("confirm.whitelist.commands", "del /q");
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.REJECT);
+        ConfirmGate g = gate(ui);
+        assertFalse(g.check(bashTool(), args("{\"command\":\"del /q x && rm -rf y\"}")));
+        assertEquals(1, ui.asked.size());
+    }
+
+    @Test
+    public void prefixWhitelist_legacyWordEntry_chainUnchanged() throws Exception {
+        config.appendWhitelist("confirm.whitelist.commands", "del");
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        FakeConfirmUi ui = new FakeConfirmUi();
+        ConfirmGate g = gate(ui);
+        // 用户确认：旧单词条目不收紧
+        assertTrue(g.check(bashTool(), args("{\"command\":\"del /q x && rm -rf y\"}")));
+        assertTrue(ui.asked.isEmpty());
+    }
+
     @Test
     public void whitelistCommand_approveWhitelist_persistsAndBypasses() throws Exception {
         FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.APPROVE_WHITELIST);
