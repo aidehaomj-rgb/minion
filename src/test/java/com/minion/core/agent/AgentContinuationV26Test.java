@@ -49,14 +49,12 @@ public class AgentContinuationV26Test {
     @Test public void shortDeepSeekProgressContinuesAtLargeWindowWithoutCompaction() {
         scan("scan");
         llm.addTurn("继续推进。先验证chunk文件内容完整性，并确认3个无匹配单的情况。");
-        scan("verify"); finish();
         loop.runUserTurn("核对38个分块");
-        assertEquals(4,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
-        assertTrue(warnings.toString().contains("阶段性回复"));
-        assertTrue(lastHint(2).contains("立即调用"));
-        assertTrue(llm.completeChatRequests.isEmpty());
+        // 主流对齐第二轮补丁：有工具回执的回合，阶段性措辞不再拦截——模型 stop 即回合结束
+        assertEquals(2,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
+        assertFalse(warnings.toString().contains("阶段性回复"));
+        assertEquals(1,loop.messages().stream().filter(m -> m.role==Message.Role.TOOL).count());
         assertEquals(900000,loop.contextManager().maxTokens());
-        assertEquals(2,loop.messages().stream().filter(m -> m.role==Message.Role.TOOL).count());
         assertFalse(loop.messages().stream().anyMatch(m -> m.role==Message.Role.USER && m.content.contains("系统完成性检查")));
     }
     @Test public void longChinesePlanWithLetMeCheckTailContinues() {
@@ -65,9 +63,10 @@ public class AgentContinuationV26Test {
                 + "由于chunk有38个，逐个派发会很多轮。让我核对result_0后，考虑更高效但保持准确性的方式。让我核对result_0.json落地。"
                 + "实际上，让我继续分批派发。先核对第一个结果文件的真实落地，再继续。让我核对result_0.json。"
                 + "由于需要逐块核对子agent，且38块数量大，我将持续派发和核对。让我先验证result_0文件，然后继续。让我检查results目录及result_0.json内容。";
-        assertTrue(plan.length()>240); llm.addTurn(plan); scan("verify"); finish();
+        assertTrue(plan.length()>240); llm.addTurn(plan);
         loop.runUserTurn("核对38块并汇总");
-        assertEquals(4,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
+        // 主流对齐第二轮补丁：有工具回执的回合，计划性措辞不再拦截——模型 stop 即回合结束（2 请求完成）
+        assertEquals(2,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
     }
     @Test public void pendingTodoCannotEndOnUnrecognizedShortReplyOrCompletionMarker() {
         loop.session().taskState.begin("完成整表",false);
@@ -135,8 +134,9 @@ public class AgentContinuationV26Test {
     }
     @Test public void repeatedPlansStopExplicitlyAndNeverCompactHealthyContext() {
         scan("scan"); llm.addTurn("让我检查result_0.json。"); loop.runUserTurn("汇总38块");
-        assertEquals(6,llm.requests.size()); // 同上：无进展预算收紧 assertFalse(loop.lastTurnSucceeded());
-        assertTrue(warnings.toString().contains("停止自动续接"));
+        // 主流对齐第二轮补丁：有工具回执的回合，计划性措辞不再拦截——模型 stop 即回合结束（2 请求完成）
+        assertEquals(2,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
+        assertFalse(warnings.toString().contains("停止自动续接"));
         assertTrue(llm.completeChatRequests.isEmpty());
     }
     @Test public void oldTaskChildDoesNotBlockNewQuestion() {
@@ -327,12 +327,12 @@ public class AgentContinuationV26Test {
                 + "- 原产国=越南/香港、启运港/装货地=越南/香港的记录\n"
                 + "国家代码映射：250=法国、643=俄罗斯、036=澳大利亚、392=日本、124=加拿大、360=印尼、410=韩国、764=泰国、604=秘鲁。无越南、无香港，但要核对数字代码是否对应。\n让我做全面比对。";
         assertTrue(reply.length()>240 && reply.length()<1000);
-        llm.addTurn(reply); scan("compare"); finish();
+        llm.addTurn(reply);
         loop.runUserTurn("将这4家企业与03072进口表比对");
+        // 主流对齐第二轮补丁：有工具回执的回合，计划性措辞不再拦截——模型 stop 即回合结束
+        assertEquals(2,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
         assertTrue(loop.session().todos.items.isEmpty());
-        assertEquals(4,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
-        assertTrue(warnings.toString().contains("阶段性回复"));
-        assertEquals(2,loop.messages().stream().filter(m -> m.role==Message.Role.TOOL).count());
+        assertEquals(1,loop.messages().stream().filter(m -> m.role==Message.Role.TOOL).count());
         assertTrue(llm.completeChatRequests.isEmpty());
     }
     @Test public void activeComparisonAndScriptPlansAreRecognizedAcrossLengths() {
@@ -358,10 +358,11 @@ public class AgentContinuationV26Test {
     }
     @Test public void repeatedComparisonPlansRemainBounded() {
         scan("copy"); llm.addTurn("让我做全面比对。"); loop.runUserTurn("比对进口表");
-        assertEquals(6,llm.requests.size()); // NO_PROGRESS_LIMIT 12→4：1 次首轮 + 4 次无进展续接 + 1 次收尾 assertFalse(loop.lastTurnSucceeded());
-        assertTrue(warnings.toString().contains("停止自动续接"));
-        assertEquals("paused",loop.session().taskState.status);
-        assertFalse(displayed.toString().contains("完成时间："));
+        // 主流对齐第二轮补丁：有工具回执的回合，计划性措辞不再拦截——模型 stop 即回合结束，
+        // 不再有“无进展续接”循环（原 12/4 次催促语义仅保留给零工具回合）
+        assertEquals(2,llm.requests.size()); assertTrue(loop.lastTurnSucceeded());
+        assertFalse(warnings.toString().contains("停止自动续接"));
+        assertEquals("completed",loop.session().taskState.status);
     }
     @Test public void planInOrdinaryExplanationWithoutToolsDoesNotForceExecution() {
         llm.addTurn("让我做全面比对。"); loop.runUserTurn("解释这个句子的含义");

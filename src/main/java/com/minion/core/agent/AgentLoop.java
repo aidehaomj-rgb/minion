@@ -1895,8 +1895,12 @@ public class AgentLoop {
                     boolean turnHasWork=!stopReceipts.isEmpty();
                     boolean actionAlreadyEvidenced=turnHasWork||!snapshot.localProof.isEmpty()
                             ||snapshot.hasSuccessfulMutation();
+                    // 主流对齐（第二轮补丁）：有真实工作的回合不再做“阶段性措辞”语义猜测——
+                    // 实证：1222 字实质交付答复因结尾计划性措辞被 looksLikeInterimAnswer 误判，
+                    // 强制续接到 no_progress 暂停（“该停不停”残留根因）。防懒网只在零工作回合生效；
+                    // 有工作回合模型 stop = 交付控制权给用户（Codex/Claude Code 语义）。
                     boolean directModeAnswer="stop".equalsIgnoreCase(finish[0])
-                            && !looksLikeInterimAnswer(visibleCandidate)
+                            && (!looksLikeInterimAnswer(visibleCandidate)||turnHasWork)
                             && !looksLikeInterruptedReply(visibleCandidate)
                             && !ReplyHeuristics.looksLikeUnconfirmedOutcome(visibleCandidate)
                             && snapshot.blocking.isEmpty()
@@ -2006,6 +2010,9 @@ public class AgentLoop {
                     // information/authorization. Let the bounded continuation loop try it.
                     if(("waiting_user".equals(decision.status)||"unknown".equals(decision.status)) && decision.valid
                             && !ReliabilityService.hasUnobservedOutcome(uncertainSteps)
+                             // 主流对齐第二轮补丁：普通模式下有真实工作的回合，模型停下=合法等待；
+                             // GOAL/REVIEW 持续目标模式保留原改写（用户显式要求盯到完成）
+                             && !(turnHasWork && executionMode==ExecutionMode.NORMAL)
                              && looksLikeInterimAnswer(StopGate.visibleCandidate(candidate))
                              && !looksLikeUserBlock(StopGate.visibleCandidate(candidate))) {
                         decision.status="continue";

@@ -1790,20 +1790,14 @@ public class AgentLoopTest {
         tc.arguments = "{\"text\":\"scan\"}";
         llm.addTurnWithTools(Collections.singletonList(tc), null);
         llm.addTurn("找到两个文件了");
-        llm.addTurn("分析已完成，结果文件已生成并核验。");
         AgentLoop loop = newLoop();
         loop.runUserTurn("分析两个表格并生成结果");
 
+        // 主流对齐第二轮补丁：有工具回执的普通模式回合，进度措辞不再拦截——模型 stop 即回合结束
         assertEquals("stopReviews="+llm.stopReviewRequests+" warnings="+ui.warnings+" requests="+llm.requests.size(),
-                3, llm.requests.size());
-        Message hint = llm.requests.get(2).messages.get(llm.requests.get(2).messages.size() - 1);
-        assertEquals(Message.Role.USER, hint.role);
-        assertTrue(hint.content.contains("当前目标尚未交付"));
-        assertEquals("warnings="+ui.warnings+" reviews="+llm.stopReviewRequests,
-                2,llm.stopReviewRequests.size());
-        assertTrue(ui.warnings.toString().contains("阶段性回复"));
-        assertTrue(loop.messages().get(loop.messages().size() - 1).content
-                .startsWith("分析已完成，结果文件已生成并核验。"));
+                2, llm.requests.size());
+        assertTrue(loop.lastTurnSucceeded());
+        assertTrue(loop.messages().get(loop.messages().size() - 1).content.startsWith("找到两个文件了"));
     }
 
     @Test

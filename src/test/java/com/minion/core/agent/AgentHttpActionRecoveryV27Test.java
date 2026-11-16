@@ -28,23 +28,18 @@ public class AgentHttpActionRecoveryV27Test {
         try {
             StopReviewDispatcher dispatcher=new StopReviewDispatcher();server.setDispatcher(dispatcher);
             dispatcher.enqueue(tool("scan"));dispatcher.enqueue(text("我先检查实际数据。"));
-            dispatcher.enqueue(text("先调用Bash构建补全清单并分块。"));dispatcher.enqueue(tool("verify"));
-            dispatcher.enqueue(text("全部结果已生成并核验。"+AgentLoop.TASK_COMPLETE_MARKER));
+            // 主流对齐第二轮补丁：有工具回执的计划措辞不再拦截——模型 stop 即回合结束
             loop.runUserTurn("检查实际数据并汇报");assertTrue(loop.lastTurnSucceeded());
-            assertEquals(5,server.getRequestCount());
+            assertEquals(2,server.getRequestCount());
             List<JsonObject> requests=new ArrayList<JsonObject>();
-                for(int i=0;i<5;i++) {
+                for(int i=0;i<2;i++) {
                 RecordedRequest r=server.takeRequest(2,TimeUnit.SECONDS);assertNotNull(r);
                 JsonObject body=JsonParser.parseString(r.getBody().readUtf8()).getAsJsonObject();
                 if(body.get("stream").getAsBoolean())requests.add(body);
             }
-            assertEquals(5,requests.size());
+            assertEquals(2,requests.size());
             assertFalse(requests.get(0).has("tool_choice"));
-            assertEquals("required",requests.get(3).get("tool_choice").getAsString());
-            assertEquals("disabled",requests.get(3).getAsJsonObject("thinking").get("type").getAsString());
-            assertFalse(requests.get(4).has("tool_choice"));
-            assertEquals("enabled",requests.get(4).getAsJsonObject("thinking").get("type").getAsString());
-            assertEquals(2,loop.messages().stream().filter(m -> m.role==Message.Role.TOOL).count());
+            assertEquals(1,loop.messages().stream().filter(m -> m.role==Message.Role.TOOL).count());
             assertEquals(900000,loop.contextManager().maxTokens());
         } finally {loop.shutdown();client.close();server.shutdown();}
     }

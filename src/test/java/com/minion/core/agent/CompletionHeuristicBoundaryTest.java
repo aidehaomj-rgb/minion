@@ -10,6 +10,8 @@ import com.minion.core.tools.confirm.ConfirmGate;
 import com.minion.core.tools.confirm.ConfirmUi;
 import com.minion.core.tools.confirm.FakeConfirmUi;
 import org.junit.Test;
+
+import static org.junit.Assert.*;
 import org.junit.Rule;
 import org.junit.rules.TemporaryFolder;
 
@@ -54,11 +56,10 @@ public class CompletionHeuristicBoundaryTest {
                     + "实际上，让我继续分批派发。先核对第一个结果文件的真实落地，再继续。"
                     + "让我检查results目录及result_0.json内容。");
             f.loop.runUserTurn("核对38块并汇总");
-            assertTrue(f.llm.requests.size()>2);
-            assertFalse(f.loop.lastTurnSucceeded());
-            assertNotNull(f.loop.session().taskState.stopDecision);
-            assertFalse("completed".equals(f.loop.session().taskState.stopDecision.status));
-            assertTrue(f.warnings.toString().contains("无实质进展"));
+            // 主流对齐第二轮补丁：有工具回执的普通模式回合，计划性措辞不再拦截——模型 stop 即回合结束
+            assertEquals(2,f.llm.requests.size());
+            assertTrue(f.loop.lastTurnSucceeded());
+            assertEquals("completed",f.loop.session().taskState.stopDecision.status);
         } finally {
             f.loop.shutdown();
         }

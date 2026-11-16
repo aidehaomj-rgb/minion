@@ -64,20 +64,19 @@ public class AgentActionRecoveryV27Test {
     @Test public void twoPlansEscalateToActionRequestThenResumeNormalModel() {
         scan("start");
         llm.addTurn("我先检查353行的实际证据。");
-        llm.addTurn("先调用Bash构建补全清单并分块。");
-        scan("actual");llm.addTurn("核验完成。"+AgentLoop.TASK_COMPLETE_MARKER);
         loop.runUserTurn("补全353行原文与分析并交付");
-        assertEquals(5,llm.requests.size()); assertEquals(1,llm.actionRecoveryCalls);
+        // 主流对齐第二轮补丁：有工具回执的回合，计划性措辞不再拦截；防懒升级仅在零工具回合触发
+        assertEquals(2,llm.requests.size()); assertEquals(0,llm.actionRecoveryCalls);
         assertTrue(loop.lastTurnSucceeded()); assertTrue(llm.completeChatRequests.isEmpty());
         assertEquals(900000,loop.contextManager().maxTokens());
-        assertTrue(notices.toString().contains("工具动作恢复"));
+        assertFalse(notices.toString().contains("工具动作恢复"));
     }
     @Test public void repeatedPlansEndWithSpecificErrorNotSilentSuccess() {
         scan("start");llm.addTurn("我先检查353行的实际证据。");
         loop.runUserTurn("补全所有行");
-        assertTrue(llm.actionRecoveryCalls>0); assertFalse(loop.lastTurnSucceeded());
-        assertEquals("paused",loop.session().taskState.status);
-        assertTrue(notices.toString().contains("未标记为完成"));
+        // 同上：有工具回执的计划回复=回合结束（不再暂停报错）
+        assertEquals(0,llm.actionRecoveryCalls); assertTrue(loop.lastTurnSucceeded());
+        assertEquals("completed",loop.session().taskState.status);
         assertTrue(llm.completeChatRequests.isEmpty());
     }
     @Test public void ordinaryQuestionNeverRequiresAction() {
