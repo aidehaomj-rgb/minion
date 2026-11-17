@@ -25,6 +25,8 @@
     -wb-cta: #4f86c2;
     -wb-cta-hover: #679ad4;
     -wb-on-cta: #f6fafd;
+    -wb-dot-running: #f2c94c;
+    -wb-dot-done: #3fb950;
     -fx-background-color: -wb-canvas;
     -fx-font-size: 16px;
     /* 全局关闭 Modena 焦点环：自绘控件用自己的 focus 边框表达焦点 */
@@ -35,29 +37,31 @@
 /* Theme variants. Graphite is the compatibility default; all four retain the same
    information hierarchy and only change surfaces, text and action emphasis. */
 .minion-workbench.theme-obsidian {
-    -wb-rail: #0b0c0e;
-    -wb-canvas: #15161a;
-    -wb-reader: #191b1f;
-    -wb-surface: #1e2126;
-    -wb-hover: #272b31;
-    -wb-border: #2c3036;
-    -wb-select: #212831;
-    -wb-ink: #f1f2f2;
-    -wb-secondary: #c4c6c7;
-    -wb-muted: #909498;
-    -wb-accent: #89a6c2;
-    -wb-accent-strong: #bfd5e8;
-    -wb-on-accent: #0d141b;
-    -wb-link: #97b4cf;
-    -wb-focus: #718faa;
-    -wb-highlight: #31475a;
-    -wb-pending: #465f73;
-    -wb-tool: #b5a1c4;
-    -wb-scroll: #34373a;
-    -wb-scroll-hover: #484c51;
-    -wb-cta: #4c84c4;
-    -wb-cta-hover: #6499d9;
-    -wb-on-cta: #f6fafd;
+    -wb-rail: #0a0e14;
+    -wb-canvas: #121822;
+    -wb-reader: #171f2b;
+    -wb-surface: #1e2836;
+    -wb-hover: #283548;
+    -wb-border: #2e3c52;
+    -wb-select: #223145;
+    -wb-ink: #f2f5f9;
+    -wb-secondary: #c6cfdc;
+    -wb-muted: #93a1b5;
+    -wb-accent: #6fb1ff;
+    -wb-accent-strong: #a8d1ff;
+    -wb-on-accent: #081018;
+    -wb-link: #86b9ff;
+    -wb-focus: #5f9fe8;
+    -wb-highlight: #2b4560;
+    -wb-pending: #3f5c78;
+    -wb-tool: #b7a4d6;
+    -wb-scroll: #3a4a61;
+    -wb-scroll-hover: #4d607c;
+    -wb-cta: #3f8ae0;
+    -wb-cta-hover: #5ba0f0;
+    -wb-on-cta: #f5faff;
+    -wb-dot-running: #f2c94c;
+    -wb-dot-done: #3fb950;
 }
 
 .minion-workbench.theme-mist {
@@ -84,6 +88,8 @@
     -wb-cta: #4f88c8;
     -wb-cta-hover: #699dd8;
     -wb-on-cta: #f7fafd;
+    -wb-dot-running: #f2c94c;
+    -wb-dot-done: #3fb950;
 }
 
 .minion-workbench.theme-light {
@@ -97,19 +103,21 @@
     -wb-ink: #222426;
     -wb-secondary: #5f6266;
     -wb-muted: #808387;
-    -wb-accent: #4f7396;
-    -wb-accent-strong: #385b7e;
+    -wb-accent: #3d7ab8;
+    -wb-accent-strong: #235a8c;
     -wb-on-accent: #ffffff;
-    -wb-link: #3f6d99;
-    -wb-focus: #6c8dab;
-    -wb-highlight: #d8e5f0;
-    -wb-pending: #9ab0c3;
+    -wb-link: #2f6db3;
+    -wb-focus: #4a86c2;
+    -wb-highlight: #cfe0f2;
+    -wb-pending: #8fb3d4;
     -wb-tool: #71577f;
     -wb-scroll: #d0d0cc;
     -wb-scroll-hover: #b9b9b4;
-    -wb-cta: #3f6d99;
-    -wb-cta-hover: #2f5880;
+    -wb-cta: #2f6db3;
+    -wb-cta-hover: #235a8c;
     -wb-on-cta: #ffffff;
+    -wb-dot-running: #b77900;
+    -wb-dot-done: #238636;
 }
 
 /* Shared window chrome and thin but draggable dividers */
@@ -524,3 +532,57 @@
 .minion-workbench .artifact-workspace .toggle-button:focused {
     -fx-border-color: -wb-focus; -fx-border-radius: 5; -fx-border-insets: 0;
 }
+
+/* ===== 全主题质感增强（参照 Codex/Zed：分层中性面 + 发丝分隔 + 单一强调色族）：
+   仅配色/质感，不改布局不加控件；渐变与微光全部取主题变量，四主题各自适配。
+   微光只加在小节点（按钮/状态点/logo 块），大面板不用 effect，软件渲染无每帧开销。 ===== */
+.minion-workbench .topbar {
+    -fx-background-color: linear-gradient(to bottom, -wb-surface, -wb-rail);
+}
+.minion-workbench .project-sidebar .sidebar-primary {
+    -fx-background-color: linear-gradient(to right, -wb-select, -wb-surface);
+    -fx-border-color: -wb-border; -fx-border-width: 1; -fx-border-radius: 6;
+}
+.minion-workbench .project-sidebar .sidebar-primary:hover {
+    -fx-background-color: linear-gradient(to right, -wb-hover, -wb-surface);
+}
+.minion-workbench .project-sidebar .project-heading { -fx-text-fill: -wb-accent; }
+.minion-workbench .project-sidebar .sidebar-folder { -fx-stroke: -wb-accent; }
+.minion-workbench .workbench-welcome {
+    -fx-background-color: radial-gradient(center 50% 35%, radius 65%, -wb-select 0%, transparent 70%), -wb-canvas;
+}
+.minion-workbench .welcome-mark {
+    -fx-background-color: linear-gradient(to bottom right, -wb-surface, -wb-reader);
+    -fx-border-color: -wb-border; -fx-border-width: 1; -fx-border-radius: 15;
+    -fx-effect: dropshadow(gaussian, -wb-pending, 18, 0, 0, 0);
+}
+.minion-workbench .welcome-start,
+.minion-workbench .btn-guide-now {
+    -fx-background-color: linear-gradient(to bottom, -wb-cta-hover, -wb-cta);
+    -fx-effect: dropshadow(gaussian, -wb-pending, 10, 0, 0, 2);
+}
+.minion-workbench .welcome-start:hover,
+.minion-workbench .btn-guide-now:hover {
+    -fx-background-color: linear-gradient(to bottom, -wb-cta, -wb-cta-hover);
+}
+.minion-workbench .btn-send-full {
+    -fx-background-color: linear-gradient(to bottom, -wb-accent-strong, -wb-accent);
+    -fx-effect: dropshadow(gaussian, -wb-pending, 8, 0, 0, 1);
+}
+.minion-workbench .btn-send-full:hover {
+    -fx-background-color: linear-gradient(to bottom, -wb-accent, -wb-accent-strong);
+}
+.minion-workbench .status-dot-running {
+    -fx-fill: -wb-dot-running;
+    -fx-effect: dropshadow(gaussian, -wb-dot-running, 6, 0, 0, 0);
+}
+.minion-workbench .status-dot-completed,
+.minion-workbench .status-dot-paused {
+    -fx-fill: -wb-dot-done;
+    -fx-effect: dropshadow(gaussian, -wb-dot-done, 6, 0, 0, 0);
+}
+.minion-workbench .project-sidebar .list-cell.active-conversation,
+.minion-workbench .project-sidebar .list-cell.active-conversation:filled {
+    -fx-background-color: linear-gradient(to right, -wb-select, -wb-surface);
+}
+.minion-workbench .conversation-tabs .tab:selected .tab-label { -fx-text-fill: -wb-accent-strong; }

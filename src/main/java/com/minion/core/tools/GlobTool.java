@@ -54,7 +54,7 @@ public class GlobTool implements Tool {
     }
 
     @Override
-    public ToolResult execute(JsonObject args) throws IOException {
+    public ToolResult execute(JsonObject args) throws IOException, InterruptedException {
         String pattern = args.has("pattern") ? args.get("pattern").getAsString() : "";
         if (pattern.isEmpty()) return ToolResult.error("缺少 pattern 参数");
         pattern = normalizePattern(pattern);
@@ -95,9 +95,9 @@ public class GlobTool implements Tool {
             boolean rgDone = false;
             if (rg != null && Files.isDirectory(root)) {
                 int before = found.size();
-                rgDone = tryRipgrep(rg, root, rootAbs, workRootAbs, matchers, found);
+                rgDone = tryRipgrep(rg, root, rootAbs, workRootAbs, matchers, found, before);
                 if (!rgDone) {
-                    while (found.size() > before) found.remove(found.size() - 1);
+                    trimResults(found, before);
                 }
             }
             if (rgDone) {
@@ -151,14 +151,19 @@ public class GlobTool implements Tool {
     /** ripgrep 枚举旁路。退出码 0/1 视为成功；失败返回 false（调用方丢弃部分结果回退 Java 遍历）。
      *  达到 MAX_RESULTS 提前 destroy 进程，同样视为成功（截断语义与 Java 遍历一致）。 */
     private boolean tryRipgrep(String rg, Path root, Path rootAbs, Path workRootAbs,
-            List<PathMatcher> matchers, List<String> found) {
+            List<PathMatcher> matchers, List<String> found, int before)
+            throws IOException, InterruptedException {
         Process proc = null;
+        com.minion.core.tools.search.RipgrepSidecar.Guard guard = null;
         try {
-            proc = new ProcessBuilder(rg, "--files",
-                    "--no-config", "--no-require-git",
-                    "--no-ignore-parent", "--no-ignore-dot", "--no-ignore-exclude",
-                    "--hidden", "--no-messages", "--sort", "path", "-g", "!.git", ".")
-                    .directory(root.toFile()).start();
+            guard = com.minion.core.tools.search.RipgrepSidecar.startGuarded(
+                    new ProcessBuilder(rg, "--files",
+                            "--no-config", "--no-require-git",
+                            "--no-ignore-parent", "--no-ignore-dot", "--no-ignore-exclude",
+                            "--hidden", "--no-messages", "--sort", "path", "-g", "!.git", ".")
+                            .directory(root.toFile()),
+                    "Glob");
+            proc = guard.process();
             final Process fp = proc;
             Thread drain = new Thread(new Runnable() {
                 @Override public void run() {
@@ -173,6 +178,7 @@ public class GlobTool implements Tool {
                     new java.io.InputStreamReader(proc.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
             String line;
             while ((line = reader.readLine()) != null) {
+                guard.throwIfAborted();
                 if (line.isEmpty()) continue;
                 Path abs = root.resolve(line).toAbsolutePath().normalize();
                 // .git 恒不进入（与 Java 遍历一致，不依赖 rg 版本行为）
@@ -189,15 +195,28 @@ public class GlobTool implements Tool {
                 }
             }
             int exit = proc.waitFor();
+            guard.throwIfAborted();
             return exit == 0 || exit == 1;
         } catch (IOException e) {
+            trimResults(found, before);
+            if (guard != null && guard.timedOut()) throw new IOException(guard.abortMessage(), e);
+            if (guard != null && guard.cancelled()) {
+                Thread.currentThread().interrupt();
+                throw new InterruptedException(guard.abortMessage());
+            }
             return false;
         } catch (InterruptedException e) {
+            trimResults(found, before);
             Thread.currentThread().interrupt();
-            return false;
+            throw e;
         } finally {
-            if (proc != null) proc.destroyForcibly();
+            if (guard != null) guard.close();
+            else if (proc != null) proc.destroyForcibly();
         }
+    }
+
+    private static void trimResults(List<String> found, int before) {
+        while (found.size() > before) found.remove(found.size() - 1);
     }
 
     /** 工作空间相对、搜索根相对、绝对路径三种写法都可匹配。 */

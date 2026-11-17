@@ -64,7 +64,7 @@ public class GrepTool implements Tool {
     }
 
     @Override
-    public ToolResult execute(JsonObject args) throws IOException {
+    public ToolResult execute(JsonObject args) throws IOException, InterruptedException {
         String pattern = args.has("pattern") ? args.get("pattern").getAsString() : "";
         if (pattern.isEmpty()) return ToolResult.error("缺少 pattern 参数");
         final boolean ignoreCase = args.has("ignoreCase") && args.get("ignoreCase").getAsBoolean();
@@ -234,8 +234,9 @@ public class GrepTool implements Tool {
     private boolean tryRipgrep(String rg, String pattern, boolean ignoreCase, Path root,
             boolean rootInWork, Path rootNormalized, Path dumpPath, BufferedWriter[] dumpWriter,
             Path dumpDirPath, StringBuilder disp, int[] dispCount, int[] totalCount,
-            boolean[] dispFull, int max) {
+            boolean[] dispFull, int max) throws IOException, InterruptedException {
         Process proc = null;
+        RipgrepSidecar.Guard guard = null;
         try {
             java.util.List<String> cmd = new java.util.ArrayList<String>();
             cmd.add(rg);
@@ -259,7 +260,9 @@ public class GrepTool implements Tool {
             cmd.add("-e"); cmd.add(pattern);
             cmd.add(".");
             // cwd=root：输出相对路径，避免 Windows 盘符冒号与 文件:行号 格式歧义
-            proc = new ProcessBuilder(cmd).directory(root.toFile()).start();
+            guard = RipgrepSidecar.startGuarded(
+                    new ProcessBuilder(cmd).directory(root.toFile()), "Grep");
+            proc = guard.process();
             final Process fp = proc;
             final StringBuilder err = new StringBuilder();
             Thread drain = new Thread(new Runnable() {
@@ -279,6 +282,7 @@ public class GrepTool implements Tool {
                     new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8));
             String line;
             while ((line = reader.readLine()) != null) {
+                guard.throwIfAborted();
                 Matcher m = RG_LINE.matcher(line);
                 if (!m.matches()) continue;
                 Path file = root.resolve(m.group(1)).normalize();
@@ -300,30 +304,60 @@ public class GrepTool implements Tool {
                 }
             }
             int exit = proc.waitFor();
+            guard.throwIfAborted();
             drain.join(2000);
             if (exit == 0 || exit == 1) return true;
             DiagnosticLog.warn("grep", "rg 退出码 " + exit + "，回退 Java 遍历: " + err);
         } catch (IOException e) {
+            if (guard != null && guard.timedOut()) {
+                discardRipgrepOutput(dumpPath, dumpWriter, disp, dispCount, totalCount, dispFull);
+                throw new IOException(guard.abortMessage(), e);
+            }
+            if (guard != null && guard.cancelled()) {
+                discardRipgrepOutput(dumpPath, dumpWriter, disp, dispCount, totalCount, dispFull);
+                Thread.currentThread().interrupt();
+                throw new InterruptedException(guard.abortMessage());
+            }
             DiagnosticLog.warn("grep", "rg 执行失败，回退 Java 遍历: " + e);
         } catch (InterruptedException e) {
+            discardRipgrepOutput(dumpPath, dumpWriter, disp, dispCount, totalCount, dispFull);
             Thread.currentThread().interrupt();
+            throw e;
         } finally {
-            if (proc != null) proc.destroyForcibly();
+            if (guard != null) guard.close();
+            else if (proc != null) proc.destroyForcibly();
         }
         // 失败重置：显示层/计数清零，落盘文件重建，保证 Java 回退从零开始
+        resetRipgrepOutput(dumpPath, dumpWriter, disp, dispCount, totalCount, dispFull);
+        return false;
+    }
+
+    private static void discardRipgrepOutput(Path dumpPath, BufferedWriter[] dumpWriter,
+            StringBuilder disp, int[] dispCount, int[] totalCount, boolean[] dispFull) {
         disp.setLength(0); dispCount[0] = 0; totalCount[0] = 0; dispFull[0] = false;
         if (dumpWriter[0] != null) {
             try { dumpWriter[0].close(); } catch (IOException ignored) { }
+            dumpWriter[0] = null;
         }
         if (dumpPath != null) {
             try {
                 Files.deleteIfExists(dumpPath);
-                dumpWriter[0] = Files.newBufferedWriter(dumpPath, StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                dumpWriter[0] = null;
-            }
+                Files.deleteIfExists(dumpPath.getParent());
+            } catch (IOException ignored) { }
         }
-        return false;
+    }
+
+    private static void resetRipgrepOutput(Path dumpPath, BufferedWriter[] dumpWriter,
+            StringBuilder disp, int[] dispCount, int[] totalCount, boolean[] dispFull) {
+        discardRipgrepOutput(dumpPath, dumpWriter, disp, dispCount, totalCount, dispFull);
+        if (dumpPath == null) return;
+        try {
+            // discard 可能已删掉空的 tmp 目录，newBufferedWriter 不建父目录，必须先重建
+            Files.createDirectories(dumpPath.getParent());
+            dumpWriter[0] = Files.newBufferedWriter(dumpPath, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            dumpWriter[0] = null;
+        }
     }
 
     /** 单行截断：>1000 字符截断并加省略号（落盘与显示同格式，文件大小可控） */

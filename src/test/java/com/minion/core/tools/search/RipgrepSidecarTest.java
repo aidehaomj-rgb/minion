@@ -13,6 +13,8 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -163,6 +165,28 @@ public class RipgrepSidecarTest {
     }
 
     @Test
+    public void grep_rgFailure_fallbackDumpStillWorks() throws Exception {
+        // rg 语法失败（环视退出码 2）回退 Java 时，discard 会删掉空的 tmp 目录；
+        // 重建落盘文件前必须恢复目录，否则回退路径丢失落盘能力
+        Path dump = ws.resolve("dumpdir2");
+        write("f1.txt", "foobar\n");
+        write("f2.txt", "foobar\n");
+        write("f3.txt", "foobar\n");
+        GrepTool tool = new GrepTool(workspace, null, dump.toString(), null);
+        ToolResult r = tool.execute(args("{\"pattern\":\"foo(?=bar)\",\"maxResults\":1}"));
+        assertTrue(r.ok);
+        assertTrue("回退后落盘应可用: " + r.output, r.output.contains("完整结果已保存到"));
+        assertFalse(r.output.contains("落盘失败"));
+        java.io.File[] dumps = dump.toFile().listFiles();
+        assertNotNull("落盘目录应存在", dumps);
+        assertEquals(1, dumps.length);
+        String full = new String(Files.readAllBytes(dumps[0].toPath()), StandardCharsets.UTF_8);
+        assertTrue(full.contains("f1.txt"));
+        assertTrue(full.contains("f2.txt"));
+        assertTrue(full.contains("f3.txt"));
+    }
+
+    @Test
     public void rgSafePattern_rules() {
         assertTrue(GrepTool.rgSafePattern("needle"));
         assertTrue(GrepTool.rgSafePattern("foo.*bar"));
@@ -180,5 +204,35 @@ public class RipgrepSidecarTest {
         assertNull(RipgrepSidecar.resolve());
         RipgrepSidecar.overrideForTests(VENDORED.toString());
         assertEquals(VENDORED.toString(), RipgrepSidecar.resolve());
+    }
+
+    @Test
+    public void bundledResource_extractsVerifiesAndSelfRepairs() throws Exception {
+        Path install = tmp.newFolder("install").toPath();
+        Path exe = RipgrepSidecar.ensureBundled(install);
+        assertNotNull("JAR 内 rg.exe 应可自解压", exe);
+        assertTrue(Files.isRegularFile(exe));
+        assertTrue("资源应来自 13.0.0 随包二进制", Files.size(exe) > 4_000_000L);
+        assertEquals(exe, RipgrepSidecar.ensureBundled(install));
+
+        Files.write(exe, "corrupt".getBytes(StandardCharsets.US_ASCII));
+        Path repaired = RipgrepSidecar.ensureBundled(install);
+        assertEquals(exe, repaired);
+        assertTrue(Files.size(repaired) > 4_000_000L);
+
+        Process process = new ProcessBuilder(repaired.toString(), "--version")
+                .redirectErrorStream(true).start();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (InputStream in = process.getInputStream()) {
+            byte[] buffer = new byte[1024];
+            int count;
+            while ((count = in.read(buffer)) >= 0) {
+                if (count > 0) output.write(buffer, 0, count);
+            }
+        }
+        assertTrue(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals(0, process.exitValue());
+        assertTrue(new String(output.toByteArray(), StandardCharsets.UTF_8)
+                .contains("ripgrep 13.0.0"));
     }
 }

@@ -145,6 +145,10 @@
       <resource>
         <directory>src/resource</directory>
       </resource>
+      <resource>
+        <directory>offline-package/ripgrep</directory>
+        <targetPath>ripgrep</targetPath>
+      </resource>
     </resources>
     <plugins>
       <plugin>
