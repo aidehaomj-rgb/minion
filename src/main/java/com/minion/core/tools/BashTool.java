@@ -49,12 +49,18 @@ public class BashTool implements Tool {
     private final Workspace workspace;
     /** 会话临时目录（jarDir/.session/tmp/<sessionId>；null = 落盘降级为纯内存截断） */
     private final Path tmpDir;
+    /** 可空：bash.analyzer.enabled / bash.readonlyCommands 配置来源 */
+    private final com.minion.core.config.Config config;
 
-    public BashTool(Workspace workspace) { this(workspace, null); }
+    public BashTool(Workspace workspace) { this(workspace, null, null); }
 
-    public BashTool(Workspace workspace, Path tmpDir) {
+    public BashTool(Workspace workspace, Path tmpDir) { this(workspace, tmpDir, null); }
+
+    /** config 供 bash.analyzer.enabled 与 bash.readonlyCommands 读取（null = 分析器默认启用） */
+    public BashTool(Workspace workspace, Path tmpDir, com.minion.core.config.Config config) {
         this.workspace = workspace;
         this.tmpDir = tmpDir;
+        this.config = config;
     }
 
     @Override
@@ -75,7 +81,24 @@ public class BashTool implements Tool {
 
     @Override
     public boolean isHighRisk(JsonObject args) {
-        return args.has("command") && DangerousCommands.isDangerous(args.get("command").getAsString());
+        if (!args.has("command")) return false;
+        String command = args.get("command").getAsString();
+        // v2.4 §4.4：DangerousCommands 保留为 deny 补充层；分析器覆盖注入/展开/续行/heredoc 等面。
+        // bash.analyzer.enabled=true（默认，安全修复例外）：too-complex/parse-failed/校验器命中 → 高危。
+        if (config != null && config.bashAnalyzerEnabled() == false)
+            return DangerousCommands.isDangerous(command);
+        com.minion.core.security.bash.BashCommandAnalyzer.Analysis a = analyzer().analyze(command);
+        return DangerousCommands.isDangerous(command) || a.asks();
+    }
+
+    private com.minion.core.security.bash.BashCommandAnalyzer analyzer;
+    private com.minion.core.security.bash.BashCommandAnalyzer analyzer() {
+        if (analyzer == null) {
+            String raw = config == null ? "" : config.get("bash.readonlyCommands", "");
+            String[] extra = raw.trim().isEmpty() ? new String[0] : raw.trim().split("[,; \\t]+");
+            analyzer = new com.minion.core.security.bash.BashCommandAnalyzer(extra);
+        }
+        return analyzer;
     }
 
     @Override

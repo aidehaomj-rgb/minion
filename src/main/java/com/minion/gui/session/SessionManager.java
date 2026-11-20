@@ -541,7 +541,7 @@ public class SessionManager {
         registry.register(new EditTool(workspace, skillsDir, tmpDir, checkpoints, gate));
         registry.register(new GlobTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new GrepTool(workspace, skillsDir, tmpDir, gate));
-        registry.register(new BashTool(workspace, tmpDirOf(sessionId)));
+        registry.register(new BashTool(workspace, tmpDirOf(sessionId), config));
         PythonRuntime python = new PythonRuntime(config.pythonPath());
         registry.register(new FilesTool(workspace));
         registry.register(new GitTool(workspace));

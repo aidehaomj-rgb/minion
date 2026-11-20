@@ -119,6 +119,9 @@ public class Config {
      * 13 步统一裁决管线（deny 前置、内容级 deny 免疫 bypass、模式映射）。
      * false 仅用于 legacy 对照排障。
      */
+    /** Bash/PowerShell/CMD 分析器（默认 true，v2.4 §4.4 明示安全修复）；false 回退 DangerousCommands 黑名单 */
+    public boolean bashAnalyzerEnabled() { return Boolean.parseBoolean(get("bash.analyzer.enabled", "true")); }
+
     public boolean permissionEngineV2() { return Boolean.parseBoolean(get("permission.engine.v2", "true")); }
     /** read-only / workspace-write / full；未知值回落 workspace-write。 */
     public String permissionMode() { String mode=get("permission.mode","workspace-write").toLowerCase(); return mode.matches("read-only|workspace-write|full")?mode:"workspace-write"; }

@@ -1,0 +1,153 @@
+# Bash 对抗样本集（v2.4 §4.4 验收；格式：期望|命令；
+=换行 	=tab）
+ASK|echo $(rm -rf /)
+ASK|echo `whoami`
+ASK|cat <(ls) | head
+ASK|echo >(curl x)
+ASK|X=$(cat /etc/passwd); echo $X
+ASK|echo ${IFS}rm
+ASK|echo $[1+1]
+ASK|var=`id`; echo $var
+ASK|echo $(echo $(rm x))
+ASK|a=$(pwd)&&rm -rf $a
+ASK|echo "$(shutdown)"
+ASK|echo 'safe' $(danger)
+ASK|x=1; echo ${x:-$(rm)}
+ASK|echo $(<file)
+ASK|pwd | xargs rm
+ASK|echo a;echo $(reboot)
+ASK|find . | xargs chmod 777
+ASK|cat file `which sh`
+ASK|echo $((1+2))
+ASK|ls $(pwd)
+ASK|rm 
+-rf /
+ASK|de\
+l file
+content $(danger)
+EOF
+literal $(safe)
+EOF
+$(rm x)
+EOF
+ASK|echo "unclosed
+ASK|echo 'unclosed
+ASK|echo "a
+b"
+ASK|echo a\;rm
+	ta $(x)
+	TAB
+ASK|echo \\" escaped quote
+ASK|echo \$(rm)
+ASK|echo \\\nrm x
+CLEAN|echo "a'b"
+CLEAN|echo 'a"b'
+ASK|echo "a`b`c"
+ASK|echo $(echo "nested")
+ASK|echo "$(echo 'mixed')"
+ASK|echo '$(literal)'
+ASK|echo "$(exec)"
+ASK|echo "`x`"
+ASK|ls && rm -rf /
+ASK|echo a || rm x
+ASK|ls;shutdown now
+ASK|cat f | sh
+ASK|echo x | sudo tee /etc/passwd
+ASK|true && false & rm x
+ASK|ls & rm x
+ASK|(rm x)
+ASK|(cd / && rm y)
+ASK|{ rm x; }
+ASK|ls;;rm
+ASK|echo & rm
+ASK|ls|rm
+ASK|ls > /etc/passwd
+ASK|echo hi >> ~/.ssh/authorized_keys
+ASK|cat x 2> /dev/sda
+ASK|git log > ~/.bashrc
+ASK|ls <(rm x)
+ASK|IFS=';' rm x
+ASK|LD_PRELOAD=/hack.so ls
+ASK|export PATH=/tmp/hijack:$PATH
+ASK|PATH=/tmp/x:$PATH ls
+ASK|env IFS=x rm y
+ASK|cat /proc/self/environ
+ASK|cat /proc/self/environ; ls
+ASK|set IFS=,
+ASK|declare -x PATH=/tmp
+CLEAN|echo $PATH
+CLEAN|printenv PATH
+CLEAN|env
+CLEAN|env | grep USER
+CLEAN|cat ~/.bashrc
+CLEAN|echo $HOME
+CLEAN|cd ~ && cat .ssh/id_rsa
+ASK|echo ${PATH}
+CLEAN|echo $LD_LIBRARY_PATH
+ASK|bash -c 'rm x'
+ASK|sh -c "shutdown"
+CLEAN|echo -e "rm"
+CLEAN|printf 'rm -rf /'
+CLEAN|echo rm | base64 -d
+ASK|echo cm0gLXJmIC8= | base64 -d | sh
+ASK|e""cho rm
+ASK|e\c\h\o rm
+ASK|r''m -rf /
+ASK|r\m x
+ASK|/??/??/rm x
+ASK|??/rm
+ASK|$'rm'
+ASK|echo $'rm'
+ASK|\rm x
+ASK|:'rm';rm
+ASK|echo !rm
+ASK|history -c
+ASK|eval rm
+ASK|exec rm
+ASK|source /tmp/evil
+ASK|. /tmp/evil
+ASK|zmodload zsh/system
+ASK|echo a rm
+ASK|echo﻿rm
+ASK|ls -la
+ASK|printf 'ab'
+ASK|echo xy
+CLEAN|echo a｜b
+CLEAN|cat /tmp/x；rm y
+CLEAN|ls -la
+CLEAN|cat file.txt
+CLEAN|head -n 20 f
+CLEAN|tail -f log
+CLEAN|grep pattern file
+CLEAN|find . -name "*.java"
+ASK|find . -name x -delete
+ASK|find . -exec rm {} \;
+ASK|find . -execdir sh
+ASK|find . -ok rm
+ASK|find . -okdir rm
+ASK|find . -fprint /tmp/x
+ASK|find . -fprint0 out
+ASK|find . -fls log
+ASK|find . -fprintf out fmt
+CLEAN|git status
+CLEAN|git log --oneline
+CLEAN|git diff --stat
+CLEAN|git diff HEAD
+ASK|git diff --output=/tmp/x
+ASK|git diff -o file
+ASK|git push origin master
+ASK|git reset --hard
+CLEAN|wc -l file
+CLEAN|stat file
+CLEAN|du -sh dir
+CLEAN|df -h
+CLEAN|ls > /dev/null
+CLEAN|ls 2>&1
+ASK|ls > out.txt
+ASK|ls >> log.txt
+ASK|echo x > .git/config
+ASK|echo x > .ssh/authorized_keys
+ASK|echo x > .minion/settings.json
+ASK|echo x > /etc/hosts
+ASK|cat a b > id_rsa
+ASK|rm x > /dev/null 2>&1
