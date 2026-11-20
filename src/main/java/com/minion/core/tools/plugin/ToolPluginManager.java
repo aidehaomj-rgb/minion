@@ -20,6 +20,7 @@ public class ToolPluginManager implements ToolRegistry.PluginGate {
     private final BrowserPlugin browserPlugin;
     private final List<DbPlugin> dbPlugins = new ArrayList<DbPlugin>();
     private final SshPlugin sshPlugin;
+    private final ComputerUsePlugin computerUsePlugin;
     private final List<ToolPlugin> all;
     private final List<Runnable> listeners = new ArrayList<Runnable>();
     /** 插件落盘回调：写文件后顺带通知 GUI 刷新 */
@@ -39,10 +40,12 @@ public class ToolPluginManager implements ToolRegistry.PluginGate {
             if (c != null) dbPlugins.add(new DbPlugin(t, c, saver));
         }
         this.sshPlugin = new SshPlugin(store.sshConfig(), saver);
+        this.computerUsePlugin = new ComputerUsePlugin(store.computerUseConfig(), saver);
         List<ToolPlugin> list = new ArrayList<ToolPlugin>();
         list.add(browserPlugin);
         list.addAll(dbPlugins);
         list.add(sshPlugin);
+        list.add(computerUsePlugin);
         this.all = Collections.unmodifiableList(list);
     }
 
@@ -88,6 +91,8 @@ public class ToolPluginManager implements ToolRegistry.PluginGate {
     }
 
     /** ssh 插件（设置页第 5 行） */
+    public ComputerUsePlugin computerUsePlugin() { return computerUsePlugin; }
+
     public SshPlugin sshPlugin() { return sshPlugin; }
 
     public ToolStore store() { return store; }

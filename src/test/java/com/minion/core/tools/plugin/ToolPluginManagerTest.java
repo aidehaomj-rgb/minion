@@ -26,7 +26,7 @@ public class ToolPluginManagerTest {
         ToolPluginManager m = new ToolPluginManager(ToolStore.load(dir()));
         List<String> ids = new ArrayList<String>();
         for (ToolPlugin p : m.plugins()) ids.add(p.id());
-        assertEquals("[browser, mysql, postgresql, oracle, ssh]", ids.toString());
+        assertEquals("[browser, mysql, postgresql, oracle, ssh, computerUse]", ids.toString()); // 计算机使用插件第 6 位
     }
 
     @Test

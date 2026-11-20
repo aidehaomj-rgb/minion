@@ -29,6 +29,7 @@ public class ToolStore {
         DbConfig postgresql = new DbConfig();
         DbConfig oracle = new DbConfig();
         SshConfig ssh = new SshConfig();
+        com.minion.core.tools.computeruse.ComputerUseConfig computerUse = new com.minion.core.tools.computeruse.ComputerUseConfig();
     }
 
     private final Path file;
@@ -73,6 +74,9 @@ public class ToolStore {
     /** tools.json 的 ssh 段（可插拔工具第 5 个） */
     public SshConfig sshConfig() { return root.ssh; }
 
+    /** tools.json 的 computerUse 段（计算机使用插件） */
+    public com.minion.core.tools.computeruse.ComputerUseConfig computerUseConfig() { return root.computerUse; }
+
     /** gson 可能把显式 null 写进字段（手改文件/旧版本），统一归一化为可用默认值 */
     private void normalize() {
         if (root.browser == null) root.browser = new BrowserConfig();
@@ -81,6 +85,7 @@ public class ToolStore {
         if (b.userDataDir == null) b.userDataDir = "./.minion/browser-profile";
         if (b.port <= 0) b.port = 9222;
         if (b.timeoutMs <= 0) b.timeoutMs = 30000;
+        if (root.computerUse == null) root.computerUse = new com.minion.core.tools.computeruse.ComputerUseConfig();
         for (String id : new String[]{"mysql", "postgresql", "oracle"}) {
             DbConfig db = dbConfig(id);
             if (db == null) continue;
