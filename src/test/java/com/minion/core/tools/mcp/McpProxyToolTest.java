@@ -18,6 +18,9 @@ public class McpProxyToolTest {
         assertEquals("fake_tool", tool.name());
         assertEquals("fake desc", tool.description());
         assertEquals(schema, tool.schema());
-        assertFalse(tool.isHighRisk(null)); // MCP 工具不弹高危确认
+        // v2.4 §3.7 P0：MCP 默认高危确认（旧语义"永不确认"已修复）；应急开关构造时回退
+        assertTrue(tool.isHighRisk(null));
+        assertEquals("mcp:fake_server", tool.serverWhitelistKey());
+        assertFalse(new McpProxyTool(null, "fake_server", info, false).isHighRisk(null));
     }
 }

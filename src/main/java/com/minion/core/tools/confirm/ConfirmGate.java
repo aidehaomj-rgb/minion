@@ -92,6 +92,10 @@ public class ConfirmGate {
     private boolean isWhitelisted(Tool tool, JsonObject args) {
         String toolName = tool.name().toLowerCase();
         if (config.whitelistTools().contains(toolName)) return true;
+        // MCP 整 server 放行：白名单配置 mcp:<server>（v2.4 §3.7——免确认只认用户存过的 allow 规则）
+        if (tool instanceof com.minion.core.tools.mcp.McpProxyTool
+                && config.whitelistTools().contains(((com.minion.core.tools.mcp.McpProxyTool) tool).serverWhitelistKey()))
+            return true;
         if (tool instanceof BashTool && args.has("command")) {
             return CommandWhitelist.matches(args.get("command").getAsString(), config.whitelistCommands());
         }

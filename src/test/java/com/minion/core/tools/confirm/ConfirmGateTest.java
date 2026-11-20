@@ -327,4 +327,75 @@ public class ConfirmGateTest {
                 "paths.write.allowOutside", "true");
         assertTrue("W 会话放行应返回 true", g.checkEscapeWrite(writeTool(), args("{}"), "/tmp/x.txt"));
     }
+    // ==================== v2.4 §3.7 P0：MCP 工具确认缺口修复 ====================
+
+    private com.minion.core.tools.mcp.McpProxyTool mcpTool(String toolName, String server, boolean confirmRequired) {
+        return new com.minion.core.tools.mcp.McpProxyTool(null, server,
+                new com.minion.core.mcp.McpToolInfo(toolName, "test mcp tool", new JsonObject()), confirmRequired);
+    }
+
+    /** MCP 默认高危：必须弹确认，用户拒绝则拒绝（V68 旧行为是静默执行，本测试锁定新语义） */
+    @Test public void mcpToolRequiresConfirmationByDefault() throws Exception {
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.REJECT);
+        assertFalse(gate(ui).check(mcpTool("search", "playwright", true), new JsonObject()));
+        assertTrue(!ui.asked.isEmpty());
+    }
+
+    /** 用户放行一次后允许执行 */
+    @Test public void mcpToolApprovedOnceExecutes() throws Exception {
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.APPROVE);
+        assertTrue(gate(ui).check(mcpTool("search", "playwright", true), new JsonObject()));
+        assertTrue(!ui.asked.isEmpty());
+    }
+
+    /** 整 server 白名单键 mcp:<server> 放行，不弹窗 */
+    @Test public void mcpServerWhitelistSkipsPrompt() throws Exception {
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        config.set("confirm.whitelist.tools", "mcp:playwright");
+        FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.REJECT);  // 若仍弹窗会被拒
+        assertTrue(gate(ui).check(mcpTool("search", "playwright", true), new JsonObject()));
+        assertFalse(!ui.asked.isEmpty());
+    }
+
+    /** 单工具名白名单同样放行（复用既有机制），不弹窗 */
+    @Test public void mcpSingleToolWhitelistSkipsPrompt() throws Exception {
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        config.set("confirm.whitelist.tools", "search");
+        FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.REJECT);
+        assertTrue(gate(ui).check(mcpTool("search", "playwright", true), new JsonObject()));
+        assertFalse(!ui.asked.isEmpty());
+    }
+
+    /** 其他 server 的白名单键不放行本 server（隔离） */
+    @Test public void mcpServerWhitelistDoesNotLeakAcrossServers() throws Exception {
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        config.set("confirm.whitelist.tools", "mcp:other-server");
+        FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.REJECT);
+        assertFalse(gate(ui).check(mcpTool("search", "playwright", true), new JsonObject()));
+        assertTrue(!ui.asked.isEmpty());
+    }
+
+    /** read-only 权限模式下 MCP 高危直接拒绝（与其它高危工具一致） */
+    @Test public void mcpToolDeniedInReadOnlyMode() throws Exception {
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        config.set("permission.mode", "read-only");
+        FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.APPROVE);
+        assertFalse(gate(ui).check(mcpTool("search", "playwright", true), new JsonObject()));
+        assertFalse(!ui.asked.isEmpty());
+    }
+
+    /** mcp.confirm.skip=true 应急回退：confirmRequired=false 构造，恢复 V68 永不确认行为 */
+    @Test public void mcpConfirmSkipFallbackRestoresLegacyBehavior() throws Exception {
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.REJECT);
+        assertTrue(gate(ui).check(mcpTool("search", "playwright", false), new JsonObject()));
+        assertFalse(!ui.asked.isEmpty());
+    }
+
+    /** serverWhitelistKey 键格式 */
+    @Test public void mcpServerWhitelistKeyFormat() {
+        assertEquals("mcp:playwright", mcpTool("search", "playwright", true).serverWhitelistKey());
+    }
 }

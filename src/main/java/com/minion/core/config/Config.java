@@ -107,6 +107,12 @@ public class Config {
     /** 工具空输出占位：true 时成功空输出发送「输出内容为空」占位（服务端校验通过+模型可识别）；默认 false */
     public boolean emptyOutputPlaceholder() { return Boolean.parseBoolean(get("agent.emptyOutput.placeholder", "false")); }
     public boolean confirmSkip() { return Boolean.parseBoolean(get("confirm.skip", "false")); }
+    /**
+     * MCP 工具确认缺口应急回退（默认 false，开发说明 v2.4 §3.7 P0）：
+     * 默认时 MCP 工具按高危确认（整 server 白名单键 {@code mcp:<server>} 或单工具名放行）；
+     * true 时回退 V68 旧行为（MCP 永不确认），仅限应急排障，不作为长期配置。
+     */
+    public boolean mcpConfirmSkip() { return Boolean.parseBoolean(get("mcp.confirm.skip", "false")); }
     /** read-only / workspace-write / full；未知值回落 workspace-write。 */
     public String permissionMode() { String mode=get("permission.mode","workspace-write").toLowerCase(); return mode.matches("read-only|workspace-write|full")?mode:"workspace-write"; }
     public String contextOutputMode() { return get("context.outputMode", "balanced"); }

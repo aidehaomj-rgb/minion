@@ -600,7 +600,7 @@ public class SessionManager {
         for (McpToolInfo info : server.tools) {
             Tool exist = registry.get(info.name);
             if (exist == null) {
-                registry.register(new McpProxyTool(mcp, server.name, info));
+                registry.register(new McpProxyTool(mcp, server.name, info, !config.mcpConfirmSkip()));
                 continue;
             }
             if (exist instanceof McpProxyTool
