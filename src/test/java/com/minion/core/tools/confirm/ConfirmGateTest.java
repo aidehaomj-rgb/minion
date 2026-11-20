@@ -48,15 +48,28 @@ public class ConfirmGateTest {
     }
 
     @Test
-    public void skipFlag_bypassesAsk() throws Exception {
+    public void skipFlag_bypassesAsk_onlyInLegacyEngine() throws Exception {
         Files.write(java.nio.file.Paths.get(config.externalFile().toString()),
-                "confirm.skip=true\n".getBytes(StandardCharsets.UTF_8),
+                "permission.engine.v2=false\nconfirm.skip=true\n".getBytes(StandardCharsets.UTF_8),
                 java.nio.file.StandardOpenOption.APPEND);
         config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
         FakeConfirmUi ui = new FakeConfirmUi();
         ConfirmGate g = gate(ui);
         assertTrue(g.check(writeTool(), args("{\"path\":\"a.txt\"}")));
         assertTrue(ui.asked.isEmpty());
+    }
+
+    /** v2 管线不认 confirm.skip 全局旁路（安全收紧，v2.4 §4.1）：高危写入仍需交互 */
+    @Test
+    public void skipFlag_doesNotBypassInV2() throws Exception {
+        Files.write(java.nio.file.Paths.get(config.externalFile().toString()),
+                "confirm.skip=true\n".getBytes(StandardCharsets.UTF_8),
+                java.nio.file.StandardOpenOption.APPEND);
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.REJECT);
+        ConfirmGate g = gate(ui);
+        assertFalse(g.check(writeTool(), args("{\"path\":\"a.txt\"}")));
+        assertFalse(ui.asked.isEmpty());
     }
 
     @Test
@@ -146,13 +159,27 @@ public class ConfirmGateTest {
 
     @Test
     public void prefixWhitelist_legacyWordEntry_chainUnchanged() throws Exception {
+        // V68 旧白名单对复合命令按首词放行（已知宽松点）——legacy 引擎下保持旧行为不收紧
         config.appendWhitelist("confirm.whitelist.commands", "del");
+        Files.write(java.nio.file.Paths.get(config.externalFile().toString()),
+                "permission.engine.v2=false\n".getBytes(StandardCharsets.UTF_8),
+                java.nio.file.StandardOpenOption.APPEND);
         config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
         FakeConfirmUi ui = new FakeConfirmUi();
         ConfirmGate g = gate(ui);
-        // 用户确认：旧单词条目不收紧
         assertTrue(g.check(bashTool(), args("{\"command\":\"del /q x && rm -rf y\"}")));
         assertTrue(ui.asked.isEmpty());
+    }
+
+    /** v2.4 §4.1/§4.4 安全收紧：前缀规则不再放行复合命令（首段匹配≠整条安全），须逐子命令判定 */
+    @Test
+    public void prefixWhitelist_v2_chainCommandAsks() throws Exception {
+        config.appendWhitelist("confirm.whitelist.commands", "del");
+        config = com.minion.core.config.Config.load(tmp.getRoot().toPath());
+        FakeConfirmUi ui = new FakeConfirmUi(ConfirmUi.Decision.REJECT);
+        ConfirmGate g = gate(ui);
+        assertFalse(g.check(bashTool(), args("{\"command\":\"del /q x && rm -rf y\"}")));
+        assertEquals(1, ui.asked.size());
     }
 
     @Test

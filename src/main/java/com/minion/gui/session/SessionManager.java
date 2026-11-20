@@ -488,7 +488,10 @@ public class SessionManager {
         String projSkills = WorkspacePaths.projectSkillsDir(w);
         workspace.setExtraAllowedDirs(projSkills == null
                 ? new ArrayList<String>() : java.util.Collections.singletonList(projSkills));
-        ConfirmGate gate = new ConfirmGate(config, confirmUi);
+        ConfirmGate gate = new ConfirmGate(config, confirmUi);        // v2.4 §4.1 项目/本地层权限规则来源（settings.json；文件缺失=空来源）
+        gate.setProjectSettings(
+                java.nio.file.Paths.get(w.workDir, ".minion", "settings.json"),
+                java.nio.file.Paths.get(w.workDir, ".minion", "settings.local.json"));
         WorkspaceCtx ctx = new WorkspaceCtx(w.workSpaceName, workspace,
                 new SessionStore(WorkspaceManager.sessionDirFor(jarDir, w.workSpaceName)),
                 gate, skillsDir);

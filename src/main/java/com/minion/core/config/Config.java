@@ -113,6 +113,13 @@ public class Config {
      * true 时回退 V68 旧行为（MCP 永不确认），仅限应急排障，不作为长期配置。
      */
     public boolean mcpConfirmSkip() { return Boolean.parseBoolean(get("mcp.confirm.skip", "false")); }
+
+    /**
+     * 权限引擎 v2（默认 true，开发说明 v2.4 §4.1，属 0.3 明示安全修复）：
+     * 13 步统一裁决管线（deny 前置、内容级 deny 免疫 bypass、模式映射）。
+     * false 仅用于 legacy 对照排障。
+     */
+    public boolean permissionEngineV2() { return Boolean.parseBoolean(get("permission.engine.v2", "true")); }
     /** read-only / workspace-write / full；未知值回落 workspace-write。 */
     public String permissionMode() { String mode=get("permission.mode","workspace-write").toLowerCase(); return mode.matches("read-only|workspace-write|full")?mode:"workspace-write"; }
     public String contextOutputMode() { return get("context.outputMode", "balanced"); }
