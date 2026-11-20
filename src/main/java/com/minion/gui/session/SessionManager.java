@@ -493,7 +493,8 @@ public class SessionManager {
                 java.nio.file.Paths.get(w.workDir, ".minion", "settings.json"),
                 java.nio.file.Paths.get(w.workDir, ".minion", "settings.local.json"));
         WorkspaceCtx ctx = new WorkspaceCtx(w.workSpaceName, workspace,
-                new SessionStore(WorkspaceManager.sessionDirFor(jarDir, w.workSpaceName)),
+                new SessionStore(WorkspaceManager.sessionDirFor(jarDir, w.workSpaceName),
+                        config.transcriptJsonl() ? jarDir.resolve(".minion").resolve("transcripts").resolve(w.workSpaceName) : null),
                 gate, skillsDir);
         try { ctx.order.addAll(ctx.store.loadOrder()); }
         catch (IOException e) { notifyError("读取会话顺序失败: " + e.getMessage()); }
@@ -1227,7 +1228,8 @@ public class SessionManager {
         WorkspaceCtx ctx = ctxByName.remove(oldName);
         ctx.name = newName;
         ctxByName.put(newName, ctx);
-        ctx.store = new SessionStore(WorkspaceManager.sessionDirFor(jarDir, newName)); // 目录已迁移，store 跟随
+        ctx.store = new SessionStore(WorkspaceManager.sessionDirFor(jarDir, newName),
+                config.transcriptJsonl() ? jarDir.resolve(".minion").resolve("transcripts").resolve(newName) : null); // 目录已迁移，store 跟随
         for (SessionHandle h : ctx.sessions) h.workspaceName = newName;
         if (currentWorkspaceName.equals(oldName)) currentWorkspaceName = newName;
         notifyWorkspaceChanged();

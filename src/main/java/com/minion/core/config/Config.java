@@ -122,6 +122,9 @@ public class Config {
     /** Bash/PowerShell/CMD 分析器（默认 true，v2.4 §4.4 明示安全修复）；false 回退 DangerousCommands 黑名单 */
     public boolean bashAnalyzerEnabled() { return Boolean.parseBoolean(get("bash.analyzer.enabled", "true")); }
 
+    /** v2.4 §9.1：transcript JSONL 双写层（默认 false=legacy 单写；replica-offline 开启双写） */
+    public boolean transcriptJsonl() { return Boolean.parseBoolean(get("session.transcript.jsonl", "false")); }
+
     public boolean permissionEngineV2() { return Boolean.parseBoolean(get("permission.engine.v2", "true")); }
     /** read-only / workspace-write / full；未知值回落 workspace-write。 */
     public String permissionMode() { String mode=get("permission.mode","workspace-write").toLowerCase(); return mode.matches("read-only|workspace-write|full")?mode:"workspace-write"; }

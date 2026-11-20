@@ -2,6 +2,7 @@ package com.minion.core.storage;
 
 import com.google.gson.Gson;
 import com.minion.core.agent.Session;
+import com.minion.core.diagnostics.DiagnosticLog;
 import com.minion.core.llm.Message;
 
 import java.io.IOException;
@@ -21,8 +22,24 @@ public class SessionStore {
     private final Path dir;
     private final SessionIndex index;
     private final Map<String, SessionEventJournal> journals = new HashMap<String, SessionEventJournal>();
+    /** v2.4 §9.1 transcript JSONL 根目录（null = 开关关闭，零行为变化）；key=sessionId */
+    private final Path transcriptsRoot;
+    private final Map<String, TranscriptJsonl> transcripts = new HashMap<String, TranscriptJsonl>();
 
-    public SessionStore(Path dir) { this.dir = dir; this.index = new SessionIndex(dir); }
+    public SessionStore(Path dir) { this(dir, null); }
+
+    public SessionStore(Path dir, Path transcriptsRoot) {
+        this.dir = dir;
+        this.index = new SessionIndex(dir);
+        this.transcriptsRoot = transcriptsRoot;
+    }
+
+    private synchronized TranscriptJsonl transcript(String id) {
+        if (transcriptsRoot == null) return null;
+        TranscriptJsonl t = transcripts.get(id);
+        if (t == null) { t = new TranscriptJsonl(transcriptsRoot, id); transcripts.put(id, t); }
+        return t;
+    }
 
     private synchronized SessionEventJournal journal(String id) {
         SessionEventJournal j = journals.get(id);
@@ -34,11 +51,15 @@ public class SessionStore {
     public void appendMessage(Session session, Message message) throws IOException {
         if (!Files.exists(dir.resolve(session.id + ".json"))) save(session);
         journal(session.id).record(session, message);
+        TranscriptJsonl t = transcript(session.id);
+        if (t != null) t.append(session, "message", new TranscriptJsonl.MessagePayload(message));
     }
 
     /** Archive first, then write the replacement context before swapping it in memory. */
     public void recordCompactionTransition(Session session, List<Message> after) throws IOException {
         journal(session.id).compact(session, after);
+        TranscriptJsonl t = transcript(session.id);
+        if (t != null) t.append(session, "compact", after.toArray(new Message[0]));
     }
 
     public int archiveCompacted(Session session, List<Message> before, List<Message> after) throws IOException {
@@ -110,6 +131,9 @@ public class SessionStore {
         if (session == null || !id.equals(session.id)) throw new IOException("Invalid session snapshot: " + id);
         if (session.messages == null) session.messages = new ArrayList<Message>();
         journal(id).replay(session);
+        TranscriptJsonl t = transcript(id);
+        if (t != null && !t.verifyConsistent())
+            DiagnosticLog.warn("transcript", "会话 " + id + " 的 JSONL 副本损坏；权威源（JSON 快照+journal）已完整恢复，副本按空重建");
         if (session.taskState == null) session.taskState = new com.minion.core.agent.TaskState();
         if (session.queuedTasks == null) session.queuedTasks = new ArrayList<Session.QueuedTask>();
         Path queueFile = dir.resolve(id + ".queue.json");
@@ -150,6 +174,8 @@ public class SessionStore {
         new HistoryArchive(dir, id).delete();
         journal(id).delete();
         synchronized (this) { journals.remove(id); }
+        TranscriptJsonl t = transcript(id);
+        if (t != null) { t.delete(); synchronized (this) { transcripts.remove(id); } }
         index.deleted(id);
     }
 
