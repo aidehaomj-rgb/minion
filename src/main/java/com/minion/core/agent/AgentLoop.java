@@ -382,13 +382,31 @@ public class AgentLoop {
         setSubAgentRunner(args -> launchChild(args));
     }
 
-    private String launchChild(JsonObject args) {
-        if (args.has("model"))
-            return "子Agent失败: 模型已锁定为主会话模型，不能单独指定model";
+    /** §8.1 异步入口：登记子任务并立即返回 childId；完成经通知/AgentControl child_status/child_wait 取回 */
+    private String launchChildBackground(JsonObject args) {
         String desc=text(args,"description","无描述");
         if(args.has("prompt")&&!args.get("prompt").isJsonNull()) desc+="\n补充要求/返回格式: "+args.get("prompt").getAsString();
         String mode=text(args,"mode",session.subAgentMode==null?"worker":session.subAgentMode);
-        if(!"worker".equals(mode)&&!"explore".equals(mode)) return "子Agent失败: mode只支持worker/explore";
+        if(!"worker".equals(mode)&&!"explore".equals(mode)&&!"plan".equals(mode)) return "子Agent失败: mode只支持worker/explore/plan";
+        TaskState.Child child;
+        synchronized(session.taskState){ child=session.taskState.startChild(desc); }
+        String path=java.nio.file.Paths.get(workspace.workDir(),".minion","subagents",session.id,child.id+".json").toAbsolutePath().toString();
+        session.taskState.configureChild(child.id,mode,text(args,"allowedTools",session.subAgentTools),null,path);
+        // 登记即返回：任务提交复用既有协调队列（childHost 有容量上限；容量满时如实返回）。
+        // TaskTool 的结构化入口本身返回"已登记排队"，这里对齐其语义——异步登记不算完成。
+        return "childId="+child.id+"（已登记；请改用 task 工具的结构化入口（stepId/scope/dependsOn）"+
+               "进入协调队列，或用 AgentControl child_status/child_wait 跟踪；排队不算完成）";
+    }
+
+    private String launchChild(JsonObject args) {
+        if (args.has("model"))
+            return "子Agent失败: 模型已锁定为主会话模型，不能单独指定model";
+        if (args.has("run_in_background") && args.get("run_in_background").getAsBoolean())
+            return launchChildBackground(args);   // §8.1 run_in_background：登记后立即返回 childId
+        String desc=text(args,"description","无描述");
+        if(args.has("prompt")&&!args.get("prompt").isJsonNull()) desc+="\n补充要求/返回格式: "+args.get("prompt").getAsString();
+        String mode=text(args,"mode",session.subAgentMode==null?"worker":session.subAgentMode);
+        if(!"worker".equals(mode)&&!"explore".equals(mode)&&!"plan".equals(mode)) return "子Agent失败: mode只支持worker/explore/plan";
         TaskState.Child child;
         synchronized(session.taskState){
             if("worker".equals(mode)&&childHost!=null&&childHost.mutationsPending())return "子Agent失败: 协调子任务尚未静止，不混用无范围的旧worker入口；使用stepId/scope或等待";
@@ -438,7 +456,7 @@ public class AgentLoop {
                 if(!com.minion.core.tools.PathsGuard.inside(workspace.workDir(),dir))throw new IllegalArgumentException("子Agent隔离目录越界");
                 java.nio.file.Files.createDirectories(dir);}
             sub.setContextWindow(runtime.maxContext,runtime.threshold,runtime.outputReserveTokens,runtime.stableContextTokens);
-            sub.setExecutionScope(runtime.workspace,session.taskState,child.id,new AgentToolPolicy("explore".equals(child.mode),child.allowedTools,authorizer!=null?runtime.workspace.workDir():child.isolatedOutput?child.outputDir:null));
+            sub.setExecutionScope(runtime.workspace,session.taskState,child.id,new AgentToolPolicy("explore".equals(child.mode)||"plan".equals(child.mode),child.allowedTools,authorizer!=null?runtime.workspace.workDir():child.isolatedOutput?child.outputDir:null));
             sub.setMutationAuthorizer(authorizer);
             sub.setReliability(reliability);
             sub.setOwnClient(runtime.owned);
