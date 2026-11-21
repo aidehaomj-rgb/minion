@@ -549,13 +549,28 @@ public class SessionManager {
         registry.register(new EditTool(workspace, skillsDir, tmpDir, checkpoints, gate, readState, ccSemantics));
         registry.register(new GlobTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new GrepTool(workspace, skillsDir, tmpDir, gate));
-        registry.register(new BashTool(workspace, tmpDirOf(sessionId), config));
+        ProcessTool processTool = new ProcessTool(workspace);
+        registry.register(processTool);
+        // §3.2：Bash run_in_background 委托同一后台账本（唯一真源）；TaskOutput/TaskStop/Sleep 补齐
+        {
+            BashTool bash = new BashTool(workspace, tmpDirOf(sessionId), config);
+            bash.setBackgroundRunner(processTool);
+            registry.register(bash);
+            registry.register(new com.minion.core.tools.TaskOutputTool(processTool));
+            registry.register(new com.minion.core.tools.TaskStopTool(processTool));
+            registry.register(new com.minion.core.tools.SleepTool(() -> session.taskState != null
+                    && "interrupted_needs_review".equals(session.taskState.status)));
+        }
+        if (config.teamEnabled()) {   // §8.3 团队邮箱工具（默认 false；replica-offline 开启）
+            String workDir = workspace.workDir();
+            registry.register(new com.minion.core.team.TeamTools.TeamCreateTool(workDir));
+            registry.register(new com.minion.core.team.TeamTools.TeamDeleteTool(workDir));
+            registry.register(new com.minion.core.team.TeamTools.SendMessageTool(workDir));
+        }
         PythonRuntime python = new PythonRuntime(config.pythonPath());
         registry.register(new FilesTool(workspace));
         registry.register(new GitTool(workspace));
         registry.register(new com.minion.core.tools.dev.CodeIndexTool(workspace));
-        ProcessTool processTool = new ProcessTool(workspace);
-        registry.register(processTool);
         registry.register(new ProjectTool(workspace));
         registry.register(new BuildTool(workspace, python, processTool));
         registry.register(new com.minion.core.tools.dev.ArtifactVerificationTool(workspace,()->

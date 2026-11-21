@@ -26,6 +26,8 @@ import java.util.regex.Pattern;
 public class BashTool implements Tool {
 
     public static final int DEFAULT_TIMEOUT = 120;
+    /** §3.2 超时上限（bash.maxTimeout 秒，默认 600=600000ms） */
+    public static final int MAX_TIMEOUT = 600;
 
     // 纯 cd 命令识别：整命令只有 cd [dir]，不含 && / | 等复合语法
     private static final Pattern CD_PATTERN =
@@ -85,8 +87,25 @@ public class BashTool implements Tool {
 
     @Override
     public JsonObject schema() {
-        return SchemaGenerator.objectSchema("执行 shell 命令",
-                new String[]{"command", "timeoutSeconds"}, new String[]{"command"});
+        JsonObject schema = SchemaGenerator.objectSchema("执行 shell 命令",
+                new String[]{"command", "timeoutSeconds", "description", "run_in_background", "sandbox"},
+                new String[]{"command"});
+        JsonObject bg = new JsonObject();
+        bg.addProperty("type", "boolean");
+        bg.addProperty("description", "true=立即返回后台任务 id（用 TaskOutput 取增量输出/TaskStop 终止）");
+        schema.getAsJsonObject("properties").add("run_in_background", bg);
+        JsonObject sandbox = new JsonObject();
+        sandbox.addProperty("type", "boolean");
+        sandbox.addProperty("description", "本机不支持 OS 沙箱：true 会在执行前直接报错");
+        schema.getAsJsonObject("properties").add("sandbox", sandbox);
+        return schema;
+    }
+
+    /** §3.2 后台执行委托（SessionManager 装配时注入会话 ProcessTool；null=未接线走前台） */
+    private volatile com.minion.core.tools.dev.ProcessTool background;
+
+    public void setBackgroundRunner(com.minion.core.tools.dev.ProcessTool processTool) {
+        this.background = processTool;
     }
 
     @Override
@@ -115,6 +134,22 @@ public class BashTool implements Tool {
     public ToolResult execute(JsonObject args) throws Exception {
         String command = args.has("command") ? args.get("command").getAsString() : "";
         if (command.isEmpty()) return ToolResult.errorWithoutSideEffects("缺少 command 参数");
+        // §3.2：sandbox=true 明确拒绝（Win7 无 OS 沙箱）；省略时按普通权限流程，不静默忽略安全参数
+        if (args.has("sandbox") && !args.get("sandbox").isJsonNull()
+                && "true".equalsIgnoreCase(args.get("sandbox").getAsString()))
+            return ToolResult.errorWithoutSideEffects("本机（Windows 7）不支持 OS 级沙箱，sandbox=true 已拒绝执行；"
+                    + "请去掉 sandbox 参数按普通权限流程执行（危险命令会走确认）");
+        // §3.2 run_in_background：委托会话后台进程机制（唯一真源：ProcessTool 账本/输出/取消围栏）
+        if (args.has("run_in_background") && !args.get("run_in_background").isJsonNull()
+                && "true".equalsIgnoreCase(args.get("run_in_background").getAsString())) {
+            com.minion.core.tools.dev.ProcessTool process = background;
+            if (process == null)
+                return ToolResult.errorWithoutSideEffects("后台执行未接线；请直接使用 Process 工具 start");
+            JsonObject start = new JsonObject();
+            start.addProperty("action", "start");
+            start.addProperty("command", command);
+            return process.execute(start);
+        }
         final int timeout;
         try {
             timeout = args.has("timeoutSeconds") ? args.get("timeoutSeconds").getAsInt() : DEFAULT_TIMEOUT;
@@ -122,6 +157,9 @@ public class BashTool implements Tool {
             return ToolResult.errorWithoutSideEffects("参数 timeoutSeconds 格式错误: " + e.getMessage());
         }
         if (timeout < 1) return ToolResult.errorWithoutSideEffects("timeoutSeconds 非法: " + timeout);
+        if (timeout > MAX_TIMEOUT)
+            return ToolResult.errorWithoutSideEffects("timeoutSeconds 超过上限 " + MAX_TIMEOUT
+                    + "s（bash.maxTimeout）；长时间任务请用 run_in_background 或 Process 工具");
 
         // 纯 cd 命令直接改会话级 cwd（跨命令持久化）；复合命令（含 && 等）走 shell 原样执行
         String trimmed = command.trim();

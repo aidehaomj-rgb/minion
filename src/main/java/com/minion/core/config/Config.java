@@ -200,6 +200,9 @@ public class Config {
     /** v2.4 §5.4 ToolSearch 延迟加载（默认 false 保守起步；验证 token 节省 ≥40% 后改默认 true） */
     public boolean toolSearchEnabled() { return Boolean.parseBoolean(get("toolsearch.enabled", "false")); }
 
+    /** v2.4 §8.2/§8.3 团队（team.enabled 默认 false；replica-offline 开启时注册 Team 工具） */
+    public boolean teamEnabled() { return Boolean.parseBoolean(get("team.enabled", "false")); }
+
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
         catch (Exception e) { return fallback; }
