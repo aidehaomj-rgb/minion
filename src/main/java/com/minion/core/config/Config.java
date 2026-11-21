@@ -194,6 +194,12 @@ public class Config {
     /** v2.4 §5.3 压缩后文件重读（默认 true；无读状态时零影响） */
     public boolean compactRestoreEnabled() { return Boolean.parseBoolean(get("compact.restore.enabled", "true")); }
 
+    /** v2.4 §6.1 MINION.md 自动发现（默认 false=不发现，projectMd 原行为不变；replica-offline 开启） */
+    public boolean instructionsEnabled() { return Boolean.parseBoolean(get("instructions.enabled", "false")); }
+
+    /** v2.4 §5.4 ToolSearch 延迟加载（默认 false 保守起步；验证 token 节省 ≥40% 后改默认 true） */
+    public boolean toolSearchEnabled() { return Boolean.parseBoolean(get("toolsearch.enabled", "false")); }
+
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
         catch (Exception e) { return fallback; }

@@ -805,6 +805,10 @@ public class SessionManager {
         loop.compactRestoreEnabled = config.compactRestoreEnabled();
         ContextManager cmFormula = loop.contextManager();
         if (cmFormula != null) cmFormula.setAutocompactFormula(config.autocompactFormula());
+        // §6.1 MINION.md 自动发现（默认关；projectMd 原行为不变）
+        if (config.instructionsEnabled())
+            loop.setInstructionLoader(new com.minion.core.context.InstructionLoader(
+                    Paths.get(loop.workspace().workDir()), jarDir, true));
         loop.setToolProfileSupplier(()->{
             try {
                 ModelConfig current=parent.runtimeModelConfig==null?modelForSession(parent):parent.runtimeModelConfig;

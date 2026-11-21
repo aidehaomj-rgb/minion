@@ -316,6 +316,12 @@ public class AgentLoop {
     public boolean microcompactEnabled = false;
     public int microcompactIdleMinutes = 60;
     private long lastAssistantAt;   // 最近一次 assistant 入历史时间（microcompact 闲置判据）
+    /** §6.1 MINION.md 装载器（instructions.enabled 默认 false=不发现；非 null 且启用时请求侧注入） */
+    private volatile com.minion.core.context.InstructionLoader instructionLoader;
+
+    public void setInstructionLoader(com.minion.core.context.InstructionLoader loader) {
+        this.instructionLoader = loader;
+    }
     private boolean lengthEscalationUsed;
     private Long turnTokenBudget;
     private long turnUsedTokens, lastRoundTokens = -1, prevRoundTokens = -1;
@@ -1655,6 +1661,20 @@ public class AgentLoop {
                 if (recalled != null) request.add(recalled);
                 List<Message> modelMessages = contextManager == null
                         ? session.messages : contextManager.prepareForRequest(session.messages);
+                // §6.1 MINION.md 指令层（instructions.enabled，默认关）：请求侧注入首条 context 消息
+                // （不写历史）；层级发现+@import 去重由 InstructionLoader 承担
+                {
+                    com.minion.core.context.InstructionLoader loader = instructionLoader;
+                    if (loader != null) {
+                        java.util.List<com.minion.core.context.InstructionLoader.Layer> layers = loader.loadAll(null);
+                        if (!layers.isEmpty()) {
+                            StringBuilder sb = new StringBuilder("[项目指令]\n");
+                            for (com.minion.core.context.InstructionLoader.Layer layer : layers)
+                                sb.append(layer.content.trim()).append("\n\n");
+                            request.add(Message.taskControl(sb.toString()));
+                        }
+                    }
+                }
                 request.addAll(modelMessages);
                 if (lengthContinuationHint != null) {
                     // 仅加入本次 API 请求，不写入会话/界面，避免伪造一条用户消息。
