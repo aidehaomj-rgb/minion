@@ -582,6 +582,16 @@ public class SessionManager {
             registry.register(new com.minion.core.team.TeamTools.TeamDeleteTool(workDir));
             registry.register(new com.minion.core.team.TeamTools.SendMessageTool(workDir));
         }
+        // §3.4 TaskV2（唯一事实源=TaskWorkflow/TaskState）+ NotebookEdit；计划模式工具对随
+        // AgentLoop 构造注册（需要 loop 引用）
+        {
+            com.minion.core.tools.TaskV2Tools taskV2 = new com.minion.core.tools.TaskV2Tools(session);
+            registry.register(com.minion.core.tools.TaskV2Tools.action("TaskCreate", taskV2, "create"));
+            registry.register(com.minion.core.tools.TaskV2Tools.action("TaskGet", taskV2, "get"));
+            registry.register(com.minion.core.tools.TaskV2Tools.action("TaskUpdate", taskV2, "update"));
+            registry.register(com.minion.core.tools.TaskV2Tools.action("TaskList", taskV2, "list"));
+            registry.register(new com.minion.core.tools.NotebookEditTool(workspace, readState, ccSemantics));
+        }
         PythonRuntime python = new PythonRuntime(config.pythonPath());
         registry.register(new FilesTool(workspace));
         {   // §13.2 提交归因（attribution.commit 默认 true）：commit 追加 Generated with Minion + 模型共同作者

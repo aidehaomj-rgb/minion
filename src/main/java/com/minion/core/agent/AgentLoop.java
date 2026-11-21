@@ -518,6 +518,10 @@ public class AgentLoop {
         });
         registry.register(askUserTool);
         registry.register(new com.minion.core.tools.AgentControlTool(this,workspace));
+        // §3.4 计划模式工具对（EnterPlanMode 需要 loop 引用；ExitPlanMode 读会话计划文件）
+        registry.register(new com.minion.core.tools.PlanModeTools.EnterPlanModeTool(this));
+        registry.register(new com.minion.core.tools.PlanModeTools.ExitPlanModeTool(
+                workspace.workDir(), session.id));
         registry.register(new com.minion.core.tools.dev.CodeIndexTool(workspace,()->interrupted));
         registry.register(new com.minion.core.tools.RuntimeJobsTool(()->{
             java.nio.file.Path root=java.nio.file.Paths.get(workspace.workDir()).toAbsolutePath().normalize();
