@@ -196,6 +196,7 @@ public class SessionManager {
         this.dispatcher = new CommandDispatcher().featureFlags(() -> featureFlags)
                 .stats(this::statsText)
                 .doctor(this::doctorText)
+                .plugin(this::pluginCommand)
                 .queuePriority((h, text, priority) -> sendPrioritized(h, text, priority))
                 .rewind(new CommandDispatcher.RewindApi() {
                     public String list(com.minion.core.agent.Session s) { return rewindList(s); }
@@ -377,6 +378,7 @@ public class SessionManager {
 
     /** 装配所有工作空间上下文（对照 Main 现有注册代码），并恢复历史会话 */
     private void loadWorkspaceContexts() {
+        loadPlugins();   // §7.2 先装载插件技能（buildCtx 内 skillsOf 合并需插件快照就绪）
         for (WorkspaceConfig w : workspaces.list()) {
             WorkspaceCtx ctx = buildCtx(w);
             ctxByName.put(w.workSpaceName, ctx);
@@ -921,9 +923,84 @@ public class SessionManager {
     private SkillSet.Result skillsOf(String workspaceName) {
         SkillSet.Result hit = skillCache.get(workspaceName);
         if (hit != null) return hit;
-        SkillSet.Result r = skillSet.resolve(projectSkillsDirOf(workspaceName));
+        SkillSet.Result r = SkillSet.withExtra(
+                skillSet.resolve(projectSkillsDirOf(workspaceName)), pluginSkills);
         skillCache.put(workspaceName, r);
         return r;
+    }
+
+    /** §7.2 插件运行时技能快照（loadPlugins 时刷新；null=无插件体系） */
+    private volatile List<Skill> pluginSkills;
+    /** §7.2 插件运行时（/plugin 处理与重载） */
+    private volatile com.minion.core.plugins.PluginLoader pluginLoader;
+
+    /**
+     * §7.2 装载已启用插件（构造期与 /reload-plugins 调用）：刷新插件技能快照并失效
+     * 技能缓存（新会话生效；插件技能 SOURCE_PLUGIN 默认禁内联 shell，hooks/MCP/LSP
+     * 声明经 §10.9 信任复核——未批准仅展示不执行）。
+     */
+    public void loadPlugins() {
+        try {
+            com.minion.core.plugins.PluginMarketplace marketplace =
+                    new com.minion.core.plugins.PluginMarketplace(jarDir);
+            com.minion.core.plugins.PluginInstaller installer =
+                    new com.minion.core.plugins.PluginInstaller(jarDir, marketplace);
+            com.minion.core.plugins.PluginLoader loader = new com.minion.core.plugins.PluginLoader(
+                    installer, com.minion.core.security.ProjectTrustStore.load(jarDir));
+            com.minion.core.plugins.PluginLoader.Runtime runtime = loader.loadEnabled();
+            pluginSkills = runtime.skills.isEmpty()
+                    ? null : new ArrayList<Skill>(runtime.skills);
+            pluginLoader = loader;
+            skillCache.clear();   // 快照失效：下一会话并入插件技能
+            if (!runtime.pendingTrust.isEmpty())
+                notifyError("插件执行声明待信任（§10.9，未批准不执行）: "
+                        + runtime.pendingTrust);
+        } catch (Exception e) {
+            notifyError("插件装载失败: " + e.getMessage());
+        }
+    }
+
+    /** §7.2 /plugin 命令处理（列表/安装/卸载/启停/回退/市场管理） */
+    public String pluginCommand(String[] parts) {
+        com.minion.core.plugins.PluginMarketplace marketplace =
+                new com.minion.core.plugins.PluginMarketplace(jarDir);
+        com.minion.core.plugins.PluginInstaller installer =
+                new com.minion.core.plugins.PluginInstaller(jarDir, marketplace);
+        String action = parts.length > 1 ? parts[1] : "list";
+        if ("reload".equals(action)) {
+            loadPlugins();
+            return "插件已重载（技能缓存失效，新会话生效；待信任声明见错误通知）";
+        }
+        if ("list".equals(action)) {
+            StringBuilder out = new StringBuilder("已安装插件：");
+            java.util.List<com.minion.core.plugins.PluginInstaller.Installed> all = installer.installed();
+            if (all.isEmpty()) out.append("（无）");
+            for (com.minion.core.plugins.PluginInstaller.Installed i : all)
+                out.append(String.format("%n  %s@%s [%s] %s", i.name, i.version,
+                        i.enabled ? "启用" : "停用", i.cacheDir));
+            out.append(String.format("%n本地市场："));
+            java.util.List<com.minion.core.plugins.PluginMarketplace.Source> markets = marketplace.known();
+            if (markets.isEmpty()) out.append("（无；/plugin market add <名> directory <路径>）");
+            for (com.minion.core.plugins.PluginMarketplace.Source s : markets) {
+                out.append(String.format("%n  %s（%s）%s", s.name, s.type, s.location));
+                for (com.minion.core.plugins.PluginManifest m : marketplace.listPlugins(s))
+                    out.append(String.format("%n    - %s@%s %s", m.name, m.version, m.description));
+            }
+            return out.toString();
+        }
+        if ("install".equals(action) && parts.length > 2) return installer.install(parts[2]) + "\n/reload-plugins 生效";
+        if ("uninstall".equals(action) && parts.length > 2) return installer.uninstall(parts[2]);
+        if ("enable".equals(action) && parts.length > 2) return installer.setEnabled(parts[2], true);
+        if ("disable".equals(action) && parts.length > 2) return installer.setEnabled(parts[2], false);
+        if ("rollback".equals(action) && parts.length > 2) return installer.rollback(parts[2]);
+        if ("market".equals(action)) {
+            if ("add".equals(parts.length > 2 ? parts[2] : "") && parts.length > 5)
+                return marketplace.add(parts[3], parts[4], parts[5]);
+            if ("remove".equals(parts.length > 2 ? parts[2] : "") && parts.length > 3)
+                return marketplace.remove(parts[3]);
+            return "用法: /plugin market add <名> <directory|git> <路径>｜/plugin market remove <名>";
+        }
+        return "用法: /plugin [list|install|uninstall|enable|disable|rollback|market ...]；另见 /reload-plugins";
     }
 
     /** 项目级技能目录绝对路径（相对写法按该空间项目路径解析）；未配置 → null */

@@ -39,6 +39,18 @@ public class SkillSet {
         }
     }
 
+    /** 以既有结果为底追加外部技能（§7.2 插件技能并入；同名不覆盖既有——项目/内置优先） */
+    public static Result withExtra(Result base, List<Skill> extra) {
+        if (extra == null || extra.isEmpty()) return base;
+        Map<String, Skill> merged = new LinkedHashMap<String, Skill>();
+        for (Skill s : base.skills) merged.put(s.name.toLowerCase(Locale.ROOT), s);
+        for (Skill s : extra)
+            if (!merged.containsKey(s.name.toLowerCase(Locale.ROOT)))
+                merged.put(s.name.toLowerCase(Locale.ROOT), s);
+        return new Result(Collections.unmodifiableList(
+                new ArrayList<Skill>(merged.values())), base.warning);
+    }
+
     /** projectDir 为空/null → 仅内置（等价无项目技能）；否则项目技能在前、同名顶掉内置 */
     public Result resolve(String projectDir) {
         if (projectDir == null || projectDir.trim().isEmpty()) {

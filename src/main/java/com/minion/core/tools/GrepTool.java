@@ -10,6 +10,7 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -63,7 +64,8 @@ public class GrepTool implements Tool {
     @Override
     public JsonObject schema() {
         return SchemaGenerator.objectSchema("正则搜索文件内容",
-                new String[]{"pattern", "path", "ignoreCase", "maxResults"},
+                new String[]{"pattern", "path", "ignoreCase", "maxResults",
+                        "glob", "type", "output_mode", "context", "head_limit", "offset"},
                 new String[]{"pattern"});
     }
 
@@ -100,6 +102,38 @@ public class GrepTool implements Tool {
         }
         if (max < 0) return ToolResult.error("参数 maxResults 不能为负: " + max);
 
+        // §3.1 参数补全（切片 29）：glob/type/output_mode/context/head_limit/offset——
+        // 任一增强参数在用即走 Java 遍历缓冲整形（rg 旁路仅服务旧语义快速路径）；
+        // multiline 明确不支持（回退模式按规格声明报错，不静默）
+        final String globFilter = args.has("glob") ? args.get("glob").getAsString() : "";
+        final String typeFilter = args.has("type") ? args.get("type").getAsString() : "";
+        final String outputMode = args.has("output_mode") ? args.get("output_mode").getAsString() : "content";
+        if (!java.util.Arrays.asList("content", "files_with_matches", "count").contains(outputMode))
+            return ToolResult.error("output_mode 仅支持 content|files_with_matches|count: " + outputMode);
+        if (args.has("multiline") && args.get("multiline").getAsBoolean())
+            return ToolResult.error("multiline 模式当前不支持（Java 回退实现按行匹配）；请改写为逐行模式或分多次搜索");
+        final int contextLines = intOf(args, "context", 0);
+        if (contextLines < 0 || contextLines > 10)
+            return ToolResult.error("context 范围 0..10");
+        final int headLimit = args.has("head_limit")
+                ? args.get("head_limit").getAsInt() : max;
+        final int offset = intOf(args, "offset", 0);
+        if (offset < 0) return ToolResult.error("参数 offset 不能为负");
+        final boolean enhanced = !globFilter.isEmpty() || !typeFilter.isEmpty()
+                || !"content".equals(outputMode) || contextLines > 0
+                || args.has("head_limit") || offset > 0;
+        final java.util.List<java.nio.file.PathMatcher> globs = new java.util.ArrayList<java.nio.file.PathMatcher>();
+        for (String g : globFilter.split(","))
+            if (!g.trim().isEmpty()) globs.add(FileSystems.getDefault().getPathMatcher("glob:" + g.trim()));
+        final java.util.Set<String> typeExts = new java.util.HashSet<String>();
+        for (String t : typeFilter.split(","))
+            for (String ext : t.trim().isEmpty() ? new String[0] : t.trim().split("\\s+|\\.|,"))
+                if (!ext.isEmpty()) typeExts.add(ext.toLowerCase());
+        final java.util.List<String> fileHits = new java.util.ArrayList<String>();   // files_with_matches
+        final java.util.List<int[]> countHits = new java.util.ArrayList<int[]>();     // count（hash 文件→条数用并行表）
+        final java.util.List<String> countFiles = new java.util.ArrayList<String>();
+        final java.util.List<String> buffered = new java.util.ArrayList<String>();    // content+context 缓冲
+
         // 落盘：全量匹配流式写入；失败降级（dumpWriter[0] == null 纯内存截断，不阻断执行）
         final Path dumpPath = OutputDump.write(tmpDir, "grep", "");
         final BufferedWriter[] dumpWriter = { dumpPath == null ? null
@@ -117,9 +151,10 @@ public class GrepTool implements Tool {
         final Path rootNormalized = root.toAbsolutePath().normalize();
 
         // ripgrep 旁路：命中则显示/落盘状态已填好；失败自动重置并回退 Java 遍历
+        // （增强参数在用时走 Java 路径——rg 旁路不携带 glob/type/output_mode/offset 语义）
         boolean rgDone = false;
         String rg = RipgrepSidecar.resolve();
-        if (rg != null && rgSafePattern(pattern) && Files.isDirectory(root)) {
+        if (!enhanced && rg != null && rgSafePattern(pattern) && Files.isDirectory(root)) {
             rgDone = tryRipgrep(rg, pattern, ignoreCase, root, rootInWork, rootNormalized,
                     dumpPath, dumpWriter, dumpDirPath, disp, dispCount, totalCount, dispFull, max);
         }
@@ -156,6 +191,19 @@ public class GrepTool implements Tool {
                 }
                 if (ignore.isIgnored(file, false)) return FileVisitResult.CONTINUE;
                 if (com.minion.core.tools.search.GitignoreFilter.isBinary(file)) return FileVisitResult.CONTINUE;
+                // §3.1 glob/type 文件过滤（增强路径）
+                String fileName = file.getFileName().toString();
+                if (!globs.isEmpty()) {
+                    boolean globHit = false;
+                    for (java.nio.file.PathMatcher m : globs)
+                        if (m.matches(file.getFileName()) || m.matches(file)) { globHit = true; break; }
+                    if (!globHit) return FileVisitResult.CONTINUE;
+                }
+                if (!typeExts.isEmpty()) {
+                    int dot = fileName.lastIndexOf('.');
+                    String ext = dot < 0 ? "" : fileName.substring(dot + 1).toLowerCase();
+                    if (!typeExts.contains(ext)) return FileVisitResult.CONTINUE;
+                }
                 Path rel = rootInWork ? workspace.cwd().relativize(file) : file;
                 try {
                     java.util.List<String> lines = TextFiles.readAllLines(file).lines;
@@ -163,6 +211,26 @@ public class GrepTool implements Tool {
                     for (int i = 0; i < lines.size(); i++) {
                         String line = lines.get(i);
                         if (p.matcher(line).find()) {
+                            if (enhanced) {
+                                // 增强路径：缓冲整条（content+context）/文件名（files_with_matches）/计数（count）
+                                String relName = rel.toString().replace('\\', '/');
+                                int countIndex = countFiles.indexOf(relName);
+                                if (countIndex < 0) { countFiles.add(relName); countHits.add(new int[]{1}); }
+                                else countHits.get(countIndex)[0]++;
+                                if ("files_with_matches".equals(outputMode)) {
+                                    if (!fileHits.contains(relName)) fileHits.add(relName);
+                                } else if (!"count".equals(outputMode)) {
+                                    buffered.add(relName + ":" + (i + 1) + ": " + truncateLine(line.trim()));
+                                    for (int c = 1; c <= contextLines; c++) {
+                                        if (i - c >= 0)
+                                            buffered.add(relName + ":" + (i + 1 - c) + "- " + truncateLine(lines.get(i - c).trim()));
+                                        if (i + c < lines.size())
+                                            buffered.add(relName + ":" + (i + 1 + c) + "- " + truncateLine(lines.get(i + c).trim()));
+                                    }
+                                }
+                                totalCount[0]++;
+                                continue;
+                            }
                             totalCount[0]++;
                             String entry = rel.toString().replace('\\', '/') + ":" + (i + 1)
                                     + ": " + truncateLine(line.trim()) + "\n";
@@ -186,6 +254,29 @@ public class GrepTool implements Tool {
         });
         if (dumpWriter[0] != null) {
             try { dumpWriter[0].close(); } catch (IOException ignored) { }
+        }
+
+        // §3.1 增强整形：offset 跳过 + head_limit 截取 + output_mode 三态
+        if (enhanced) {
+            StringBuilder shaped = new StringBuilder();
+            if ("files_with_matches".equals(outputMode)) {
+                for (int i = offset; i < fileHits.size() && shaped.length() < DISPLAY_CHARS; i++)
+                    shaped.append(fileHits.get(i)).append('\n');
+            } else if ("count".equals(outputMode)) {
+                for (int i = offset; i < countFiles.size() && shaped.length() < DISPLAY_CHARS; i++)
+                    shaped.append(countFiles.get(i)).append(':').append(countHits.get(i)[0]).append('\n');
+            } else {
+                int limit = headLimit <= 0 ? Integer.MAX_VALUE : headLimit;
+                int shown = 0;
+                for (int i = 0; i < buffered.size() && shown < limit
+                        && shaped.length() < DISPLAY_CHARS; i++) {
+                    if (i < offset) continue;
+                    shaped.append(buffered.get(i)).append('\n');
+                    shown++;
+                }
+            }
+            String text = shaped.toString().trim();
+            return ToolResult.success(text.isEmpty() ? "未匹配: " + pattern : text);
         }
 
         boolean truncated = totalCount[0] > max || disp.length() >= DISPLAY_CHARS;
@@ -212,6 +303,16 @@ public class GrepTool implements Tool {
             if (part.toString().equals(".git")) return true;
         }
         return false;
+    }
+
+    /** §3.1 数值参数安全读取（缺省/非法回落默认值） */
+    private static int intOf(JsonObject args, String key, int fallback) {
+        try {
+            return args.has(key) && args.get(key).isJsonPrimitive()
+                    ? args.get(key).getAsInt() : fallback;
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     /** rg 输出行解析：路径:行号:内容（路径取到第一个 ":数字:" 为止） */

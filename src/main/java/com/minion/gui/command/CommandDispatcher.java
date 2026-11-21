@@ -26,6 +26,9 @@ public class CommandDispatcher {
     /** /doctor 环境与配置诊断（§13.1）；未接线时命令返回不可用提示 */
     private java.util.function.Supplier<String> doctor = () -> null;
 
+    /** §7.2 /plugin 插件管理（列表/安装/启停/回退/市场）；未接线时返回提示 */
+    private java.util.function.Function<String[], String> plugin = parts -> null;
+
     /** /queue add 的优先发送通道（§2.3 now 含中断在途）；未接线时走普通入队 */
     public interface QueuePriority {
         void apply(SessionHandle h, String text, String priority);
@@ -40,6 +43,11 @@ public class CommandDispatcher {
 
     public CommandDispatcher doctor(java.util.function.Supplier<String> supplier) {
         this.doctor = supplier;
+        return this;
+    }
+
+    public CommandDispatcher plugin(java.util.function.Function<String[], String> handler) {
+        this.plugin = handler;
         return this;
     }
 
@@ -72,6 +80,13 @@ public class CommandDispatcher {
         if ("/stats".equals(cmd) || "/统计".equals(cmd)) return statsText();
         if ("/rewind".equals(cmd) || "/回退".equals(cmd)) return rewindText(h, parts);
         if ("/cost".equals(cmd) || "/费用".equals(cmd)) return costText(h);
+        if ("/plugin".equals(cmd) || "/插件".equals(cmd) || "/reload-plugins".equals(cmd)) {
+            // §7.2 /plugin 系（/reload-plugins 等价 /plugin reload）
+            String[] effective = "/reload-plugins".equals(cmd)
+                    ? new String[]{"/plugin", "reload"} : parts;
+            String result = plugin.apply(effective);
+            return result == null ? "插件管理未接线" : result;
+        }
         if ("/doctor".equals(cmd) || "/诊断环境".equals(cmd)) {
             String text = doctor == null ? null : doctor.get();
             return text == null ? "/doctor 不可用（诊断源未接线）" : text;
