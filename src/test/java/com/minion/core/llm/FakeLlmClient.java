@@ -27,6 +27,9 @@ public class FakeLlmClient implements LlmClient {
     public final List<RequestRecord> requests = new ArrayList<RequestRecord>();
     public int withoutThinkingCalls = 0;
     public int actionRecoveryCalls = 0;
+    /** §1.4 升档捕获：最后一次 setMaxTokensOverride 值（-1=未调用） */
+    public int lastMaxTokensOverride = -1;
+    @Override public void setMaxTokensOverride(int override) { lastMaxTokensOverride = override; }
     public final List<String> stopReviewRequests=new ArrayList<String>();
     public final java.util.Queue<String> stopStatuses=new java.util.ArrayDeque<String>();
     public String stopReviewRaw;

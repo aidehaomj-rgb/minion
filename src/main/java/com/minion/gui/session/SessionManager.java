@@ -761,7 +761,43 @@ public class SessionManager {
                 mc.thinking, mc.reasoningEffort, mc.provider, mc.maxOutputTokens, mc.sessionId);
     }
 
+    /**
+     * §1.3 模型降级切换（仅本会话）：替换 loop/ContextManager 客户端并同步 handle 与 Session
+     * 模型字段；不动 ModelManager.setCurrent（那只影响新会话默认，不得用于降级）。
+     * 返回实际切换的模型名；找不到配置或构造失败返回 null（调用方取链中下一项）。
+     */
+    private String switchFallbackModel(AgentLoop loop, WorkspaceCtx ctx, Session parent, String modelName) {
+        try {
+            ModelConfig mc = models.get(modelName);
+            if (mc == null) return null;
+            LlmClient fresh = newLlm(mc);
+            loop.setLlm(fresh);
+            ContextManager cm = loop.contextManager();
+            if (cm != null) {
+                cm.setLlm(fresh);
+                cm.update(mc.maxContextTokens, mc.compressThreshold, mc.keepRecentMessages);
+            }
+            parent.runtimeModelConfig = mc;
+            parent.modelDisplayName = mc.displayName;
+            parent.modelName = mc.modelName;
+            for (SessionHandle h : ctx.sessions)
+                if (h.session == parent) { h.llm = fresh; break; }
+            return mc.modelName;
+        } catch (Exception failed) {
+            return null;
+        }
+    }
+
     private void configureAgentRuntime(AgentLoop loop,WorkspaceCtx ctx,Session parent) {
+        // §1.2 retry.profile（legacy 默认；cc 复刻参数）+ §1.3 模型降级链（默认空=完全保持现状）
+        loop.retryPolicy = com.minion.core.agent.RetryPolicy.fromProfile(config);
+        loop.setModelFallback(config.get("model.fallbackChain", ""),
+                next -> switchFallbackModel(loop, ctx, parent, next));
+        // §1.4 长度升档/续写上限 + §1.5 token 预算（默认值=V68 现状）
+        loop.llmAutoContinue = config.llmAutoContinueEnabled();
+        loop.llmEscalatedMaxTokens = config.llmEscalatedMaxTokens();
+        loop.llmMaxContinueRecovery = config.llmMaxContinueRecovery();
+        loop.budgetEnabled = config.budgetEnabled();
         loop.setToolProfileSupplier(()->{
             try {
                 ModelConfig current=parent.runtimeModelConfig==null?modelForSession(parent):parent.runtimeModelConfig;

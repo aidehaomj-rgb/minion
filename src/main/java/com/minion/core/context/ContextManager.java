@@ -738,12 +738,9 @@ public class ContextManager {
         if (compressionControl != null) sb.append(compressionControl).append('\n');
         if (prefix != null) sb.append(prefix).append('\n');
         sb.append(batch);
-        try {
-            return llm.completeChat(
-                    Collections.singletonList(Message.taskControl(sb.toString())), COMPRESS_SYSTEM);
-        } catch (Exception e) {
-            return null; // 失败静默降级，顶层统一告警
-        }
+        // §1.6 SideQuery：侧路压缩摘要统一通道（≤2 次重试、限流/过载即弃、失败不中断主循环）
+        return com.minion.core.llm.SideQuery.complete(llm,
+                Collections.singletonList(Message.taskControl(sb.toString())), COMPRESS_SYSTEM, "compact");
     }
 
     private String buildBatch(List<List<Message>> chains, int from, int to) {

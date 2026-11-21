@@ -165,6 +165,23 @@ public class Config {
         return "deny".equals(v) ? "deny" : "ask";
     }
 
+    /** v2.4 §1.4 max_tokens 截断两级恢复总开关（默认 true；现状已有 hint 续写，此为增强不收紧） */
+    public boolean llmAutoContinueEnabled() { return Boolean.parseBoolean(get("llm.autoContinue.enabled", "true")); }
+
+    /** §1.4 升档目标（默认 64000，受模型 maxOutputTokens 上限约束） */
+    public int llmEscalatedMaxTokens() { return (int) longOf("llm.escalatedMaxTokens", 64000); }
+
+    /** §1.4 续写次数上限（默认 12=V68 现状；cc 语义可配 3） */
+    public int llmMaxContinueRecovery() { return (int) longOf("llm.maxContinueRecovery", 12); }
+
+    /** v2.4 §1.5 token 预算（默认 true；无预算输入时零影响） */
+    public boolean budgetEnabled() { return Boolean.parseBoolean(get("budget.enabled", "true")); }
+
+    private long longOf(String key, long fallback) {
+        try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
+        catch (Exception e) { return fallback; }
+    }
+
     public boolean permissionEngineV2() { return Boolean.parseBoolean(get("permission.engine.v2", "true")); }
     /** read-only / workspace-write / full；未知值回落 workspace-write。 */
     public String permissionMode() { String mode=get("permission.mode","workspace-write").toLowerCase(); return mode.matches("read-only|workspace-write|full")?mode:"workspace-write"; }

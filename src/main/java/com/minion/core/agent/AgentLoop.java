@@ -291,6 +291,95 @@ public class AgentLoop {
     public void recordQueueWait(long millis){phaseTimings.record(com.minion.core.llm.PhaseTimings.Phase.QUEUE,Math.max(0,millis));session.taskState.observedPhaseTimings=phaseTimings();}
     /** 瞬时错误长重试策略（429/500/502；默认固定 5s/次，总时长 20 分钟；测试可覆写小参数） */
     public RetryPolicy retryPolicy = RetryPolicy.transientErrors();
+    /** §1.3 模型降级链（默认空=不降级，行为与 legacy 完全一致）；switcher 返回实际切换到的模型名或 null */
+    private volatile String[] fallbackChain = new String[0];
+    private volatile java.util.function.UnaryOperator<String> fallbackSwitch;
+    /** §1.2 连续过载计数（529/overloaded_error）：≥3 触发降级或报"服务反复过载" */
+    private int consecutiveOverloads;
+
+    // ==================== §1.4 长度升档 + §1.5 token 预算（默认值=V68 现状） ====================
+    /** §1.4 总开关（llm.autoContinue.enabled 默认 true） */
+    public boolean llmAutoContinue = true;
+    /** §1.4 升档目标（llm.escalatedMaxTokens 默认 64000；受模型上限约束） */
+    public int llmEscalatedMaxTokens = 64000;
+    /** §1.4 默认输出档位（规格参考值 8000，对齐 V68 实际默认 8192）：≤ 此档才升档 */
+    public int llmDefaultMaxTokensCap = 8192;
+    /** §1.4 续写次数上限（llm.maxContinueRecovery 默认 12=V68；cc 语义可配 3） */
+    public int llmMaxContinueRecovery = 12;
+    /** §1.5 预算开关（budget.enabled 默认 true；无预算输入零影响） */
+    public boolean budgetEnabled = true;
+    private boolean lengthEscalationUsed;
+    private Long turnTokenBudget;
+    private long turnUsedTokens, lastRoundTokens = -1, prevRoundTokens = -1;
+    private int budgetContinuations;
+
+    /** §1.3 配置降级链（逗号分隔模型名）与切换器；switcher 负责替换本会话客户端（不得用 ModelManager.setCurrent 污染新会话默认） */
+    public void setModelFallback(String chainCsv, java.util.function.UnaryOperator<String> switcher) {
+        this.fallbackChain = chainCsv == null || chainCsv.trim().isEmpty()
+                ? new String[0] : chainCsv.trim().split("[,，\\s]+");
+        this.fallbackSwitch = switcher;
+    }
+
+    /** 链中当前 override 之后的下一个模型；无可用项返回 null */
+    private String nextFallbackModel() {
+        String current = session.modelOverride;
+        String[] chain = fallbackChain;
+        int start = 0;
+        if (current != null)
+            for (int i = 0; i < chain.length; i++)
+                if (current.equals(chain[i])) { start = i + 1; break; }
+        for (int i = start; i < chain.length; i++)
+            if (chain[i] != null && !chain[i].isEmpty()) return chain[i];
+        return null;
+    }
+
+    /** §1.2 过载判定：HTTP 529 或响应体含 overloaded_error */
+    private static boolean isOverload(LlmException e) {
+        return e.httpCode == 529 || (e.getMessage() != null && e.getMessage().contains("overloaded_error"));
+    }
+
+    /**
+     * §1.4 升档：本轮首次 length 截断且未用过升档——仅当当前是默认输出档
+     * （模型配置 ≤ llmDefaultMaxTokensCap=8192，用户未显式配大档）才升到 escalated
+     * （受 65536 硬上限）。用户已配大档视为显式选择，尊重不升。
+     * 返回 true=已升档（调用方设置续接提示后 continue）。
+     */
+    private boolean escalateMaxTokens() {
+        if (session.runtimeModelConfig == null) return false;   // 无模型配置的裸会话保持 V68 续写路径
+        int modelCap = session.runtimeModelConfig.maxOutputTokens;
+        if (modelCap <= 0) modelCap = 8192;
+        if (modelCap > llmDefaultMaxTokensCap) return false;
+        int target = Math.min(llmEscalatedMaxTokens, 65536);
+        if (target <= modelCap) return false;
+        lengthEscalationUsed = true;
+        llm.setMaxTokensOverride(target);
+        ui.onWarning("输出达到长度上限，已升档 max_tokens=" + target + " 后重发");
+        return true;
+    }
+
+    /**
+     * §1.5 预算 nudge：未达 90% 注入 meta 提醒并继续；达 90%/收益递减/续写穷尽返回 false（正常停）。
+     */
+    private boolean budgetNudgeWanted() {
+        Long b = turnTokenBudget;
+        if (b == null || b <= 0) return false;
+        long budget = b;
+        // 收益递减：已续写 ≥3 次且最近两轮增量都 <500 token
+        if (budgetContinuations >= 3 && lastRoundTokens >= 0 && lastRoundTokens < 500
+                && prevRoundTokens >= 0 && prevRoundTokens < 500) {
+            DiagnosticLog.info("budget", "收益递减停止：两轮增量 " + prevRoundTokens + "/" + lastRoundTokens);
+            return false;
+        }
+        if (turnUsedTokens >= budget * 9 / 10) return false;   // 达 90% 预算停止
+        if (budgetContinuations >= 10) return false;           // nudge 熔断（防预算过大无限续写）
+        budgetContinuations++;
+        int pct = (int) (turnUsedTokens * 100 / budget);
+        session.messages.add(Message.taskControl(
+                "[预算提醒] 本轮 token 预算 " + budget + "，已用约 " + pct
+                        + "%。继续完成剩余工作，不要总结、不要道歉；工作做完再交付。"));
+        persistSession();
+        return true;
+    }
     /** 工具空输出占位（配置 agent.emptyOutput.placeholder 注入；开启时成功空输出发「输出内容为空」占位） */
     public boolean emptyOutputPlaceholder = false;
     /** 连续工具失败止损阈值：达到后注入提醒让模型停止尝试并请求用户补充信息 */
@@ -1301,6 +1390,14 @@ public class AgentLoop {
 
     /** Queued inputs explicitly start a new task, even when their text says "continue". */
     public void runUserTurn(String input, List<ImagePart> images, boolean forceNewTask) {
+        // §1.2/§1.4/§1.5 每轮状态重置：过载计数、升档标记、token 预算
+        consecutiveOverloads = 0;
+        lengthEscalationUsed = false;
+        turnTokenBudget = budgetEnabled ? TokenBudget.parse(input) : null;
+        turnUsedTokens = 0;
+        lastRoundTokens = -1;
+        prevRoundTokens = -1;
+        budgetContinuations = 0;
         runTurn(input,images,forceNewTask,false);
     }
 
@@ -1616,6 +1713,27 @@ public class AgentLoop {
                         continue;
                     } else if (isTransientError(e)
                             && noOutputYet(content, thinking)) {
+                        // §1.2 连续过载（529/overloaded_error）达 3 → §1.3 降级链切换或明确报错。
+                        // 本分支在 noOutputYet 门内：本轮 assistant 未入历史、无悬空 tool_result，
+                        // 降级清理顺序天然满足，直接重建请求整发（continue 轮循环）。
+                        if (isOverload(e)) consecutiveOverloads++; else consecutiveOverloads = 0;
+                        if (consecutiveOverloads >= 3) {
+                            consecutiveOverloads = 0;
+                            String next = nextFallbackModel();
+                            java.util.function.UnaryOperator<String> switcher = fallbackSwitch;
+                            String switched = next != null && switcher != null ? switcher.apply(next) : null;
+                            if (switched != null) {
+                                session.modelOverride = switched;
+                                session.messages.add(Message.taskControl(
+                                        "[系统提示] 主模型连续过载，已自动降级切换到 " + switched
+                                                + "；本会话沿用该模型，可用 /model 切回"));
+                                ui.onWarning("主模型连续过载（连续 3 次），已降级切换到 " + switched);
+                                continue;   // 轮循环重建请求整发
+                            }
+                            ui.onError("服务反复过载（连续 3 次过载且无可用降级模型），已停止；"
+                                    + "请稍后重试或配置 model.fallbackChain");
+                            break;
+                        }
                         // 瞬时错误长重试（内网模型资源差）：指数退避+抖动（5s 起步×2、60s 封顶），墙钟总时长 20 分钟（RetryPolicy.transientErrors）；
                         // 服务端 Retry-After 与策略延迟取大值；
                         // 覆盖 429/500/502 + 网络超时 + 可恢复网络错误；进度经 onRetryProgress 进左下角指示器，
@@ -1625,6 +1743,7 @@ public class AgentLoop {
                         int attempts = 0;
                         long retryStart = System.currentTimeMillis(); // 墙钟基准：含每次请求自身耗时
                         LlmException last = e;
+                        boolean fallbackSwitched = false;
                         inRetry[0] = true;
                         while (true) {
                             attempts++;
@@ -1632,7 +1751,7 @@ public class AgentLoop {
                             long delay = Math.max(retryPolicy.nextDelayMs(attempts), last.retryAfterMs);
                             if (!sleepWithInterruptCheck(delay)) break; // 用户中断
                             long elapsed = System.currentTimeMillis() - retryStart;
-                            if (retryPolicy.isExhausted(elapsed)) {
+                            if (retryPolicy.isExhausted(elapsed) || retryPolicy.attemptsExhausted(attempts)) {
                                 ui.onError(RetryProgress.tag(last) + " 重试了 " + attempts + " 次，持续 "
                                         + (elapsed / 60000) + " 分钟仍失败，已停止重试");
                                 break;
@@ -1644,6 +1763,27 @@ public class AgentLoop {
                                 break;
                             } catch (LlmException re) {
                                 if (interrupted) break;
+                                // §1.2 连续过载在内层同样计数（每次失败都可能是 529）；
+                                // 达 3 走 §1.3 降级链，链空/切换失败则明确报错停止
+                                if (isOverload(re)) consecutiveOverloads++; else consecutiveOverloads = 0;
+                                if (consecutiveOverloads >= 3) {
+                                    consecutiveOverloads = 0;
+                                    String next = nextFallbackModel();
+                                    java.util.function.UnaryOperator<String> switcher = fallbackSwitch;
+                                    String switched = next != null && switcher != null ? switcher.apply(next) : null;
+                                    if (switched != null) {
+                                        session.modelOverride = switched;
+                                        session.messages.add(Message.taskControl(
+                                                "[系统提示] 主模型连续过载，已自动降级切换到 " + switched
+                                                        + "；本会话沿用该模型，可用 /model 切回"));
+                                        ui.onWarning("主模型连续过载（连续 3 次），已降级切换到 " + switched);
+                                        fallbackSwitched = true;
+                                    } else {
+                                        ui.onError("服务反复过载（连续 3 次过载且无可用降级模型），已停止；"
+                                                + "请稍后重试或配置 model.fallbackChain");
+                                    }
+                                    break;
+                                }
                                 if (!isTransientError(re) || !noOutputYet(content, thinking)) {
                                     ui.onError("请求失败: " + re.getMessage());
                                     break;
@@ -1656,6 +1796,7 @@ public class AgentLoop {
                             appendPartialAssistant(content, thinking);
                             break;
                         }
+                        if (fallbackSwitched) continue;   // §1.3：轮循环重建请求整发（新客户端）
                         if (finish[0] == null && usage[0] == null) {
                             break; // 未成功（超时/换错已提示），结束本轮
                         }
@@ -1676,7 +1817,15 @@ public class AgentLoop {
                     if(firstDeltaMs[0]>=0)phaseTimings.record(com.minion.core.llm.PhaseTimings.Phase.FIRST_DELTA,firstDeltaMs[0]);
                 }
 
-                if (usage[0] != null) session.usage.record(usage[0]);
+                if (usage[0] != null) {
+                    session.usage.record(usage[0]);
+                    // §1.5 每轮增量记账（diminishing returns 判据：最近两轮增量）
+                    long inc = usage[0].totalTokens > 0 ? usage[0].totalTokens
+                            : (long) usage[0].inputTokens + usage[0].outputTokens;
+                    turnUsedTokens += inc;
+                    prevRoundTokens = lastRoundTokens;
+                    lastRoundTokens = inc;
+                }
                 if(requestHadCompactionHandoff&&!"error".equals(finish[0])
                         &&(hasVisibleText(content)||toolCalls[0]!=null&&!toolCalls[0].isEmpty()))compactionHandoffPending=false;
                 if (contextManager != null && usage[0] != null && !usage[0].estimated) {
@@ -1843,8 +1992,18 @@ public class AgentLoop {
                 }
 
                 if (truncatedByLength) {
-                    if (lengthContinuationAttempts >= 12) {
-                        ui.onError("模型连续 12 次达到单次输出上限，已停止自动续接。请提高模型的 maxOutputTokens 或拆分任务。");
+                    // §1.4 升档重试（一次性）：仍用默认输出档被截断时先放大 max_tokens 再走既有续接协议；
+                    // 受模型 maxOutputTokens 上限约束，消息不额外追加
+                    if (!lengthEscalationUsed && llmAutoContinue && escalateMaxTokens()) {
+                        lengthContinuationHint = truncatedToolCall
+                                ? "[系统续接] 上一次输出因长度上限在工具调用生成过程中被截断，该工具没有执行。请从头重新生成一个完整、合法的工具调用，然后继续原任务；不要重复已经完成的工作。"
+                                : "[系统续接] 上一次输出因达到单次输出长度上限而被截断。请紧接已完成的内容继续原任务，不要重复，不要提前总结；需要调用工具时请生成完整合法的工具调用。";
+                        nextRequestWithoutThinking = true;
+                        persistSession();
+                        continue;
+                    }
+                    if (lengthContinuationAttempts >= llmMaxContinueRecovery) {
+                        ui.onError("模型连续 " + llmMaxContinueRecovery + " 次达到单次输出上限，已停止自动续接。请提高模型的 maxOutputTokens 或拆分任务。");
                         exitCode="output_length";
                         break;
                     }
@@ -1906,6 +2065,9 @@ public class AgentLoop {
                         lengthContinuationHint="[系统结束检查] 有新用户补充，旧交付未通过验收。先处理最新补充，不得执行旧目标。";
                         continue;
                     }
+                    // §1.5 token 预算（仅显式预算输入时生效；无预算=V68 零影响）：
+                    // 未达 90% 注入 meta 提醒续写；连续两轮增量 <500 token 且已续写 ≥3 次按收益递减停止
+                    if (turnTokenBudget != null && budgetNudgeWanted()) continue;
                     String candidate=content.toString();
                     long stopRevision=session.taskState.revision();
                     StopGate.Snapshot snapshot=stopSnapshot(candidate,stopReceipts,stopHistoricalEvidenceCount,reportFromIndex);

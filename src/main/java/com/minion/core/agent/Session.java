@@ -25,6 +25,8 @@ public class Session {
     public transient volatile com.minion.core.config.ModelConfig runtimeModelConfig;
     /** Child defaults are per conversation, not global model settings. */
     public volatile String subAgentModelName;
+    /** §1.3 模型降级 override：主模型连续过载降级后本会话沿用该模型（/model 手动切换时清除）；null=无 */
+    public volatile String modelOverride;
     public volatile String subAgentMode="worker";
     public volatile String subAgentTools="";
     public volatile String contextProfile="balanced";

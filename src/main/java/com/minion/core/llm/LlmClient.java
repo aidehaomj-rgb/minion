@@ -41,6 +41,9 @@ public interface LlmClient {
      *  默认空实现——不支持视觉协议的客户端可忽略。 */
     default void setSuppressImages(boolean suppress) { }
 
+    /** §1.4 长度升档：临时覆盖 max_tokens（正数生效，0=恢复配置值）；不支持升档的客户端可忽略 */
+    default void setMaxTokensOverride(int override) { }
+
     /** 释放底层资源（HTTP 连接池/线程）；默认无操作。关闭后不可再发起请求 */
     default void close() { }
 }

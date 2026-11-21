@@ -6,8 +6,9 @@ import com.minion.core.llm.LlmException;
 public final class TurnSemantics {
     private TurnSemantics(){}
     public static boolean transientFailure(LlmException e){
+        // 529=服务过载：v2.4 §1.2 过载特殊路径需要它能进长重试梯并计数（≥500 家族的最小扩展）
         return e!=null&&(e.type==LlmException.Type.RATE_LIMIT||e.type==LlmException.Type.TIMEOUT
-                ||e.type==LlmException.Type.NETWORK&&e.retryable||e.httpCode==500||e.httpCode==502);
+                ||e.type==LlmException.Type.NETWORK&&e.retryable||e.httpCode==500||e.httpCode==502||e.httpCode==529);
     }
     public static boolean visible(CharSequence text){
         if(text==null)return false;

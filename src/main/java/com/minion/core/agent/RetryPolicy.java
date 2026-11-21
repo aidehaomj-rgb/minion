@@ -16,6 +16,34 @@ public class RetryPolicy {
         return new RetryPolicy(5000, 0, 60000, 20 * 60 * 1000L, 2.0, 0.2);
     }
 
+    /**
+     * cc 复刻策略（v2.4 §1.2，retry.profile=cc）：base×2^(n-1)、capMs 封顶、0–25% 抖动、
+     * 最大 maxAttempts 次；服务端 Retry-After 由调用方与策略延迟取大值（可绕过封顶）。
+     * 参数默认 500ms/32s/10 次，可经 retry.baseMs/retry.capMs/retry.max 覆盖。
+     */
+    public static RetryPolicy ccProfile(int maxAttempts, long baseMs, long capMs) {
+        return new RetryPolicy(baseMs, 0, capMs, 20 * 60 * 1000L, 2.0, 0.25, maxAttempts);
+    }
+
+    /** 按 Config 选择 profile：retry.profile=cc 用复刻参数；legacy/未知值保持现状默认 */
+    public static RetryPolicy fromProfile(com.minion.core.config.Config config) {
+        if (config != null && "cc".equalsIgnoreCase(config.get("retry.profile", "legacy"))) {
+            int max = intOf(config.get("retry.max", "10"), 10);
+            long base = longOf(config.get("retry.baseMs", "500"), 500L);
+            long cap = longOf(config.get("retry.capMs", "32000"), 32000L);
+            return ccProfile(Math.max(1, max), Math.max(1, base), Math.max(base, cap));
+        }
+        return transientErrors();
+    }
+
+    private static int intOf(String v, int fallback) {
+        try { return Integer.parseInt(v.trim()); } catch (Exception e) { return fallback; }
+    }
+
+    private static long longOf(String v, long fallback) {
+        try { return Long.parseLong(v.trim()); } catch (Exception e) { return fallback; }
+    }
+
     public final long initialDelayMs;
     public final long incrementMs;
     public final long maxDelayMs;
@@ -24,6 +52,8 @@ public class RetryPolicy {
     public final double multiplier;
     /** nextDelayMs 在基础延迟上施加 ±jitterRatio 的随机抖动；0=无抖动 */
     public final double jitterRatio;
+    /** 最大重试次数（0=不限，仅受墙钟约束）。legacy 恒 0；cc=10 */
+    public final int maxAttempts;
 
     public RetryPolicy(long initialDelayMs, long incrementMs, long maxDelayMs, long maxTotalMs) {
         this(initialDelayMs, incrementMs, maxDelayMs, maxTotalMs, 1.0, 0.0);
@@ -31,12 +61,23 @@ public class RetryPolicy {
 
     public RetryPolicy(long initialDelayMs, long incrementMs, long maxDelayMs, long maxTotalMs,
                        double multiplier, double jitterRatio) {
+        this(initialDelayMs, incrementMs, maxDelayMs, maxTotalMs, multiplier, jitterRatio, 0);
+    }
+
+    public RetryPolicy(long initialDelayMs, long incrementMs, long maxDelayMs, long maxTotalMs,
+                       double multiplier, double jitterRatio, int maxAttempts) {
         this.initialDelayMs = initialDelayMs;
         this.incrementMs = incrementMs;
         this.maxDelayMs = maxDelayMs;
         this.maxTotalMs = maxTotalMs;
         this.multiplier = multiplier;
         this.jitterRatio = jitterRatio;
+        this.maxAttempts = maxAttempts;
+    }
+
+    /** 重试次数是否已耗尽（maxAttempts>0 时生效；与墙钟上限独立） */
+    public boolean attemptsExhausted(int attempts) {
+        return maxAttempts > 0 && attempts >= maxAttempts;
     }
 
     /** 第 attempt 次重试（1 起）前的基础等待时长（无抖动），封顶 maxDelayMs */

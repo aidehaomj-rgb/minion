@@ -99,6 +99,12 @@ public class DeepSeekClient implements LlmClient {
         // HTTP/SSL initialization is deferred until the first request.
     }
 
+    /** §1.4 长度升档：>0 时覆盖 max_tokens（仍受 65536 硬上限）；0=恢复配置值 */
+    private volatile int maxTokensOverride;
+    @Override public void setMaxTokensOverride(int override) {
+        this.maxTokensOverride = override > 0 ? Math.min(override, 65536) : 0;
+    }
+
     private synchronized OkHttpClient http() {
         if (closed) throw new IllegalStateException("LLM client is closed");
         if (http == null) http = new OkHttpClient.Builder()
@@ -165,7 +171,7 @@ public class DeepSeekClient implements LlmClient {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("stream", true);
-        body.addProperty("max_tokens", maxOutputTokens);
+        body.addProperty("max_tokens", maxTokensOverride > 0 ? maxTokensOverride : maxOutputTokens);
         if (structuredProbe) {
             JsonObject format = new JsonObject(); format.addProperty("type", "json_object");
             body.add("response_format", format);
