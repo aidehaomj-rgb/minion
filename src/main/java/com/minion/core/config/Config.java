@@ -183,6 +183,17 @@ public class Config {
      */
     public boolean toolsParallelMetadataDriven() { return Boolean.parseBoolean(get("tools.parallel.metadataDriven", "false")); }
 
+    /** v2.4 §5.1 microcompact（默认 false=legacy；replica-offline 开启）；闲置阈值分钟数可配 */
+    public boolean microcompactEnabled() { return Boolean.parseBoolean(get("microcompact.enabled", "false")); }
+
+    public int microcompactIdleMinutes() { return (int) longOf("microcompact.idleMinutes", 60); }
+
+    /** v2.4 §5.2 autocompact 公式制阈值（默认 false=沿用 150K 现状） */
+    public boolean autocompactFormula() { return Boolean.parseBoolean(get("autocompact.formula", "false")); }
+
+    /** v2.4 §5.3 压缩后文件重读（默认 true；无读状态时零影响） */
+    public boolean compactRestoreEnabled() { return Boolean.parseBoolean(get("compact.restore.enabled", "true")); }
+
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
         catch (Exception e) { return fallback; }

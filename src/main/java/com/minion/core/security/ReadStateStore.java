@@ -116,6 +116,13 @@ public final class ReadStateStore {
     /** 查询（命中刷新 LRU）；无记录返回 null */
     public synchronized Entry get(String path) { return lru.get(path); }
 
+    /** 全部条目按 readAt 倒序快照（§5.3 压缩后重读最近文件用） */
+    public synchronized java.util.List<Entry> recentEntries() {
+        java.util.List<Entry> out = new java.util.ArrayList<Entry>(lru.values());
+        out.sort((a, b) -> Long.compare(b.readAt, a.readAt));
+        return out;
+    }
+
     public synchronized int size() { return lru.size(); }
 
     /**

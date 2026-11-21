@@ -53,6 +53,12 @@ public class ContextManager {
     private volatile double threshold;
     private volatile int outputReserveTokens = 8192;
     private volatile int stableContextTokens = DEFAULT_SOFT_TRIGGER_TOKENS;
+    /** §5.2 公式制阈值（autocompact.formula，默认 false=150K 现状） */
+    private volatile boolean autocompactFormula;
+    /** §5.2 熔断：连续自动压缩失败计数（≥AUTO_COMPACT_TRIP_AFTER 停自动；成功清零） */
+    private int consecutiveAutoFailures;
+    private volatile boolean autoCompressTripped;
+    private static final int AUTO_COMPACT_TRIP_AFTER = 3;
     private volatile int keepRecent;
     private volatile LlmClient llm;
     private final int systemTokens;    // system 提示词 token 估算在构造时固定，保持不变
@@ -244,6 +250,7 @@ public class ContextManager {
     public String calibrationStatus(){return calibration;}
 
     public boolean shouldCompress(List<Message> messages) {
+        if (autoCompressTripped) return false;   // §5.2 熔断：连续失败 ≥3 本会话停自动压缩（手动仍可）
         return estimate(messages) >= autoCompressAtTokens();
     }
 
@@ -251,11 +258,35 @@ public class ContextManager {
      * 按用户比例触发，但保留配置的单次输出预算（常见窗口至少8192）。
      * 不再固定扣掉20%，否则90%/95%等用户配置永远无法生效。
      * 工具结果进入历史后，下一次请求前重新估算并判断压缩。
+     * §5.2 autocompact.formula=true 时改公式制：窗口 − min(输出上限,20000) − 13000。
      */
     public int autoCompressAtTokens() {
-        return Math.min(stableContextTokens,
-                triggerAtTokens(effectiveMaxContextTokens, threshold, outputReserveTokens));
+        int trigger = autocompactFormula
+                ? Math.max(1, effectiveMaxContextTokens - Math.min(outputReserveTokens, 20000) - 13000)
+                : triggerAtTokens(effectiveMaxContextTokens, threshold, outputReserveTokens);
+        return Math.min(stableContextTokens, trigger);
     }
+
+    /** §5.2 警告阈值（公式制 = 触发 −20000；legacy = 触发值），供 UI 显示"距自动压缩 %" */
+    public int warnAtTokens() {
+        int trigger = autoCompressAtTokens();
+        return autocompactFormula ? Math.max(1, trigger - 20000) : trigger;
+    }
+
+    /** §5.2 公式制开关（autocompact.formula 默认 false=150K 现状） */
+    public void setAutocompactFormula(boolean enabled) { this.autocompactFormula = enabled; }
+
+    /** §5.2 熔断记账：自动压缩成败（连续失败 ≥3 熔断；成功清零；手动压缩不计入） */
+    public void noteAutoCompressOutcome(boolean ok) {
+        if (ok) {
+            consecutiveAutoFailures = 0;
+            autoCompressTripped = false;
+            return;
+        }
+        if (++consecutiveAutoFailures >= AUTO_COMPACT_TRIP_AFTER) autoCompressTripped = true;
+    }
+
+    public boolean autoCompressTripped() { return autoCompressTripped; }
 
     /** 设置页预览与运行时使用同一算法。小窗口保持旧版测试/本地模型的行为。 */
     public static int triggerAtTokens(int max, double ratio, int outputTokens) {

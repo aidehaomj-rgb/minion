@@ -310,6 +310,12 @@ public class AgentLoop {
     public boolean budgetEnabled = true;
     /** §2.2 元数据驱动并行（tools.parallel.metadataDriven 默认 false=按名判定的 V68 现状） */
     public boolean toolsParallelMetadataDriven = false;
+    /** §5.3 压缩后文件重读（compact.restore.enabled 默认 true；无读状态时零影响） */
+    public boolean compactRestoreEnabled = true;
+    /** §5.1 microcompact（microcompact.enabled 默认 false=legacy；replica-offline 开启） */
+    public boolean microcompactEnabled = false;
+    public int microcompactIdleMinutes = 60;
+    private long lastAssistantAt;   // 最近一次 assistant 入历史时间（microcompact 闲置判据）
     private boolean lengthEscalationUsed;
     private Long turnTokenBudget;
     private long turnUsedTokens, lastRoundTokens = -1, prevRoundTokens = -1;
@@ -690,6 +696,7 @@ public class AgentLoop {
             }
         }
         session.messages.add(message);
+        if (message.role == Message.Role.ASSISTANT) lastAssistantAt = System.currentTimeMillis();   // §5.1 闲置判据
         if (message.hasUserAuthorization() && session.taskState != null) session.taskState.latestUserEventId=message.eventId;
     }
 
@@ -786,6 +793,19 @@ public class AgentLoop {
                 }
             }
             session.messages = compacted;
+        }
+        // §5.3 压缩后恢复（compact.restore.enabled 默认 true）：按读状态重读最近 ≤5 个文件注入尾部
+        if (compactRestoreEnabled && session.readState != null) {
+            try {
+                java.util.List<Message> restored = com.minion.core.context.CompactionRestore
+                        .restoreRecentFiles(session.readState, session.messages);
+                if (!restored.isEmpty()) {
+                    session.messages.addAll(restored);
+                    ui.onWarning("压缩完成，已重读最近工作文件恢复上下文");
+                }
+            } catch (Exception restoreFailure) {
+                DiagnosticLog.warn("compact", "压缩后文件重读失败（不影响压缩结果）: " + restoreFailure.getMessage());
+            }
         }
         // §4.5 ContextReadLedger：压缩清理正文后，"仍在上下文"账本整体失效——
         // Read 去重不能再凭旧账本回 stub，必须重新注入正文
@@ -1562,6 +1582,16 @@ public class AgentLoop {
                     break;
                 }
                 int currentTokens = contextManager == null ? 0 : contextManager.estimate(session.messages);
+                // §5.1 microcompact（默认关；replica-offline 开启）：会话闲置 ≥idle 分钟清理可再生工具结果
+                if (microcompactEnabled && lastAssistantAt > 0
+                        && System.currentTimeMillis() - lastAssistantAt >= microcompactIdleMinutes * 60000L) {
+                    int cleaned = com.minion.core.context.Microcompact.sweep(session.messages, 5);
+                    if (cleaned > 0) {
+                        ui.onWarning("已清理 " + cleaned + " 条闲置旧工具结果（microcompact）");
+                        lastAssistantAt = System.currentTimeMillis();
+                        persistSession();
+                    }
+                }
                 if (contextManager != null && contextManager.shouldCompress(session.messages)
                         && (lastIneffectiveAutoCompressTokens < 0
                         || currentTokens >= lastIneffectiveAutoCompressTokens + 1024)) {
@@ -1584,6 +1614,7 @@ public class AgentLoop {
                             DiagnosticLog.info("context-compact","task="+session.taskState.id
                                     +" accepted=true beforeTokens="+beforeTokens+" afterTokens="+afterTokens);
                             lastIneffectiveAutoCompressTokens = -1;
+                            contextManager.noteAutoCompressOutcome(true);   // §5.2 熔断计数清零
                             int pct = (int) (afterTokens * 100
                                     / contextManager.maxTokens());
                             pushContextStats(); // 压缩完成：进度圈回落
@@ -1591,6 +1622,10 @@ public class AgentLoop {
                             DiagnosticLog.info("context-compact","task="+session.taskState.id
                                     +" accepted=false beforeTokens="+beforeTokens+" afterTokens="+afterTokens);
                             lastIneffectiveAutoCompressTokens = beforeTokens;
+                            contextManager.noteAutoCompressOutcome(false);   // §5.2 熔断计数
+                            if (contextManager.autoCompressTripped())
+                                ui.onWarning("自动压缩已连续 3 次未成功，本会话已停用自动压缩（熔断）；"
+                                        + "请手动 /compact 或清理上下文后继续");
                             ui.onWarning(contextManager.lastCompressAttempted()
                                     ? "自动压缩本次未成功，将在上下文继续增长后重试"
                                     : "近期消息需要保留，暂时没有可自动压缩的历史");
