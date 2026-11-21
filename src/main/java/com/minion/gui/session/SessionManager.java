@@ -458,6 +458,7 @@ public class SessionManager {
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
         loop.configureTaskBudget(config.taskContinuationWindows(), 0 /* no cumulative token cap, including restored tasks */);
         loop.setAllSkills(sk.skills); // 会话级快照：本会话独享、不可变
+        applySkillEnhancements(loop, ctx); // §7.1：paths 条件激活拆分 + 内联 shell 三道检查通道 + fork/扩展开关
         loop.setSessionStore(ctx.store); // 落盘接线：恢复后随每轮/退出兜底落盘
         loop.setGlobalMemoryRoot(jarDir); // 只读显式核验的跨项目个人偏好，不检索其他工作区对话
         configureAgentRuntime(loop,ctx,s);
@@ -537,6 +538,59 @@ public class SessionManager {
         try { ctx.order.addAll(ctx.store.loadOrder()); }
         catch (IOException e) { notifyError("读取会话顺序失败: " + e.getMessage()); }
         return ctx;
+    }
+
+    /**
+     * §7.1 Skills 增强装配（setAllSkills 之后）：
+     * ① skills.enabled=false（应急）→ 只禁扩展，V68 快照行为保留；
+     * ② paths 条件技能从快照拆出进 {@link com.minion.core.skills.SkillPathActivation}
+     *    （触碰匹配文件才激活并注入提示）；
+     * ③ 内联 shell 三道检查通道：§10.9 信任 → ConfirmGate 权限 → BashTool 内置分析器。
+     */
+    private void applySkillEnhancements(AgentLoop loop, WorkspaceCtx ctx) {
+        loop.skillsExtended = config.skillsExtendedEnabled();
+        java.util.List<com.minion.core.skills.Skill> snapshot = loop.allSkills();
+        if (!loop.skillsExtended) { loop.skillPathActivation = null; loop.skillShellRunner = null; return; }
+        java.util.List<com.minion.core.skills.Skill> regular =
+                new java.util.ArrayList<com.minion.core.skills.Skill>();
+        java.util.List<com.minion.core.skills.Skill> conditional =
+                new java.util.ArrayList<com.minion.core.skills.Skill>();
+        for (com.minion.core.skills.Skill s : snapshot)
+            (s.isConditional() ? conditional : regular).add(s);
+        loop.setAllSkills(regular);
+        loop.skillPathActivation = conditional.isEmpty() ? null
+                : new com.minion.core.skills.SkillPathActivation(conditional);
+        final com.minion.core.security.TrustGate gate = trustGateOf(ctx);
+        final com.minion.core.tools.Workspace ws = ctx.workspace;
+        final BashTool skillBash = new BashTool(ws, null, config);
+        loop.skillShellRunner = new com.minion.core.skills.SkillExpansion.ShellRunner() {
+            @Override public String run(String command) throws Exception {
+                // ① §10.9 信任（skillshell 类型；引用脚本内容入指纹）
+                if (gate != null) {
+                    com.minion.core.security.TrustedExecutable spec =
+                            com.minion.core.security.TrustedExecutable.of(
+                                    com.minion.core.security.TrustedExecutable.TYPE_SKILL_SHELL,
+                                    com.minion.core.security.TrustedExecutable.shortId(command),
+                                    "project", command,
+                                    java.util.Collections.<String>emptyList(),
+                                    java.util.Collections.<String, String>emptyMap(),
+                                    ws.workDir(),
+                                    com.minion.core.security.TrustedExecutable.referencedScripts(
+                                            command, java.nio.file.Paths.get(ws.workDir())));
+                    if (!gate.ensureTrusted(spec))
+                        throw new IllegalStateException("内联 shell 未通过 §10.9 持续信任复核，已拒绝执行");
+                }
+                // ②+③ 权限门（PermissionEngine/ConfirmGate）→ 分析器（BashTool 内置）→ 执行
+                com.google.gson.JsonObject bashArgs = new com.google.gson.JsonObject();
+                bashArgs.addProperty("command", command);
+                if (!ctx.confirmGate.check(skillBash, bashArgs))
+                    throw new IllegalStateException("内联 shell 未通过权限确认，已拒绝执行");
+                com.minion.core.tools.ToolResult r = skillBash.execute(bashArgs);
+                if (!r.ok) throw new IllegalStateException("内联 shell 执行失败: "
+                        + (r.output == null ? "" : r.output));
+                return r.output == null ? "" : r.output;
+            }
+        };
     }
 
     /**
@@ -808,6 +862,7 @@ public class SessionManager {
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
         loop.setAllSkills(sk.skills);   // 会话级快照：本会话独享、不可变
+        applySkillEnhancements(loop, ctx); // §7.1：paths 条件激活拆分 + 内联 shell 三道检查通道 + fork/扩展开关
         loop.configureTaskBudget(config.taskContinuationWindows(), 0 /* no cumulative token cap, including restored tasks */);
         loop.setSessionStore(ctx.store); // 落盘接线：每轮/退出兜底落盘生效
         loop.setGlobalMemoryRoot(jarDir);

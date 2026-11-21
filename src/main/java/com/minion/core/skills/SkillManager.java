@@ -147,13 +147,7 @@ public class SkillManager {
                         Object loaded = new Yaml().load(fm);
                         Map<String, Object> yaml = loaded instanceof Map
                                 ? (Map<String, Object>) loaded : null;
-                        String name = fallbackName;
-                        String desc = "";
-                        if (yaml != null) {
-                            if (yaml.get("name") != null) name = String.valueOf(yaml.get("name"));
-                            if (yaml.get("description") != null) desc = String.valueOf(yaml.get("description"));
-                        }
-                        return new Skill(name, desc, body.trim(), file.toString(), source);
+                        return fromYaml(yaml, fallbackName, body.trim(), file, source);
                     } catch (Exception e) {
                         System.err.println("[minion] 技能 frontmatter 解析失败(" + file + "): " + e.getMessage());
                         return new Skill(fallbackName, "", text.trim(), file.toString(), source);
@@ -164,5 +158,50 @@ public class SkillManager {
         } catch (IOException e) {
             return new Skill(fallbackName, "", "(读取失败)", file.toString(), source);
         }
+    }
+
+    /** §7.1 frontmatter 全字段解析（name/description/when_to_use/allowed-tools/argument-hint/
+     *  arguments/model/version/disable-model-invocation/user-invocable/context/agent/paths） */
+    @SuppressWarnings("unchecked")
+    static Skill fromYaml(Map<String, Object> yaml, String fallbackName, String body, Path file, String source) {
+        String name = fallbackName, desc = "", whenToUse = "", argumentHint = "", model = null, version = null;
+        List<String> allowedTools = null, paths = null;
+        Map<String, String> arguments = null;
+        boolean disableModel = false, userInvocable = true;
+        String context = "inline", agent = null;
+        if (yaml != null) {
+            if (yaml.get("name") != null) name = String.valueOf(yaml.get("name"));
+            if (yaml.get("description") != null) desc = String.valueOf(yaml.get("description"));
+            if (yaml.get("when_to_use") != null) whenToUse = String.valueOf(yaml.get("when_to_use"));
+            if (yaml.get("argument-hint") != null) argumentHint = String.valueOf(yaml.get("argument-hint"));
+            if (yaml.get("model") != null) model = String.valueOf(yaml.get("model"));
+            if (yaml.get("version") != null) version = String.valueOf(yaml.get("version"));
+            if (yaml.get("agent") != null) agent = String.valueOf(yaml.get("agent"));
+            if (yaml.get("context") != null) context = String.valueOf(yaml.get("context"));
+            allowedTools = stringList(yaml.get("allowed-tools"));
+            paths = stringList(yaml.get("paths"));
+            Object args = yaml.get("arguments");
+            if (args instanceof Map) {
+                arguments = new java.util.LinkedHashMap<String, String>();
+                for (Object key : ((Map<Object, Object>) args).keySet())
+                    arguments.put(String.valueOf(key),
+                            String.valueOf(((Map<Object, Object>) args).get(key)));
+            }
+            if (Boolean.TRUE.equals(yaml.get("disable-model-invocation"))) disableModel = true;
+            if (Boolean.FALSE.equals(yaml.get("user-invocable"))) userInvocable = false;
+        }
+        return new Skill(name, desc, body, file.toString(), source,
+                whenToUse, allowedTools, argumentHint, arguments, model, version,
+                disableModel, userInvocable, context, agent, paths);
+    }
+
+    /** YAML 标量或列表 → 字符串列表（allowed-tools/paths 容忍两种写法） */
+    private static List<String> stringList(Object value) {
+        if (value == null) return null;
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        if (value instanceof List)
+            for (Object o : (List<?>) value) if (o != null) out.add(String.valueOf(o));
+        else out.add(String.valueOf(value));
+        return out;
     }
 }

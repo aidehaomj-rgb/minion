@@ -140,6 +140,18 @@ public class CommandDispatcher {
         if ("/memory".equals(cmd) || "/记忆".equals(cmd)) return dispatchLocalTool(h, "Memory", simpleAction(parts,"status"));
         if ("/permissions".equals(cmd) || "/权限".equals(cmd)) return dispatchLocalTool(h, "Permission", permissionArgs(parts));
         if ("/secrets".equals(cmd) || "/密钥".equals(cmd)) return dispatchLocalTool(h, "Secrets", simpleAction(parts,"list"));
+        // §7.1 user-invocable 技能别名：/skill-name [参数] 等价 /skill <name> [参数]（内置命令优先）
+        if (cmd.length() > 1) {
+            for (Skill s : skillsOf(h)) {
+                if (s.userInvocable && cmd.substring(1).equalsIgnoreCase(s.name)) {
+                    String[] forwarded = new String[parts.length + 1];
+                    forwarded[0] = "/skill";
+                    forwarded[1] = s.name;
+                    System.arraycopy(parts, 1, forwarded, 2, parts.length - 1);
+                    return dispatchSkill(h, forwarded);
+                }
+            }
+        }
         return "未知命令 " + parts[0] + "（/help 查看）";
     }
 

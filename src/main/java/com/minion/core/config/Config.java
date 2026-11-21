@@ -118,6 +118,11 @@ public class Config {
     }
 
     public String skillsDir()    { return get("skills.dir", "./skills"); }
+    /**
+     * v2.4 §7.1 skills.enabled（默认 true）：关闭仅禁用新增扩展（paths 条件激活/fork/
+     * 内联 shell/命名参数展开），V68 既有技能行为（扫描/合并/Skill 工具/常驻配额）完整保留。
+     */
+    public boolean skillsExtendedEnabled() { return Boolean.parseBoolean(get("skills.enabled", "true")); }
     /** 所有工作空间共用的只读 Markdown 知识库目录；留空则只使用项目知识库。 */
     public String sharedKnowledgeDir() { return get("knowledge.shared.dir", ""); }
     /** Python/Anaconda 解释器；留空时自动探测 MINION_PYTHON、Conda 和常见安装目录。 */

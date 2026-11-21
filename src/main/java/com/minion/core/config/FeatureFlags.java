@@ -72,6 +72,7 @@ public final class FeatureFlags {
             {"instructions.enabled", "false", "6.1", "新会话", false},
             {"memory.dream.enabled", "false", "6.2", "新会话", false},
             {"skills.enabled", "true", "7.1", "下一轮", false},
+            {"skills.shellInjection", "true", "7.1", "下一轮", false},
             {"team.enabled", "false", "8.2", "重启", false},
             {"agent.coordinatorMode", "false", "8.3", "重启", false},
             {"session.transcript.jsonl", "false", "9.1", "新会话", false},
