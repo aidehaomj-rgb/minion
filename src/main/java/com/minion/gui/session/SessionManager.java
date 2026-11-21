@@ -598,6 +598,15 @@ public class SessionManager {
             registry.register(new com.minion.core.team.TeamTools.TeamDeleteTool(workDir));
             registry.register(new com.minion.core.team.TeamTools.SendMessageTool(workDir));
         }
+        // §Cron 定时任务登记面：同一 LocalJobs 账本（唯一真源；新任务默认不启用，用户工作台门控）
+        try {
+            registry.register(new com.minion.core.tools.CronTool(
+                    new com.minion.core.agent.LocalJobs(workspace, Paths.get(workspace.workDir())
+                            .resolve(".minion").resolve("reliability").resolve(sessionId))));
+        } catch (Exception jobsLedgerUnavailable) {
+            com.minion.core.diagnostics.DiagnosticLog.warn("jobs",
+                    "Cron 工具未注册（账本不可用）: " + jobsLedgerUnavailable.getMessage());
+        }
         // §3.4 TaskV2（唯一事实源=TaskWorkflow/TaskState）+ NotebookEdit；计划模式工具对随
         // AgentLoop 构造注册（需要 loop 引用）
         {
@@ -646,7 +655,11 @@ public class SessionManager {
         registry.register(new LogsTool(workspace));
         registry.register(new UpdateTool(jarDir));
         registry.register(new OpenUrlTool());
-        registry.register(new WebFetchTool());
+        // §3.9 WebFetch：默认纯公网（SSRF 基线）；内网模式开白名单（域名后缀/IP/CIDR，逐跳重定向校验）
+        registry.register(config.toolsWebfetchIntranetEnabled()
+                ? new WebFetchTool(false, new com.minion.core.tools.IntranetWebFetchPolicy(
+                        config.toolsWebfetchIntranetAllowlist()))
+                : new WebFetchTool());
         // 可插拔工具：无条件注册并打插件标签，可见性交给 gate 在 schemas()/get() 时判定
         // （拉模式——改开关无需遍历会话，AgentLoop 下一轮 registry.schemas() 自动生效）
         if (plugins != null) {

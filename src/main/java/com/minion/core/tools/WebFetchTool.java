@@ -39,15 +39,35 @@ public class WebFetchTool implements Tool {
     private final OkHttpClient http = new OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
-            .followRedirects(true)
+            .followRedirects(false)   // §3.9 逐跳校验：自动跟随会绕过首跳 SSRF/白名单检查
             .build();
 
     /** true = 放行内网/回环地址（测试用）；默认 false 拦截（SSRF 防护） */
     private final boolean allowPrivateHosts;
 
+    /** §3.9 内网白名单（null=未启用内网模式；内网地址须命中白名单） */
+    private final IntranetWebFetchPolicy intranetPolicy;
+
+    /** 重定向最大跳数（每跳独立过 SSRF/白名单） */
+    private static final int MAX_REDIRECTS = 5;
+
     public WebFetchTool() { this(false); }
 
-    public WebFetchTool(boolean allowPrivateHosts) { this.allowPrivateHosts = allowPrivateHosts; }
+    public WebFetchTool(boolean allowPrivateHosts) {
+        this(allowPrivateHosts, null);
+    }
+
+    public WebFetchTool(boolean allowPrivateHosts, IntranetWebFetchPolicy intranetPolicy) {
+        this.allowPrivateHosts = allowPrivateHosts;
+        this.intranetPolicy = intranetPolicy;
+    }
+
+    /** §3.9 单跳校验：SSRF 基线 + 内网白名单（白名单启用时内网地址须命中） */
+    boolean hopAllowed(String url) {
+        if (allowPrivateHosts) return true;
+        if (!WebFetchTool.isPrivateHost(url)) return true;   // 公网：既有规则放行
+        return intranetPolicy != null && intranetPolicy.allows(url);
+    }
 
     @Override
     public String name() { return "WebFetch"; }
@@ -68,13 +88,13 @@ public class WebFetchTool implements Tool {
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
             return ToolResult.error("URL 无效: " + url);
         }
-        if (!allowPrivateHosts && isPrivateHost(url)) {
-            return ToolResult.error("SSRF 防护：禁止访问内网/回环地址");
+        if (!hopAllowed(url)) {
+            return ToolResult.error("SSRF 防护：该地址为内网/回环且不在内网白名单"
+                    + "（tools.webfetch.intranet.allowlist）中");
         }
-        Request request = new Request.Builder().url(url)
-                .header("User-Agent", "minion/0.1")
-                .build();
-        try (Response response = http.newCall(request).execute()) {
+        // §3.9 手动逐跳跟随：每跳 Location 独立过 SSRF/白名单（自动跟随会绕过首跳检查）
+        try (Response response = followWithValidation(url)) {
+            if (response == null) return ToolResult.error("重定向超过 " + MAX_REDIRECTS + " 跳或被拒绝（见上方提示）");
             if (!response.isSuccessful()) {
                 return ToolResult.error("HTTP " + response.code() + " 获取失败");
             }
@@ -96,11 +116,35 @@ public class WebFetchTool implements Tool {
                         + "\n... 内容过长已截断";
             }
             return ToolResult.success(text);
+        } catch (SecurityException denied) {
+            return ToolResult.error(denied.getMessage());
         } catch (Exception e) {
             String msg = e.getMessage();
             if (msg == null) msg = e.getClass().getSimpleName();
             return ToolResult.error("抓取失败: " + msg);
         }
+    }
+
+    /** 逐跳跟随重定向（≤MAX_REDIRECTS），每跳 Location 过 hopAllowed；违规抛 SecurityException */
+    private Response followWithValidation(String startUrl) throws Exception {
+        String current = startUrl;
+        for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
+            Request request = new Request.Builder().url(current)
+                    .header("User-Agent", "minion/0.1")
+                    .build();
+            Response response = http.newCall(request).execute();
+            int code = response.code();
+            if (code < 300 || code > 399) return response;   // 终点（含 4xx/5xx，交上层报错）
+            String location = response.header("Location");
+            response.close();
+            if (location == null || location.isEmpty())
+                throw new IOException("重定向缺少 Location");
+            current = new URL(new URL(current), location).toString();   // 相对 Location 解析
+            if (!hopAllowed(current))
+                throw new SecurityException("重定向到未授权地址已拒绝（第 " + (hop + 1) + " 跳）: "
+                        + current);
+        }
+        return null;   // 超跳数
     }
 
     /** 分块读取响应体，累计至 READ_LIMIT 即止，避免整段缓冲（关闭 source 即释放连接） */

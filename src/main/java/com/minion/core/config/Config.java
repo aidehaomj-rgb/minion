@@ -238,6 +238,12 @@ public class Config {
 
     public int toolResultsBudgetChars() { return (int) longOf("toolResults.budget.chars", 2000); }
 
+    /** v2.4 §3.9 内网 WebFetch（tools.webfetch.intranet.enabled 默认 false；总验收覆盖开启态） */
+    public boolean toolsWebfetchIntranetEnabled() { return Boolean.parseBoolean(get("tools.webfetch.intranet.enabled", "false")); }
+
+    /** §3.9 内网白名单（逗号分隔：域名后缀 / 单 IP / CIDR） */
+    public String toolsWebfetchIntranetAllowlist() { return get("tools.webfetch.intranet.allowlist", ""); }
+
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
         catch (Exception e) { return fallback; }
