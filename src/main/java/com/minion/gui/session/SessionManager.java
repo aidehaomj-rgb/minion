@@ -616,6 +616,15 @@ public class SessionManager {
             registry.register(com.minion.core.tools.TaskV2Tools.action("TaskUpdate", taskV2, "update"));
             registry.register(com.minion.core.tools.TaskV2Tools.action("TaskList", taskV2, "list"));
             registry.register(new com.minion.core.tools.NotebookEditTool(workspace, readState, ccSemantics));
+            // §3.5 worktree 入口（无 .git 时工具 disabled）；Config 只读视图；StructuredOutput
+            {
+                com.minion.core.tools.WorktreeTools worktree =
+                        new com.minion.core.tools.WorktreeTools(workspace, sessionId, ctx.confirmGate);
+                registry.register(worktree.new EnterWorktreeTool());
+                registry.register(worktree.new ExitWorktreeTool());
+            }
+            registry.register(new com.minion.core.tools.ConfigViewTool(featureFlags));
+            registry.register(new com.minion.core.tools.StructuredOutputTool());
             // §5.4 ToolSearch 工具（toolsearch.enabled 默认 false）；§3.2 Monitor（tools.monitor.enabled 默认 false）
             if (config.toolSearchEnabled())
                 registry.register(new com.minion.core.tools.ToolSearchTool(registry));
