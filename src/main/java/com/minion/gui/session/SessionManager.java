@@ -591,6 +591,11 @@ public class SessionManager {
             registry.register(com.minion.core.tools.TaskV2Tools.action("TaskUpdate", taskV2, "update"));
             registry.register(com.minion.core.tools.TaskV2Tools.action("TaskList", taskV2, "list"));
             registry.register(new com.minion.core.tools.NotebookEditTool(workspace, readState, ccSemantics));
+            // §5.4 ToolSearch 工具（toolsearch.enabled 默认 false）；§3.2 Monitor（tools.monitor.enabled 默认 false）
+            if (config.toolSearchEnabled())
+                registry.register(new com.minion.core.tools.ToolSearchTool(registry));
+            if (config.toolsMonitorEnabled())
+                registry.register(new com.minion.core.tools.MonitorTool(processTool, session));
         }
         PythonRuntime python = new PythonRuntime(config.pythonPath());
         registry.register(new FilesTool(workspace));

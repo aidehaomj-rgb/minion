@@ -225,6 +225,9 @@ public class Config {
     /** v2.4 §8.2 协调器模式（agent.coordinatorMode 默认 false）：system prompt 增补协调器分工段 */
     public boolean agentCoordinatorMode() { return Boolean.parseBoolean(get("agent.coordinatorMode", "false")); }
 
+    /** v2.4 §3.2 Monitor（tools.monitor.enabled 默认 false=legacy；replica-offline 开启） */
+    public boolean toolsMonitorEnabled() { return Boolean.parseBoolean(get("tools.monitor.enabled", "false")); }
+
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
         catch (Exception e) { return fallback; }

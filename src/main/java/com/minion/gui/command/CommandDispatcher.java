@@ -66,7 +66,22 @@ public class CommandDispatcher {
         if ("/goal".equals(cmd) || "/目标".equals(cmd)) return armMode(h,ExecutionMode.GOAL);
         if ("/review".equals(cmd) || "/审查".equals(cmd)) return armMode(h,ExecutionMode.REVIEW);
         if ("/normal".equals(cmd) || "/普通".equals(cmd)) return armMode(h,ExecutionMode.NORMAL);
-        if ("/task".equals(cmd) || "/agents".equals(cmd)) return h.session.taskState.render(h.session.todos);
+        if ("/task".equals(cmd) || "/agents".equals(cmd)) {
+            // §7.3 /agents：任务视图 + 自定义子代理定义清单（编辑直接改 .minion/agents/*.md）
+            StringBuilder taskView = new StringBuilder(h.session.taskState.render(h.session.todos));
+            if ("/agents".equals(cmd) && h.loop != null) {
+                java.util.List<com.minion.core.agent.AgentDefinitions.Definition> defs =
+                        com.minion.core.agent.AgentDefinitions.loadAll(h.loop.workspace().workDir());
+                if (!defs.isEmpty()) {
+                    taskView.append("\n\n自定义子代理（.minion/agents/*.md，直接编辑文件管理）：");
+                    for (com.minion.core.agent.AgentDefinitions.Definition d : defs)
+                        taskView.append("\n  ").append(d.name).append(" — ")
+                                .append(d.description.isEmpty() ? "（无描述）" : d.description)
+                                .append(d.tools.isEmpty() ? "" : "（tools: " + d.tools + "）");
+                }
+            }
+            return taskView.toString();
+        }
         if ("/context".equals(cmd) || "/上下文".equals(cmd)) {
             // §5.5 上下文占用视图；无循环运行时回退 Context 工具状态
             if (h.loop != null) return h.loop.contextView();

@@ -326,7 +326,7 @@ public class BashTool implements Tool {
     private static void killTree(Process process, int pid) {
         if (pid > 0) {
             String[] cmd = null;
-            String os = System.getProperty("os.name", "").toLowerCase();
+            String os = System.getProperty("os.name").toLowerCase();
             if (os.contains("win")) {
                 String bash = findGitBash();
                 if (bash != null) cmd = new String[]{bash, "-c", "kill -9 -" + pid};
@@ -339,8 +339,40 @@ public class BashTool implements Tool {
                     if (!k.waitFor(5, TimeUnit.SECONDS)) k.destroyForcibly();
                 } catch (Exception ignored) { }
             }
+            if (os.contains("win")) sweepGroupByPgid(pid);   // 组杀竞态兜底（组长已退出时 kill -PGID 报错逃逸）
         }
         ProcessCleanup.terminate(process); // Windows cmd 分支也清理整棵进程树。
+    }
+
+    /** 兜底扫尾：ps -W 解析同 PGID 成员的 WINPID 并 taskkill（仅限本组，不误伤他人）。
+     *  实测负载下 `(cmd &)` 的 bash 组长先退出，kill -9 -PGID 报 "No such process"
+     *  而孤儿子进程逃逸——按 PGID 逐成员杀可覆盖该窗口。 */
+    private static void sweepGroupByPgid(int pgid) {
+        try {
+            String bash = findGitBash();
+            if (bash == null) return;
+            Process p = new ProcessBuilder(bash, "-c",
+                    "ps -o pid,pgid,winpid -W | awk -v g=" + pgid + " 'NR>1 && $2==g {print $3}'")
+                    .redirectErrorStream(true).start();
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[2048];
+            int n;
+            try (java.io.InputStream in = p.getInputStream()) {
+                while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+            }
+            if (!p.waitFor(3, TimeUnit.SECONDS)) { p.destroyForcibly(); return; }
+            for (String line : out.toString("UTF-8").split("\n")) {
+                String winpid = line.trim();
+                if (!winpid.matches("\\d+")) continue;
+                try {
+                    Process k = new ProcessBuilder("taskkill", "/F", "/PID", winpid)
+                            .redirectErrorStream(true).start();
+                    k.waitFor(3, TimeUnit.SECONDS);
+                } catch (Exception ignored) { }
+            }
+        } catch (Exception ignored) {
+            // 扫尾失败不阻断主清理路径
+        }
     }
 
     /** 轮询读探针文件里的 shell pid（bash 启动后毫秒级写入）；3 秒内读不到返回 -1。

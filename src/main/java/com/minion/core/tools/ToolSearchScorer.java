@@ -83,10 +83,19 @@ public final class ToolSearchScorer {
         if (best == 0 && !words.isEmpty() && name.contains(words.get(0))) best = 3;
         if (!c.description.isEmpty()) {
             String desc = " " + c.description.toLowerCase(Locale.ROOT) + " ";
-            for (String w : words)
-                if (desc.contains(" " + w) || desc.contains(w + " ")) best = Math.max(best, 2);
+            for (String w : words) {
+                if (desc.contains(" " + w) || desc.contains(w + " ")) { best = Math.max(best, 2); break; }
+                // 中文等无空格分词语言：描述子串命中同样计分（词边界法只适用空格分词）
+                if (hasNonAscii(w) && desc.contains(w)) { best = Math.max(best, 2); break; }
+            }
         }
         return best;
+    }
+
+    private static boolean hasNonAscii(String s) {
+        for (int i = 0; i < s.length(); i++)
+            if (s.charAt(i) > 127) return true;
+        return false;
     }
 
     private static String wordsJoined(List<String> words) {
