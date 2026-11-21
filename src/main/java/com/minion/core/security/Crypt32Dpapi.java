@@ -13,7 +13,7 @@ import com.sun.jna.win32.StdCallLibrary;
  * 加载系统 crypt32.dll（随系统位数，天然匹配进程架构，无需自带 DLL）。
  * 出参 blob 由 DPAPI 用 LocalAlloc 分配，读出后必须 LocalFree，防句柄泄漏。
  */
-final class Crypt32Dpapi implements SecretStore.Dpapi {
+public final class Crypt32Dpapi implements SecretStore.Dpapi {
 
     private static final int CRYPTPROTECT_UI_FORBIDDEN = 0x1;
     /** DATA_BLOB 内 pbData 偏移：x64 结构体按 8 字节对齐 */
@@ -35,7 +35,7 @@ final class Crypt32Dpapi implements SecretStore.Dpapi {
     private static final Crypt32Lib C32 = (Crypt32Lib) Native.loadLibrary("Crypt32", Crypt32Lib.class);
     private static final Kernel32Lib K32 = (Kernel32Lib) Native.loadLibrary("kernel32", Kernel32Lib.class);
 
-    Crypt32Dpapi() { /* 加载失败由 Native.loadLibrary 抛 Error，调用方 defaultDpapi 捕获回退 */ }
+    public Crypt32Dpapi() { /* 加载失败由 Native.loadLibrary 抛 Error，调用方 defaultDpapi 捕获回退 */ }
 
     @Override
     public byte[] protect(byte[] plain) throws Exception {

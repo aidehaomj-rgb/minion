@@ -228,6 +228,11 @@ public class Config {
     /** v2.4 §3.2 Monitor（tools.monitor.enabled 默认 false=legacy；replica-offline 开启） */
     public boolean toolsMonitorEnabled() { return Boolean.parseBoolean(get("tools.monitor.enabled", "false")); }
 
+    /** v2.4 §6.2 autoDream 空闲整理（memory.dream.enabled 默认 false 保守起步） */
+    public boolean memoryDreamEnabled() { return Boolean.parseBoolean(get("memory.dream.enabled", "false")); }
+
+    public int memoryDreamMinHours() { return (int) longOf("memory.dream.minHours", 24); }
+
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
         catch (Exception e) { return fallback; }

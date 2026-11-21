@@ -23,6 +23,14 @@ public class CommandDispatcher {
     /** /stats 本地使用统计视图（§13.3）；未接线时命令返回不可用提示 */
     private java.util.function.Supplier<String> stats = () -> null;
 
+    /** /doctor 环境与配置诊断（§13.1）；未接线时命令返回不可用提示 */
+    private java.util.function.Supplier<String> doctor = () -> null;
+
+    public CommandDispatcher doctor(java.util.function.Supplier<String> supplier) {
+        this.doctor = supplier;
+        return this;
+    }
+
     /** /rewind 回退执行器（§9.3）：list=列出可回退消息；execute=按 eventId+mode 回退 */
     public interface RewindApi {
         String list(com.minion.core.agent.Session session);
@@ -52,6 +60,10 @@ public class CommandDispatcher {
         if ("/stats".equals(cmd) || "/统计".equals(cmd)) return statsText();
         if ("/rewind".equals(cmd) || "/回退".equals(cmd)) return rewindText(h, parts);
         if ("/cost".equals(cmd) || "/费用".equals(cmd)) return costText(h);
+        if ("/doctor".equals(cmd) || "/诊断环境".equals(cmd)) {
+            String text = doctor == null ? null : doctor.get();
+            return text == null ? "/doctor 不可用（诊断源未接线）" : text;
+        }
         if ("/skills".equals(cmd)) return skillsText(h);
         if ("/skill".equals(cmd)) return dispatchSkill(h, parts);
         if ("/tokens".equals(cmd)) return tokensText(h);

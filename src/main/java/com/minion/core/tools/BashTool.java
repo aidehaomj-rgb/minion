@@ -404,6 +404,9 @@ public class BashTool implements Tool {
     /** 已解析的 bash 路径缓存（"" 表示已解析过但未找到）：每次执行都重新解析太浪费 */
     private static volatile String cachedBash;
 
+    /** Git Bash 路径探测（/doctor 与组杀共用；null=未安装） */
+    public static String findGitBashPublic() { return findGitBash(); }
+
     private static String findGitBash() {
         if (cachedBash != null) return cachedBash.isEmpty() ? null : cachedBash;
         String found = locateGitBash();

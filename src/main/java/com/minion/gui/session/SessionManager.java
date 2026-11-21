@@ -190,6 +190,7 @@ public class SessionManager {
         this.featureFlags = new com.minion.core.config.FeatureFlags(config);
         this.dispatcher = new CommandDispatcher().featureFlags(() -> featureFlags)
                 .stats(this::statsText)
+                .doctor(this::doctorText)
                 .rewind(new CommandDispatcher.RewindApi() {
                     public String list(com.minion.core.agent.Session s) { return rewindList(s); }
                     public String execute(com.minion.core.agent.Session s, String eventId, String mode) {
@@ -213,6 +214,20 @@ public class SessionManager {
         // tick 直接在 jobClock 线程执行：账本读取/目录扫描是磁盘 IO，不再经 runLater 占用 FX 线程；
         // 到期派发走 send（后台线程安全），界面刷新由各监听器自行 runLater。
         jobClock.scheduleWithFixedDelay(() -> { try { tickJobs(); } catch (RuntimeException t) { DiagnosticLog.error("jobs", String.valueOf(t)); } }, 10, 10, java.util.concurrent.TimeUnit.SECONDS);
+        // §6.2 autoDream 空闲整理（memory.dream.enabled 默认 false）：每小时检查三重门
+        if (config.memoryDreamEnabled())
+            jobClock.scheduleWithFixedDelay(() -> {
+                try {
+                    WorkspaceCtx ctx = ctxByName.get(currentWorkspaceName);
+                    if (ctx != null)
+                        com.minion.core.context.MemoryConsolidator.runIfEnabled(true,
+                                Paths.get(ctx.workspace.workDir()), null,
+                                WorkspaceManager.sessionDirFor(jarDir, ctx.name),
+                                config.memoryDreamMinHours());
+                } catch (RuntimeException t) {
+                    DiagnosticLog.warn("memory-dream", "整理调度异常: " + t);
+                }
+            }, 10, 3600, java.util.concurrent.TimeUnit.SECONDS);
     }
     public com.minion.core.agent.LocalJobs jobs(SessionHandle h)throws java.io.IOException {
         if(h==null||h.deleted)throw new java.io.IOException("会话不存在");
@@ -860,6 +875,92 @@ public class SessionManager {
             for (SessionHandle h : ctx.sessions)
                 if (h.session == s) return h;
         return null;
+    }
+
+    /** §13.1 /doctor：环境与配置诊断（每项独立 try/catch 可注入失败；只读检查） */
+    public String doctorText() {
+        StringBuilder out = new StringBuilder("Minion /doctor 诊断");
+        check(out, "操作系统", () -> System.getProperty("os.name") + " " + System.getProperty("os.arch"));
+        check(out, "JDK", () -> System.getProperty("java.version") + "（"
+                + System.getProperty("sun.arch.data.model") + " 位）"
+                + ("64".equals(System.getProperty("sun.arch.data.model")) ? "" : "  [警告] 目标环境需 x64"));
+        check(out, "JavaFX", () -> {
+            javafx.application.Platform.runLater(() -> { });
+            return "可用";
+        });
+        check(out, "JNA/DPAPI", () -> {
+            try {
+                new com.minion.core.security.Crypt32Dpapi()
+                        .protect("doctor-probe".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                return "Crypt32 可用（DPAPI 正常）";
+            } catch (Exception e) {
+                return "[失败] " + e.getMessage();
+            }
+        });
+        check(out, "Git", () -> probeCommand("git", "--version"));
+        check(out, "Git Bash", () -> {
+            String bash = com.minion.core.tools.BashTool.findGitBashPublic();
+            return bash == null ? "[警告] 未找到 Git Bash（Bash 工具将走 cmd）" : bash;
+        });
+        check(out, "rg.exe", () -> {
+            java.nio.file.Path rg = jarDir.resolve("ripgrep").resolve("rg.exe");
+            return java.nio.file.Files.isRegularFile(rg) ? rg.toString() : "[提示] 未随包（Grep 回退 Java 实现）";
+        });
+        check(out, "密钥存储", () -> java.nio.file.Files
+                .isRegularFile(jarDir.resolve(".minion").resolve("master.key"))
+                ? "v2 master.key 存在" : "未初始化（首次 set 时生成）");
+        check(out, "未知配置键", () -> {
+            java.util.Set<String> unknown = new java.util.LinkedHashSet<String>();
+            for (String key : config.keysWithPrefix(""))
+                if (config.defaultOf(key) == null && !knownDynamicKey(key)) unknown.add(key);
+            return unknown.isEmpty() ? "无" : "[警告] " + unknown;
+        });
+        check(out, "磁盘剩余", () -> {
+            try {
+                long free = java.nio.file.Files.getFileStore(jarDir).getUsableSpace();
+                return String.format("%.1f GB", free / 1e9) + (free < 1_000_000_000L ? "  [警告] 不足 1GB" : "");
+            } catch (java.io.IOException e) {
+                return "[失败] " + e.getMessage();
+            }
+        });
+        check(out, "堆上限", () -> String.format("%.1f GB", Runtime.getRuntime().maxMemory() / 1e9));
+        return out.toString();
+    }
+
+    private static void check(StringBuilder out, String name, java.util.function.Supplier<String> probe) {
+        out.append(String.format("%n%-12s ", name));
+        try {
+            out.append(probe.get());
+        } catch (Throwable failed) {
+            out.append("[失败] ").append(failed.getClass().getSimpleName()).append(": ")
+                    .append(failed.getMessage());
+        }
+    }
+
+    /** 动态键白名单（非静态默认但合法：会话/环境写入的键） */
+    private static boolean knownDynamicKey(String key) {
+        return key.startsWith("model.") || key.startsWith("context.") || key.startsWith("input.")
+                || key.startsWith("ui.") || key.startsWith("skills.") || key.startsWith("knowledge.")
+                || key.startsWith("paths.") || key.startsWith("confirm.") || key.startsWith("python")
+                || key.equals("emptyOutputPlaceholder") || key.startsWith("task.")
+                || key.startsWith("browser") || key.startsWith("notify.") || key.startsWith("tools.");
+    }
+
+    private static String probeCommand(String... cmd) {
+        try {
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            java.io.ByteArrayOutputStream all = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[2048];
+            int n;
+            try (java.io.InputStream in = p.getInputStream()) {
+                while ((n = in.read(buf)) != -1) all.write(buf, 0, n);
+            }
+            p.waitFor();
+            String text = all.toString("UTF-8").trim();
+            return p.exitValue() == 0 ? text.split("\n")[0] : "[失败] exit=" + p.exitValue();
+        } catch (Exception failed) {
+            return "[失败] " + failed.getMessage();
+        }
     }
 
     public String statsText() {
