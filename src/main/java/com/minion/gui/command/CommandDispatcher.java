@@ -76,6 +76,32 @@ public class CommandDispatcher {
             String text = doctor == null ? null : doctor.get();
             return text == null ? "/doctor 不可用（诊断源未接线）" : text;
         }
+        // ==================== §11.2 补齐命令（v2.4 全清单） ====================
+        if ("/clear".equals(cmd) || "/reset".equals(cmd) || "/new".equals(cmd) || "/清空".equals(cmd))
+            return "会话清空：请通过 GUI 新建会话（/new 或 Ctrl+N）；CLI 用 minion -p（每次独立）";
+        if ("/model".equals(cmd) || "/模型".equals(cmd)) return modelText(parts);
+        if ("/effort".equals(cmd)) return "推理力度切换：请在设置窗口（模型配置）调整 model.reasoningEffort\n当前: " + (h.loop != null ? h.session.modelName : "未知");
+        if ("/status".equals(cmd) || "/状态".equals(cmd)) return statusText(h);
+        if ("/vim".equals(cmd)) return "Vim 模式：V68 输入框已内嵌 Emacs 快捷键子集；Vim 完整键位待 UI 切片";
+        if ("/add-dir".equals(cmd)) return addDirText(parts);
+        if ("/resume".equals(cmd) || "/continue".equals(cmd) || "/恢复".equals(cmd)) return resumeText(h, parts);
+        if ("/rename".equals(cmd) || "/改名".equals(cmd)) return renameText(h, parts);
+        if ("/export".equals(cmd) || "/导出".equals(cmd)) return exportText(h);
+        if ("/diff".equals(cmd) || "/变更".equals(cmd)) return dispatchLocalTool(h, "Git", gitDiffArgs());
+        if ("/branch".equals(cmd) || "/fork".equals(cmd) || "/分叉".equals(cmd)) return branchText();
+        if ("/btw".equals(cmd) || "/旁支".equals(cmd)) return btwText(parts);
+        if ("/insights".equals(cmd) || "/洞察".equals(cmd)) return "Insights 属 prompt 命令（分析历史会话）；请直接发送分析请求";
+        if ("/plugin".equals(cmd) || "/plugins".equals(cmd) || "/reload-plugins".equals(cmd))
+            return "插件管理：请使用 GUI 设置窗口；本版本无 CLI 插件命令（§7.2 Plugins 随后端切片）";
+        if ("/mcp".equals(cmd)) return dispatchLocalTool(h, "MCP", simpleAction(parts, "list"));
+        if ("/ide".equals(cmd)) return "IDE 桥：lsp.enabled=true 且 lsp.servers 配置后可用（/doctor 查看）";
+        if ("/security-review".equals(cmd) || "/安全审查".equals(cmd)) return armMode(h, ExecutionMode.REVIEW);
+        if ("/commit".equals(cmd) || "/提交".equals(cmd)) return commitText(parts);
+        if ("/statusline".equals(cmd)) return "StatusLine：随第 10 章 UI 切片实现";
+        if ("/output-style".equals(cmd)) return "Output Style：随第 10 章 UI 切片实现";
+        if ("/exit".equals(cmd) || "/quit".equals(cmd) || "/退出".equals(cmd)) return "退出：请关闭 GUI 窗口（CLI 自动退出）";
+        if ("/init".equals(cmd) || "/初始化".equals(cmd)) return initText(h);
+        // ==================== 既有命令 ====================
         if ("/skills".equals(cmd)) return skillsText(h);
         if ("/skill".equals(cmd)) return dispatchSkill(h, parts);
         if ("/tokens".equals(cmd)) return tokensText(h);
@@ -144,6 +170,69 @@ public class CommandDispatcher {
     private String costText(SessionHandle h) {
         if (h.loop == null) return "/cost 不可用（会话未装载）";
         return h.loop.costReport();
+    }
+
+    // ==================== §11.2 补齐命令的辅助方法 ====================
+
+    private String modelText(String[] parts) {
+        if (parts.length < 2) return "用法: /model <模型名>（当前仅提示；GUI 设置窗切换）";
+        return "模型切换请在 GUI 设置窗口操作（涉及 API Key/端点联动）\n请求模型: " + parts[1];
+    }
+
+    private String statusText(SessionHandle h) {
+        return "会话: " + (h.title != null ? h.title : h.id)
+                + "\n模型: " + (h.session != null ? h.session.modelName : "未知")
+                + "\n运行中: " + h.isLoaded()
+                + "\n工具: " + (h.loop != null ? h.loop.registry().schemas().size() : 0)
+                + "\n上下文: " + (h.loop != null && h.loop.contextManager() != null
+                        ? h.loop.contextManager().estimate(h.session.messages) + " token" : "未启用");
+    }
+
+    private String addDirText(String[] parts) {
+        if (parts.length < 2) return "用法: /add-dir <目录路径>";
+        return "附加目录请在 GUI 设置窗口（工作空间管理）添加\n请求目录: " + parts[1];
+    }
+
+    private String resumeText(SessionHandle h, String[] parts) {
+        return "会话恢复：请使用 GUI 侧边栏（历史会话列表）\n"
+                + "当前会话: " + h.id + (parts.length > 1 ? "\n搜索词: " + parts[1] : "");
+    }
+
+    private String renameText(SessionHandle h, String[] parts) {
+        if (parts.length < 2) return "用法: /rename <新标题>";
+        return "会话改名: " + parts[1] + "（请通过 GUI 侧边栏右键操作）\n当前标题: " + h.title;
+    }
+
+    private String exportText(SessionHandle h) {
+        return "导出会话：请使用 GUI 菜单（文件→导出 Markdown）\n会话: " + h.id + "（" + h.session.messages.size() + " 条消息）";
+    }
+
+    private static com.google.gson.JsonObject gitDiffArgs() {
+        com.google.gson.JsonObject args = new com.google.gson.JsonObject();
+        args.addProperty("action", "diff");
+        return args;
+    }
+
+    private String branchText() {
+        return "分叉会话：请使用 GUI 侧边栏（右键→分叉）";
+    }
+
+    private String btwText(String[] parts) {
+        if (parts.length < 2) return "用法: /btw <旁支问题>（不打断主线）";
+        return "旁支提问请使用 task 工具（mode=explore）或 AgentControl side_query：\n/btw 的独立通道随 §8.1 接线";
+    }
+
+    private String commitText(String[] parts) {
+        return "Git 提交：请使用 Git 工具（stage → commit）\n"
+                + "归因（attribution.commit 默认 true）自动追加 Generated with Minion + Co-Authored-By";
+    }
+
+    /** §6.3 /init：分析代码库生成 MINION.md（prompt 命令——展开为指导文本发模型） */
+    private String initText(SessionHandle h) {
+        return "[系统指令] 请分析当前代码库并生成 MINION.md 文件，写入项目根目录。要点：\n"
+                + "1. 项目简介（一段话）\n2. 构建与测试命令\n3. 代码风格约定\n"
+                + "4. 常见陷阱与注意事项\n5. 目录结构概览\n"
+                + "使用 Read/Glob/Grep 工具探索代码后，用 Write 工具生成 MINION.md。";
     }
 
     private String helpText() {

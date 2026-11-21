@@ -22,6 +22,10 @@ public class Boot {
     public static void main(String[] args) throws Exception {
         setPrismOrder();
         setRenderScale();
+        // §11.1 CLI 分流：-p/--print/--output-format/doctor/--version → headless（零 JavaFX）
+        if (com.minion.core.cli.MinionCli.isCliInvocation(args)) {
+            System.exit(runCli(args));
+        }
         if (!isRunningFromJar() || hasFlag(args, RELAUNCH_FLAG)) {
             Main.main(args);   // IDE 开发流或已自举：直接进入正常启动
             return;
@@ -49,6 +53,31 @@ public class Boot {
                 return;
             default:
                 errorExit();                // ERROR_NO_JVM：stderr + Swing 错误框 + exit(1)
+        }
+    }
+
+    /** §11.1 CLI 分流：解析参数 → headless 执行（零 JavaFX） */
+    private static int runCli(String[] args) {
+        try {
+            com.minion.core.cli.MinionCli.Args parsed = com.minion.core.cli.MinionCli.parse(args);
+            // 子命令：doctor
+            if ("doctor".equals(parsed.prompt)) {
+                System.out.println("minion doctor（headless）：请运行 GUI 后使用 /doctor 获取完整诊断");
+                return 0;
+            }
+            if ("--version".equals(parsed.prompt) || parsed.prompt == null) {
+                System.out.println("minion 0.1.0 (v2.4 replica)");
+                return parsed.print ? 1 : 0;   // -p 无 prompt 报错
+            }
+            boolean stream = "stream-json".equals(parsed.outputFormat);
+            com.minion.core.cli.StreamJsonProtocol protocol =
+                    new com.minion.core.cli.StreamJsonProtocol(System.out, stream);
+            Path jarDir = Paths.get(Boot.class.getProtectionDomain().getCodeSource()
+                    .getLocation().toURI()).getParent();
+            return new com.minion.core.cli.HeadlessRunner(parsed, jarDir, protocol).run();
+        } catch (Exception e) {
+            System.err.println("[minion] CLI 错误: " + e.getMessage());
+            return 1;
         }
     }
 
