@@ -343,8 +343,27 @@ public class SessionManager {
                 }
                 h.closeRetired();
             }
+            // §10.8 通知：任务结束（Notification hook 先行；失败不影响主任务）
+            notifier().notify(h.loop == null ? null : h.loop.ccHookSystem(), "Minion 任务结束",
+                    (h.title == null ? h.id : h.title) + " — "
+                            + ("completed".equals(h.session.taskState.status) ? "已完成"
+                                    : "paused".equals(h.session.taskState.status)
+                                            ? "已暂停（" + h.session.taskState.pauseCode + "）" : "已停止"));
         }
         for (Listener l : listeners) l.onSessionRunningChanged(h, running);
+    }
+
+    /** §10.8 通知器（notify.channel：tray/sound/disabled；Notification hook 先行） */
+    private volatile com.minion.core.notify.Notifier notifier;
+    private com.minion.core.notify.Notifier notifier() {
+        com.minion.core.notify.Notifier n = notifier;
+        if (n == null) {
+            synchronized (this) {
+                if (notifier == null) notifier = new com.minion.core.notify.Notifier(config);
+                n = notifier;
+            }
+        }
+        return n;
     }
     private void notifyActivated(SessionHandle h) {
         for (Listener l : listeners) l.onSessionActivated(h);
@@ -1056,6 +1075,14 @@ public class SessionManager {
     /** §13.3 /stats：本地使用统计（会话数/消息数/token 累计，数据源当前空间已装载会话 +
      * UsageTracker），快照持久化 {jarDir}/.minion/stats.json（覆盖写，含生成时间）。
      */
+    /** §9.3 Rewind 选择器公共入口（双击 Esc 打开）：列可回退点 */
+    public String rewindListFor(Session s) { return rewindList(s); }
+
+    /** §9.3 Rewind 选择器公共入口：按 eventId+mode 回退（rewind 前自动建恢复点） */
+    public String rewindExecuteFor(Session s, String eventId, String mode) {
+        return rewindExecute(s, eventId, mode);
+    }
+
     /** /rewind 消息清单（§9.3）：最近 10 条带 eventId 的用户消息 */
     private String rewindList(Session s) {
         StringBuilder sb = new StringBuilder("可回退的用户消息（/rewind <eventId> <conversation|summarize>）:\n");

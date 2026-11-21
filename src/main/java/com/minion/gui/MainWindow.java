@@ -61,6 +61,8 @@ public class MainWindow {
 
     private final Stage stage;
     private final SessionManager manager;
+    /** §9.3 双击 Esc 检测：上次 Esc 时间戳（400ms 内两次=打开 Rewind 选择器） */
+    private long lastEscAt;
     private final TabPane tabs = new TabPane();
     private BorderPane root;
     private boolean synchronizingTabs;
@@ -493,6 +495,19 @@ public class MainWindow {
                     e.consume();
                     SessionHandle h = manager.currentSession();
                     if (h != null) new TaskDashboard(stage, manager, h).show();
+                }
+                return;
+            }
+            // §9.3 双击 Esc（400ms 内两次）= Rewind 选择器；输入框有文本时不触发
+            if (e.getCode() == javafx.scene.input.KeyCode.ESCAPE) {
+                long now = System.currentTimeMillis();
+                if (now - lastEscAt < 400) {
+                    e.consume();
+                    SessionHandle h = manager.currentSession();
+                    if (h != null) com.minion.gui.dialog.RewindSelector.show(stage, manager, h);
+                    lastEscAt = 0;
+                } else {
+                    lastEscAt = now;
                 }
             }
         });
