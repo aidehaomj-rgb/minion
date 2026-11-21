@@ -2313,9 +2313,8 @@ public class AgentLoop {
                         lengthContinuationHint="[系统结束检查] 有新用户补充，旧交付未通过验收。先处理最新补充，不得执行旧目标。";
                         continue;
                     }
-                    // §1.5 token 预算（仅显式预算输入时生效；无预算=V68 零影响）：
-                    // 未达 90% 注入 meta 提醒续写；连续两轮增量 <500 token 且已续写 ≥3 次按收益递减停止
-                    if (turnTokenBudget != null && budgetNudgeWanted()) continue;
+                    // §2.6：token 预算后移至门禁与 Stop Hook 之后（第 8 步）——门禁要求继续时
+                    // 直接续跑，不触发预算续写；旧顺序（门禁前预算先裁决）已废止
                     String candidate=content.toString();
                     long stopRevision=session.taskState.revision();
                     StopGate.Snapshot snapshot=stopSnapshot(candidate,stopReceipts,stopHistoricalEvidenceCount,reportFromIndex);
@@ -2538,6 +2537,41 @@ public class AgentLoop {
                             ui.onWarning("结束Hook未通过，继续处理缺项；未标记完成");continue;
                         }
                     }
+                    // §2.6 第 7 步：Stop Hook（CC 语义）——仅 StopGate 允许结束后执行；阻断=续跑补缺
+                    // （有界：无进展预算封顶后按 stop_hook 暂停，不伪造 success）；超时/畸形按 §4.7
+                    // ask 语义收紧为阻断续跑，不得默认 continue
+                    if(!scheduledTurn&&ccHookSystem.enabled()
+                            &&ccHookSystem.matches(com.minion.core.hooks.HookSystem.STOP,"")) {
+                        com.google.gson.JsonObject stopPayload=new com.google.gson.JsonObject();
+                        stopPayload.addProperty("stop_reason","completed");
+                        stopPayload.addProperty("reason",decision.reason==null?"":decision.reason);
+                        com.minion.core.hooks.HookSystem.Outcome stopHook;
+                        try { stopHook=ccHookSystem.run(com.minion.core.hooks.HookSystem.STOP,"",stopPayload); }
+                        catch(InterruptedException stopInterrupted) { Thread.currentThread().interrupt(); break; }
+                        if(stopHook.blocked||stopHook.ask) {
+                            int denied=stopProgress.deny();
+                            if(denied>StopGate.NO_PROGRESS_LIMIT) {
+                                lastTurnSucceeded=false;taskCompleted=false;
+                                exitCode="stop_hook";
+                                exitReason="Stop Hook 连续阻断（"+denied+" 次）："+stopHook.reason;
+                                ui.onWarning("Stop Hook 持续阻断，任务保持未完成；请检查 Hook 或继续对话推进");
+                                break;
+                            }
+                            lengthContinuationHint="[Stop Hook] "+(stopHook.reason==null?"阻断":stopHook.reason)
+                                    +"。只补当前目标缺项，不重放已成功操作；完成后自然结束。";
+                            if(stopHook.systemMessage!=null) ui.onWarning(stopHook.systemMessage);
+                            DiagnosticLog.info("stop-gate","stop-hook blocked, continue #"+denied);
+                            persistSession();
+                            continue;
+                        }
+                    }
+                    // §2.6 第 8 步：Token 预算——门禁与 Stop Hook 全部放行后的最后裁决；仅用户显式
+                    // 给出预算时生效（无预算=V68 零影响）。未达 90% 注入 meta 提醒续写；达 90%/
+                    // 收益递减（连续两轮增量 <500 且已续写 ≥3）放行完成；不得借预算绕过未完成任务
+                    if (turnTokenBudget != null && budgetNudgeWanted()) {
+                        persistSession();
+                        continue;
+                    }
                     synchronized(session.pendingSupplements) {
                         if(!session.pendingSupplements.isEmpty()||!snapshot.id.equals(session.taskState.id)
                                 ||stopRevision!=session.taskState.revision()||interrupted||Thread.currentThread().isInterrupted()) {
@@ -2717,19 +2751,8 @@ public class AgentLoop {
             appendCompletionTime(java.time.Clock.systemUTC());
         }
         if(!lastTurnSucceeded && exitCode==null) exitCode="unclassified";
-        // §4.7 Stop Hook：仅在任务成功结束（StopGate 已放行）时执行；阻断=保持任务开启，
-        // 不伪造 success（自动续跑的完整状态机接线随 §2.6 统一结束切片）
-        if (lastTurnSucceeded && !interrupted) {
-            com.google.gson.JsonObject stopPayload = new com.google.gson.JsonObject();
-            stopPayload.addProperty("stop_reason", exitCode == null ? "end_turn" : exitCode);
-            String stopBlocked = runCcHook(com.minion.core.hooks.HookSystem.STOP, stopPayload);
-            if (stopBlocked != null) {
-                lastTurnSucceeded = false;
-                exitCode = "stop_hook";
-                exitReason = "Stop Hook 阻断: " + stopBlocked;
-                ui.onWarning(exitReason + "；任务保持未完成，请继续对话推进");
-            }
-        }
+        // §2.6：Stop Hook 已移入回合内裁决级联（StopGate 放行后、预算前，阻断=续跑补缺），
+        // 不再在退出路径事后执行（旧事后块只标记失败、无法续跑，已废止）
         lastTurnToolRounds=rounds;
         session.taskState.finish(lastTurnSucceeded,exitReason,exitCode);
         DiagnosticLog.info("agent-exit","task="+session.taskState.id+" state="+session.taskState.status
