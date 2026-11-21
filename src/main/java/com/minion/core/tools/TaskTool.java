@@ -23,11 +23,11 @@ public class TaskTool implements Tool {
     @Override
     public JsonObject schema() {
         JsonObject schema=SchemaGenerator.objectSchema("登记子 agent 任务",
-                new String[]{"description", "prompt", "mode", "allowedTools", "isolatedOutput", "stepId", "scope", "dependsOn", "acceptance", "timeoutMillis", "requiresMerge", "revision"},
+                new String[]{"description", "prompt", "mode", "allowedTools", "subagent_type", "run_in_background", "isolatedOutput", "stepId", "scope", "dependsOn", "acceptance", "timeoutMillis", "requiresMerge", "revision"},
                 dispatcher==null?new String[]{"description"}:new String[]{"description", "stepId", "scope", "dependsOn", "acceptance"});
         JsonObject properties=schema.getAsJsonObject("properties");
         for(String key:new String[]{"scope","dependsOn"}){JsonObject p=new JsonObject();p.addProperty("type","array");JsonObject item=new JsonObject();item.addProperty("type","string");p.add("items",item);properties.add(key,p);}
-        for(String key:new String[]{"isolatedOutput","requiresMerge"})properties.getAsJsonObject(key).addProperty("type","boolean");
+        for(String key:new String[]{"isolatedOutput","requiresMerge","run_in_background"})properties.getAsJsonObject(key).addProperty("type","boolean");
         properties.getAsJsonObject("timeoutMillis").addProperty("type","integer");
         properties.getAsJsonObject("revision").addProperty("type","integer");
         schema.addProperty("additionalProperties",false);return schema;

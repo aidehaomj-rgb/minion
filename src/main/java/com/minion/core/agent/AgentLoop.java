@@ -310,6 +310,8 @@ public class AgentLoop {
     public boolean budgetEnabled = true;
     /** §2.2 元数据驱动并行（tools.parallel.metadataDriven 默认 false=按名判定的 V68 现状） */
     public boolean toolsParallelMetadataDriven = false;
+    /** §8.2 协调器模式（agent.coordinatorMode 默认 false）：system prompt 增补分工段 */
+    public boolean coordinatorMode;
     /** §5.3 压缩后文件重读（compact.restore.enabled 默认 true；无读状态时零影响） */
     public boolean compactRestoreEnabled = true;
     /** §5.1 microcompact（microcompact.enabled 默认 false=legacy；replica-offline 开启） */
@@ -326,9 +328,40 @@ public class AgentLoop {
     public com.minion.core.llm.CostTracker costTracker() { return costTracker; }
     public com.minion.core.llm.PromptCacheBreakDetector cacheBreakDetector() { return cacheBreakDetector; }
 
+    /** §5.5 /context 视图：各段 token 占用文本表（system/schema/消息分角色/汇总与压缩线） */
+    public String contextView() {
+        StringBuilder sb = new StringBuilder("上下文占用（4/3 保守口径估算）\n");
+        int systemTokens = TokenCounter.estimate(promptBuilder.buildStable(toolSchedulingPolicy));
+        sb.append(String.format("%n%-28s %8d token", "system 提示（稳定段）", systemTokens));
+        int schemaTokens = lastRequestSchemaTokens;
+        sb.append(String.format("%n%-28s %8d token", "工具 schema（最近请求）", schemaTokens));
+        long user = 0, assistant = 0, tool = 0, other = 0;
+        if (session.messages != null)
+            for (Message m : session.messages) {
+                int t = TokenCounter.estimateMessages(java.util.Collections.singletonList(m));
+                if (m.role == Message.Role.USER || m.role == Message.Role.SYSTEM) user += t;
+                else if (m.role == Message.Role.ASSISTANT) assistant += t;
+                else if (m.role == Message.Role.TOOL) tool += t;
+                else other += t;
+            }
+        sb.append(String.format("%n%-28s %8d token", "用户/系统消息", user));
+        sb.append(String.format("%n%-28s %8d token", "assistant 消息", assistant));
+        sb.append(String.format("%n%-28s %8d token", "工具结果", tool));
+        if (other > 0) sb.append(String.format("%n%-28s %8d token", "其他（控制/召回）", other));
+        int messages = contextManager == null ? TokenCounter.estimateMessages(session.messages)
+                : contextManager.estimate(session.messages);
+        sb.append(String.format("%n%-28s %8d token", "消息合计", messages));
+        int window = contextManager == null ? 0 : contextManager.maxTokens();
+        int trigger = contextManager == null ? 0 : contextManager.autoCompressAtTokens();
+        sb.append(String.format("%n%n窗口 %d / 压缩触发线 %d / 已用 %.1f%%",
+                window, trigger, window > 0 ? messages * 100.0 / window : 0));
+        if (contextManager != null && contextManager.autoCompressTripped())
+            sb.append("\n[熔断] 自动压缩已连续 3 次失败停用；请手动 /compact");
+        return sb.toString();
+    }
+
     /** /cost 展示：费用/时长/模型明细 + 缓存打破事件 */
-    public String costReport() {
-        StringBuilder sb = new StringBuilder(costTracker.render());
+    public String costReport() {        StringBuilder sb = new StringBuilder(costTracker.render());
         java.util.List<com.minion.core.llm.PromptCacheBreakDetector.Break> breaks =
                 cacheBreakDetector.breaks();
         if (!breaks.isEmpty()) {
@@ -563,6 +596,18 @@ public class AgentLoop {
     private String launchChild(JsonObject args) {
         if (args.has("model"))
             return "子Agent失败: 模型已锁定为主会话模型，不能单独指定model";
+        // §7.3 自定义子代理：subagent_type → .minion/agents/*.md 定义（tools 白名单合并进本调用）
+        {
+            String type = text(args, "subagent_type", null);
+            if (type != null && !type.trim().isEmpty()
+                    && !java.util.Arrays.asList("general-purpose", "Explore", "Plan").contains(type)) {
+                AgentDefinitions.Definition def = AgentDefinitions.find(workspace.workDir(), type);
+                if (def == null)
+                    return "子Agent失败: 未知 subagent_type: " + type + "（内置 general-purpose/Explore/Plan 或 .minion/agents/*.md 定义）";
+                if (!def.tools.isEmpty() && !args.has("allowedTools"))
+                    args = mergeToolWhitelist(args, def);
+            }
+        }
         if (args.has("run_in_background") && args.get("run_in_background").getAsBoolean())
             return launchChildBackground(args);   // §8.1 run_in_background：登记后立即返回 childId
         String desc=text(args,"description","无描述");
@@ -585,6 +630,19 @@ public class AgentLoop {
     private static String text(JsonObject o,String key,String fallback) {
         return o.has(key)&&!o.get(key).isJsonNull()?o.get(key).getAsString():fallback;
     }
+
+    /** §7.3：定义的 tools 白名单写入调用参数（显式 allowedTools 优先，调用方未传时生效） */
+    private static JsonObject mergeToolWhitelist(JsonObject args, AgentDefinitions.Definition def) {
+        JsonObject merged = args.deepCopy();
+        merged.addProperty("allowedTools", def.tools);
+        return merged;
+    }
+
+    /** §8.2 协调器分工段（自撰文案；调度器强制并发安全，不只靠提示词） */
+    private static final String COORDINATOR_PROMPT = "\n\n[协调器模式] 你负责研究、综合与写规格；实现与验证交给子代理并行完成。"
+            + "只读任务可任意并行；写任务按文件集由调度器强制串行（不要试图绕过）。"
+            + "worker 看不到主对话：派发 prompt 必须自包含（目标、路径、验收口径）。"
+            + "worker 失败时用 SendMessage 带错误上下文续用同一 worker；方向性错误先 TaskStop 再重定向。";
     private AgentRuntime childRuntime(String model,String id) {
         return childRuntime(model,id,null);
     }
@@ -1738,7 +1796,8 @@ public class AgentLoop {
                     toolPolicyFingerprint=requestToolProfile.fingerprint;
                 }
                 String system = promptBuilder.buildStable(toolSchedulingPolicy)
-                        + executionMode.promptRules();
+                        + executionMode.promptRules()
+                        + (coordinatorMode ? COORDINATOR_PROMPT : "");
                 List<Message> request = new ArrayList<Message>();
                 request.add(Message.system(system));
                 request.add(Message.taskControl("[系统当前工作区与任务控制，非新用户指令]\n"

@@ -222,6 +222,9 @@ public class Config {
     /** v2.4 §3.3 shell 快照（默认 false 保守：先验证不破坏现有执行；replica-offline 开启） */
     public boolean bashSnapshotEnabled() { return Boolean.parseBoolean(get("bash.snapshot.enabled", "false")); }
 
+    /** v2.4 §8.2 协调器模式（agent.coordinatorMode 默认 false）：system prompt 增补协调器分工段 */
+    public boolean agentCoordinatorMode() { return Boolean.parseBoolean(get("agent.coordinatorMode", "false")); }
+
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
         catch (Exception e) { return fallback; }

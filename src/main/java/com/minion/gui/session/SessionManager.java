@@ -965,6 +965,7 @@ public class SessionManager {
         loop.llmMaxContinueRecovery = config.llmMaxContinueRecovery();
         loop.budgetEnabled = config.budgetEnabled();
         loop.toolsParallelMetadataDriven = config.toolsParallelMetadataDriven();
+        loop.coordinatorMode = config.agentCoordinatorMode();   // §8.2 协调器分工段（默认 false）
         // §5.1/5.2/5.3 上下文体系（默认值=V68 现状；microcompact 默认关、公式制默认关、恢复默认开）
         loop.microcompactEnabled = config.microcompactEnabled();
         loop.microcompactIdleMinutes = config.microcompactIdleMinutes();

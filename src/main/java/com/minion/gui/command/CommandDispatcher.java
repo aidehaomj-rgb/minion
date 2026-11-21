@@ -67,7 +67,11 @@ public class CommandDispatcher {
         if ("/review".equals(cmd) || "/审查".equals(cmd)) return armMode(h,ExecutionMode.REVIEW);
         if ("/normal".equals(cmd) || "/普通".equals(cmd)) return armMode(h,ExecutionMode.NORMAL);
         if ("/task".equals(cmd) || "/agents".equals(cmd)) return h.session.taskState.render(h.session.todos);
-        if ("/context".equals(cmd) || "/上下文".equals(cmd)) return dispatchLocalTool(h, "Context", simpleAction(parts,"status"));
+        if ("/context".equals(cmd) || "/上下文".equals(cmd)) {
+            // §5.5 上下文占用视图；无循环运行时回退 Context 工具状态
+            if (h.loop != null) return h.loop.contextView();
+            return dispatchLocalTool(h, "Context", simpleAction(parts,"status"));
+        }
         if ("/memory".equals(cmd) || "/记忆".equals(cmd)) return dispatchLocalTool(h, "Memory", simpleAction(parts,"status"));
         if ("/permissions".equals(cmd) || "/权限".equals(cmd)) return dispatchLocalTool(h, "Permission", permissionArgs(parts));
         if ("/secrets".equals(cmd) || "/密钥".equals(cmd)) return dispatchLocalTool(h, "Secrets", simpleAction(parts,"list"));
