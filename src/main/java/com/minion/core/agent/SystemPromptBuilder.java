@@ -98,6 +98,14 @@ public class SystemPromptBuilder {
 
     public SystemPromptBuilder setReplicaLayout(boolean enabled) { this.replicaLayout = enabled; return this; }
 
+    /** §10.5 输出样式风格段（非 default 时追加；空=不改。完整系统段替换随 §11.3 接线） */
+    private volatile String outputStyleBody;
+
+    public SystemPromptBuilder setOutputStyleBody(String styleBody) {
+        this.outputStyleBody = styleBody == null || styleBody.trim().isEmpty() ? null : styleBody.trim();
+        return this;
+    }
+
     /** Independent of task state, cwd, project.md contents, skill list and discovery order. */
     public String buildStable(ToolSchedulingPolicy policy) {
         StringBuilder sb = new StringBuilder(BUILTIN);
@@ -107,6 +115,7 @@ public class SystemPromptBuilder {
               .append("表示命令成功、无输出内容，请按成功结果处理，不要视为失败或重复调用同一工具。\n");
         }
         if (replicaLayout) sb.append('\n').append(ReplicaPromptTemplate.replicaSections());
+        if (outputStyleBody != null) sb.append('\n').append(outputStyleBody).append('\n');
         return sb.toString();
     }
 

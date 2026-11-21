@@ -201,6 +201,9 @@ public class SessionManager {
                 .doctor(this::doctorText)
                 .plugin(this::pluginCommand)
                 .taskRegistry(h -> backgroundRegistryOf(h.id))
+                .styleCatalog(h -> outputStyleCatalog())
+                .styleSetter((h, name) -> config.set("output.style", name))
+                .themeSetter(id -> config.set("ui.theme", id))
                 .queuePriority((h, text, priority) -> sendPrioritized(h, text, priority))
                 .rewind(new CommandDispatcher.RewindApi() {
                     public String list(com.minion.core.agent.Session s) { return rewindList(s); }
@@ -353,6 +356,21 @@ public class SessionManager {
         for (Listener l : listeners) l.onSessionRunningChanged(h, running);
     }
 
+    /** §10.5 输出样式目录（内置+user(jarDir)+project(workspace) 合并；按 output.style 解析） */
+    private com.minion.core.ui.outputstyles.OutputStyleCatalog outputStyleCatalog() {
+        WorkspaceCtx ctx = ctxByName.get(currentWorkspaceName);
+        java.nio.file.Path workspace = ctx == null ? null
+                : java.nio.file.Paths.get(ctx.workspace.workDir());
+        return com.minion.core.ui.outputstyles.OutputStyleCatalog.load(jarDir, workspace);
+    }
+
+    /** §10.5 当前生效风格段（default/未配置=空；追加进系统提示稳定段） */
+    private String outputStyleBody() {
+        String name = config.get("output.style", "default");
+        if (name == null || name.isEmpty() || "default".equalsIgnoreCase(name)) return null;
+        return outputStyleCatalog().resolve(name).body;
+    }
+
     /** §10.8 通知器（notify.channel：tray/sound/disabled；Notification hook 先行） */
     private volatile com.minion.core.notify.Notifier notifier;
     private com.minion.core.notify.Notifier notifier() {
@@ -478,7 +496,8 @@ public class SessionManager {
         AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s),
                 new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
                         tmpDirOf(h.id).toString(), config.emptyOutputPlaceholder(), projSkills)
-                        .setReplicaLayout(config.instructionsEnabled()),   // D.2 四段（replica-offline）
+                        .setReplicaLayout(config.instructionsEnabled())   // D.2 四段（replica-offline）
+                        .setOutputStyleBody(outputStyleBody()),           // §10.5 输出样式风格段
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
         loop.configureTaskBudget(config.taskContinuationWindows(), 0 /* no cumulative token cap, including restored tasks */);
@@ -884,7 +903,8 @@ public class SessionManager {
         AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s),
                 new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
                         tmpDirOf(s.id).toString(), config.emptyOutputPlaceholder(), projSkills)
-                        .setReplicaLayout(config.instructionsEnabled()),
+                        .setReplicaLayout(config.instructionsEnabled())
+                        .setOutputStyleBody(outputStyleBody()),           // §10.5 输出样式风格段
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
         loop.setAllSkills(sk.skills);   // 会话级快照：本会话独享、不可变

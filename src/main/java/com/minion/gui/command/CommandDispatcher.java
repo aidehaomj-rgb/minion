@@ -33,6 +33,16 @@ public class CommandDispatcher {
     private java.util.function.Function<SessionHandle, com.minion.core.agent.RuntimeJobRegistry>
             taskRegistry = h -> null;
 
+    /** §10.5 会话 → 输出样式目录（内置+user+project 合并；null=未接线） */
+    private java.util.function.Function<SessionHandle, com.minion.core.ui.outputstyles.OutputStyleCatalog>
+            styleCatalog = h -> null;
+
+    /** §10.5 样式选择落盘（config output.style；新会话生效） */
+    private java.util.function.BiConsumer<SessionHandle, String> styleSetter = (h, name) -> { };
+
+    /** §10.5 主题落盘（config ui.theme；界面随重启/重开完全应用） */
+    private java.util.function.Consumer<String> themeSetter = id -> { };
+
     /** /queue add 的优先发送通道（§2.3 now 含中断在途）；未接线时走普通入队 */
     public interface QueuePriority {
         void apply(SessionHandle h, String text, String priority);
@@ -58,6 +68,22 @@ public class CommandDispatcher {
     public CommandDispatcher taskRegistry(
             java.util.function.Function<SessionHandle, com.minion.core.agent.RuntimeJobRegistry> registryOf) {
         this.taskRegistry = registryOf;
+        return this;
+    }
+
+    public CommandDispatcher styleCatalog(java.util.function.Function<SessionHandle,
+            com.minion.core.ui.outputstyles.OutputStyleCatalog> catalog) {
+        this.styleCatalog = catalog;
+        return this;
+    }
+
+    public CommandDispatcher styleSetter(java.util.function.BiConsumer<SessionHandle, String> setter) {
+        this.styleSetter = setter;
+        return this;
+    }
+
+    public CommandDispatcher themeSetter(java.util.function.Consumer<String> setter) {
+        this.themeSetter = setter;
         return this;
     }
 
@@ -90,6 +116,33 @@ public class CommandDispatcher {
         if ("/stats".equals(cmd) || "/统计".equals(cmd)) return statsText();
         if ("/rewind".equals(cmd) || "/回退".equals(cmd)) return rewindText(h, parts);
         if ("/cost".equals(cmd) || "/费用".equals(cmd)) return costText(h);
+        if ("/output-style".equals(cmd) || "/输出样式".equals(cmd)) {
+            // §10.5 输出样式：无参=列表；带名=选择落盘（新会话生效）
+            com.minion.core.ui.outputstyles.OutputStyleCatalog catalog =
+                    h == null ? null : styleCatalog.apply(h);
+            if (catalog == null) return "输出样式未接线";
+            if (parts.length < 2) {
+                StringBuilder sb = new StringBuilder("输出样式（/output-style <名> 选择；新会话生效）：");
+                for (com.minion.core.ui.outputstyles.OutputStyle s : catalog.all())
+                    sb.append("\n  ").append(s.hint());
+                return sb.toString();
+            }
+            com.minion.core.ui.outputstyles.OutputStyle picked = catalog.resolve(parts[1]);
+            styleSetter.accept(h, picked.name);
+            return "已选择输出样式 " + picked.name + "（新会话生效；default=不改动系统提示）";
+        }
+        if ("/theme".equals(cmd) || "/color".equals(cmd) || "/主题".equals(cmd)) {
+            // §10.5 主题：列表与选择（ui.theme 持久化；界面随重启/重开窗口完全应用）
+            StringBuilder sb = new StringBuilder();
+            for (com.minion.gui.theme.Theme.Variant v : com.minion.gui.theme.Theme.Variant.values())
+                sb.append("\n  ").append(v.id).append(" — ").append(v.label)
+                        .append(com.minion.gui.theme.Theme.activeId().equals(v.id) ? "（当前）" : "");
+            if (parts.length < 2)
+                return "主题（/theme <id> 选择）：" + sb;
+            com.minion.gui.theme.Theme.Variant picked = com.minion.gui.theme.Theme.variant(parts[1]);
+            themeSetter.accept(picked.id);
+            return "主题 " + picked.label + " 已保存（重启或重开窗口后完全应用）";
+        }
         if ("/tasks".equals(cmd) || "/bashes".equals(cmd) || "/任务面板".equals(cmd)) {
             // §10.6/§10.7 共用可视化模型（只读快照；变更走 TaskV2/TodoWrite/TaskStop 工具）
             if (h == null || h.loop == null) return "无活动会话";
