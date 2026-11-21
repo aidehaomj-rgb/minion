@@ -51,6 +51,7 @@ public class CommandDispatcher {
         if ("/config".equals(cmd) || "/开关".equals(cmd)) return configText(parts);
         if ("/stats".equals(cmd) || "/统计".equals(cmd)) return statsText();
         if ("/rewind".equals(cmd) || "/回退".equals(cmd)) return rewindText(h, parts);
+        if ("/cost".equals(cmd) || "/费用".equals(cmd)) return costText(h);
         if ("/skills".equals(cmd)) return skillsText(h);
         if ("/skill".equals(cmd)) return dispatchSkill(h, parts);
         if ("/tokens".equals(cmd)) return tokensText(h);
@@ -94,6 +95,12 @@ public class CommandDispatcher {
         if (parts.length == 1) return api.list(h.session);
         String mode = parts.length >= 3 ? parts[2].toLowerCase(Locale.ROOT) : "conversation";
         return api.execute(h.session, parts[1], mode);
+    }
+
+    /** /cost：会话成本与缓存打破视图（§1.1；数据来自会话循环的 CostTracker） */
+    private String costText(SessionHandle h) {
+        if (h.loop == null) return "/cost 不可用（会话未装载）";
+        return h.loop.costReport();
     }
 
     private String helpText() {

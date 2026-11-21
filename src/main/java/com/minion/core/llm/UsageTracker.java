@@ -7,6 +7,8 @@ public class UsageTracker {
     private int sessionInput;
     private int sessionOutput;
     private int sessionThinking;
+    /** §1.1 缓存分账：命中/未命中累计（仅 cacheReported 的响应计入命中口径） */
+    private long sessionCacheHit, sessionCacheMiss;
     private Usage last;
     // 旧累计字段保留供历史存档兼容；新增分项不把旧存档总量倒推为真实 usage。
     private long reportedInput, reportedOutput, estimatedInput, estimatedOutput;
@@ -20,6 +22,7 @@ public class UsageTracker {
         sessionInput += usage.inputTokens;
         sessionOutput += usage.outputTokens;
         sessionThinking += usage.reasoningTokens;
+        if (usage.cacheReported) { sessionCacheHit += usage.cacheHitTokens; sessionCacheMiss += usage.cacheMissTokens; }
         if (usage.estimated) {
             estimatedInput += usage.inputTokens; estimatedOutput += usage.outputTokens; estimatedRequests++;
         } else {
@@ -42,6 +45,7 @@ public class UsageTracker {
         o.addProperty("reportedOutputTokens",reportedOutput);o.addProperty("estimatedOrMixedInputTokens",estimatedInput);
         o.addProperty("estimatedOrMixedOutputTokens",estimatedOutput);o.addProperty("reportedRequests",reportedRequests);
         o.addProperty("estimatedOrMixedRequests",estimatedRequests);
+        o.addProperty("cacheHitTokens",sessionCacheHit);o.addProperty("cacheMissTokens",sessionCacheMiss);
         o.addProperty("unattributedHistoricalInputTokens",(long)sessionInput-reportedInput-estimatedInput);
         o.addProperty("unattributedHistoricalOutputTokens",(long)sessionOutput-reportedOutput-estimatedOutput);
         o.addProperty("calibrationFingerprint",calibrationFingerprint);o.addProperty("calibrationSamples",calibrationSamples);
@@ -53,6 +57,8 @@ public class UsageTracker {
     public synchronized int sessionInput() { return sessionInput; }
     public synchronized int sessionOutput() { return sessionOutput; }
     public synchronized int sessionThinking() { return sessionThinking; }
+    public synchronized long sessionCacheHit() { return sessionCacheHit; }
+    public synchronized long sessionCacheMiss() { return sessionCacheMiss; }
     public synchronized int sessionTotal() { return sessionInput + sessionOutput; }
     public synchronized Usage last() { return last; }
 
@@ -61,6 +67,8 @@ public class UsageTracker {
         sessionInput = 0;
         sessionOutput = 0;
         sessionThinking = 0;
+        sessionCacheHit = 0;
+        sessionCacheMiss = 0;
         last = null;
         reportedInput=reportedOutput=estimatedInput=estimatedOutput=reportedRequests=estimatedRequests=0;
         calibrationFingerprint=null;calibrationLocal=calibrationActual=calibrationSamples=0;
@@ -77,6 +85,7 @@ public class UsageTracker {
     }
     private void copyFrom(UsageTracker from) {
         sessionInput=from.sessionInput;sessionOutput=from.sessionOutput;sessionThinking=from.sessionThinking;last=from.last;
+        sessionCacheHit=from.sessionCacheHit;sessionCacheMiss=from.sessionCacheMiss;
         reportedInput=from.reportedInput;reportedOutput=from.reportedOutput;estimatedInput=from.estimatedInput;
         estimatedOutput=from.estimatedOutput;reportedRequests=from.reportedRequests;estimatedRequests=from.estimatedRequests;
         calibrationFingerprint=from.calibrationFingerprint;calibrationLocal=from.calibrationLocal;

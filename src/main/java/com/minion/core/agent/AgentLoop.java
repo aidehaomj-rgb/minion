@@ -316,6 +316,33 @@ public class AgentLoop {
     public boolean microcompactEnabled = false;
     public int microcompactIdleMinutes = 60;
     private long lastAssistantAt;   // 最近一次 assistant 入历史时间（microcompact 闲置判据）
+    // ==================== §1.1 成本统计与缓存打破检测（默认开，纯观测无副作用） ====================
+    public boolean costTrackingEnabled = true;
+    public boolean cacheBreakDetectEnabled = true;
+    private final com.minion.core.llm.CostTracker costTracker = new com.minion.core.llm.CostTracker();
+    private final com.minion.core.llm.PromptCacheBreakDetector cacheBreakDetector =
+            new com.minion.core.llm.PromptCacheBreakDetector();
+
+    public com.minion.core.llm.CostTracker costTracker() { return costTracker; }
+    public com.minion.core.llm.PromptCacheBreakDetector cacheBreakDetector() { return cacheBreakDetector; }
+
+    /** /cost 展示：费用/时长/模型明细 + 缓存打破事件 */
+    public String costReport() {
+        StringBuilder sb = new StringBuilder(costTracker.render());
+        java.util.List<com.minion.core.llm.PromptCacheBreakDetector.Break> breaks =
+                cacheBreakDetector.breaks();
+        if (!breaks.isEmpty()) {
+            sb.append("\n\n缓存打破事件（").append(breaks.size()).append(" 次）:");
+            for (com.minion.core.llm.PromptCacheBreakDetector.Break b : breaks)
+                sb.append("\n  ").append(new java.text.SimpleDateFormat("HH:mm:ss")
+                                .format(new java.util.Date(b.at)))
+                        .append(" hit ").append(b.prevHit).append("→").append(b.hit)
+                        .append("（").append(b.cause).append("）");
+        } else {
+            sb.append("\n缓存打破：无（或字段未上报 unknown）");
+        }
+        return sb.toString();
+    }
     /** §6.1 MINION.md 装载器（instructions.enabled 默认 false=不发现；非 null 且启用时请求侧注入） */
     private volatile com.minion.core.context.InstructionLoader instructionLoader;
 
@@ -444,6 +471,8 @@ public class AgentLoop {
         this.workspace = workspace;
         this.session = session;
         this.sessionHooks = new SessionHooks(workspace);
+        // §1.1 恢复会话成本快照（同会话实例往返；非法快照按空处理）
+        if (session.costJson != null) costTracker.restoreJson(session.costJson);
         this.executionGuard = new ToolExecutionGuard(workspace,false);
         // §4.7 CC 语义 Hook（默认 disabled；SessionManager 装配快照批准后经 ccHooks 装入）
         this.ccHookSystem = new com.minion.core.hooks.HookSystem(java.nio.file.Paths.get(workspace.workDir()));
@@ -1018,6 +1047,7 @@ public class AgentLoop {
      */
     public void persistSession() {
         session.cwd = workspace.cwd().toString();
+        if (costTrackingEnabled) session.costJson = costTracker.persistJson();   // §1.1 成本快照随会话落盘
         saveSession();
     }
 
@@ -1796,6 +1826,10 @@ public class AgentLoop {
                     }
                 });
                 try {
+                    // §1.1 缓存打破基线：调用前记录稳定前缀（system + 工具 schema 集）
+                    if (cacheBreakDetectEnabled)
+                        cacheBreakDetector.beforeRequest(session.modelName,
+                                system + "|" + registry.schemas());
                     streamChat(request, handler, requestWithoutThinking, requestForAction);
                 } catch (LlmException e) {
                     DiagnosticLog.warn("model-health", "task="+session.taskState.id+" model="+session.modelName
@@ -1928,6 +1962,17 @@ public class AgentLoop {
 
                 if (usage[0] != null) {
                     session.usage.record(usage[0]);
+                    // §1.1 成本累计（真实 usage 才计费）与缓存打破判定（同轮 before/after 配对）
+                    if (costTrackingEnabled)
+                        costTracker.record(session.modelName, usage[0],
+                                (System.nanoTime() - requestStartNs) / 1_000_000L);
+                    if (cacheBreakDetectEnabled) {
+                        com.minion.core.llm.PromptCacheBreakDetector.Break br =
+                                cacheBreakDetector.afterResponse(usage[0], System.currentTimeMillis());
+                        if (br != null)
+                            DiagnosticLog.info("cache-break", "hit " + br.prevHit + "→" + br.hit
+                                    + " cause=" + br.cause);
+                    }
                     // §1.5 每轮增量记账（diminishing returns 判据：最近两轮增量）
                     long inc = usage[0].totalTokens > 0 ? usage[0].totalTokens
                             : (long) usage[0].inputTokens + usage[0].outputTokens;

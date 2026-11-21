@@ -299,11 +299,25 @@ public class BashTool implements Tool {
      *  trap 'wait' EXIT：bash 退出前（含 exit 语句）等待全部后台子进程结束——`sleep 30 &`
      *  这类后台任务不会在 bash 退出后成孤儿（孤儿持有 stdout 管道拖住 reader、进程残留
      *  占资源，实测：bash 退出后组杀失效，必须让 bash 保持存活直到任务完成或超时组杀） */
-    private static String probe(String command, File pidFile) {
+    private String probe(String command, File pidFile) {
+        // §3.3 shell 快照（bash.snapshot.enabled 默认 false）：新 shell 先 source 快照
+        // 恢复 函数/shopt/set/alias/PATH；快照缺失/损坏静默跳过（降级现状）
+        String source = "";
+        Path snapshot = shellSnapshot;
+        if (snapshot != null && Files.isRegularFile(snapshot)) {
+            String s = snapshot.toString().replace("\\", "/").replace("\"", "\\\"");
+            source = ". \"" + s + "\" 2>/dev/null || true\n";
+        }
         return "trap 'wait' EXIT\n"
+                + source
                 + "echo \"$$\" > \"" + pidFile.getAbsolutePath() + "\"\n"
                 + command + "\n";
     }
+
+    /** §3.3 会话快照文件（SessionManager 装配时按开关注入；null=不加载） */
+    private volatile Path shellSnapshot;
+
+    public void setShellSnapshot(Path snapshotFile) { this.shellSnapshot = snapshotFile; }
 
     /** 强杀整个进程树：按进程组整体杀（kill -9 -<pid>，负 pid = 进程组）。
      *  Windows 上 taskkill /T 因 MSYS fork 的 Windows 父链断裂找不到孙进程（已实测），

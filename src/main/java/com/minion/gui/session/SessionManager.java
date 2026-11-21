@@ -561,6 +561,14 @@ public class SessionManager {
         // §3.2：Bash run_in_background 委托同一后台账本（唯一真源）；TaskOutput/TaskStop/Sleep 补齐
         {
             BashTool bash = new BashTool(workspace, tmpDirOf(sessionId), config);
+            // §3.3 shell 快照（bash.snapshot.enabled 默认 false）：会话创建时捕获一次，
+            // 之后每次 Bash 新 shell source 恢复；存会话临时目录（随会话清理，生命周期等价
+            // 于规格的 {jarDir}/.minion/shell-snapshot-{sessionId}.sh 且免手工删除）
+            if (config.bashSnapshotEnabled()) {
+                java.nio.file.Path snap = com.minion.core.tools.bash.ShellSnapshot.capture(
+                        tmpDirOf(sessionId).resolve("shell-snapshot.sh"));
+                if (snap != null) bash.setShellSnapshot(snap);
+            }
             bash.setBackgroundRunner(processTool);
             registry.register(bash);
             registry.register(new com.minion.core.tools.TaskOutputTool(processTool));
@@ -909,6 +917,33 @@ public class SessionManager {
         }
     }
 
+    /** §1.1 单价表注册：cost.price.<model>.{input,output,cacheRead,cacheWrite}（元/百万 token）；
+     *  cacheRead/Write 缺省按参考比例（0.1×/1.25× input）；默认模型作为未配置模型的回退价 */
+    private void registerCostPrices(AgentLoop loop, Session parent) {
+        com.minion.core.llm.CostTracker tracker = loop.costTracker();
+        String defaultModel = parent.runtimeModelConfig == null ? parent.modelName
+                : parent.runtimeModelConfig.modelName;
+        tracker.setDefaultModel(defaultModel);
+        java.util.Set<String> keys = config.keysWithPrefix("cost.price.");
+        java.util.Set<String> models = new java.util.LinkedHashSet<String>();
+        for (String k : keys) {
+            String[] parts = k.split("\\.");
+            if (parts.length == 4) models.add(parts[2]);
+        }
+        for (String model : models) {
+            tracker.setPrice(model, new com.minion.core.llm.CostTracker.Price(
+                    doubleOrNull(config.get("cost.price." + model + ".input", null)),
+                    doubleOrNull(config.get("cost.price." + model + ".output", null)),
+                    doubleOrNull(config.get("cost.price." + model + ".cacheRead", null)),
+                    doubleOrNull(config.get("cost.price." + model + ".cacheWrite", null))));
+        }
+    }
+
+    private static Double doubleOrNull(String v) {
+        if (v == null || v.trim().isEmpty()) return null;
+        try { return Double.parseDouble(v.trim()); } catch (NumberFormatException e) { return null; }
+    }
+
     private void configureAgentRuntime(AgentLoop loop,WorkspaceCtx ctx,Session parent) {
         // §1.2 retry.profile（legacy 默认；cc 复刻参数）+ §1.3 模型降级链（默认空=完全保持现状）
         loop.retryPolicy = com.minion.core.agent.RetryPolicy.fromProfile(config);
@@ -930,6 +965,10 @@ public class SessionManager {
         if (config.instructionsEnabled())
             loop.setInstructionLoader(new com.minion.core.context.InstructionLoader(
                     Paths.get(loop.workspace().workDir()), jarDir, true));
+        // §1.1 成本统计/缓存检测开关 + 单价表注册（cost.price.<model>.{input,output,cacheRead,cacheWrite}）
+        loop.costTrackingEnabled = config.costTrackingEnabled();
+        loop.cacheBreakDetectEnabled = config.cacheBreakDetectEnabled();
+        registerCostPrices(loop, parent);
         loop.setToolProfileSupplier(()->{
             try {
                 ModelConfig current=parent.runtimeModelConfig==null?modelForSession(parent):parent.runtimeModelConfig;

@@ -97,6 +97,13 @@ public class Config {
     /** classpath 默认值（无外部覆盖时）；FeatureFlags 判断「显式配置 vs 默认」用（§13.1） */
     public String defaultOf(String key) { return resourceDefaults.get(key); }
 
+    /** 以前缀枚举配置键（§1.1 单价表 cost.price.* 注册用）；含 classpath 默认与外部覆盖 */
+    public java.util.Set<String> keysWithPrefix(String prefix) {
+        java.util.Set<String> out = new java.util.HashSet<String>();
+        for (String k : props.keySet()) if (k.startsWith(prefix)) out.add(k);
+        return out;
+    }
+
     public String skillsDir()    { return get("skills.dir", "./skills"); }
     /** 所有工作空间共用的只读 Markdown 知识库目录；留空则只使用项目知识库。 */
     public String sharedKnowledgeDir() { return get("knowledge.shared.dir", ""); }
@@ -205,6 +212,15 @@ public class Config {
 
     /** v2.4 §13.2 提交归因（attribution.commit 默认 true）：commit 追加 Generated with Minion + Co-Authored-By */
     public boolean attributionCommit() { return Boolean.parseBoolean(get("attribution.commit", "true")); }
+
+    /** v2.4 §1.1 成本统计（默认 true，纯统计无副作用） */
+    public boolean costTrackingEnabled() { return Boolean.parseBoolean(get("cost.tracking.enabled", "true")); }
+
+    /** v2.4 §1.1 缓存打破检测（默认 true） */
+    public boolean cacheBreakDetectEnabled() { return Boolean.parseBoolean(get("cost.cachebreak.detect", "true")); }
+
+    /** v2.4 §3.3 shell 快照（默认 false 保守：先验证不破坏现有执行；replica-offline 开启） */
+    public boolean bashSnapshotEnabled() { return Boolean.parseBoolean(get("bash.snapshot.enabled", "false")); }
 
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }

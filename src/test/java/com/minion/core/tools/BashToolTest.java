@@ -2,6 +2,7 @@ package com.minion.core.tools;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -13,6 +14,19 @@ import java.nio.file.Paths;
 import static org.junit.Assert.*;
 
 public class BashToolTest {
+
+    /** 清理跨运行残留的探针进程：残留检测按映像名全局断言，前次运行/手动实验遗留的
+     *  sleep.exe 会污染本轮判定（实测根因之一）。仅 Windows 且映像名足够特异（sleep.exe
+     *  非系统进程），不会误杀用户程序。 */
+    @BeforeClass
+    public static void killStrayProbeProcesses() throws Exception {
+        String os = System.getProperty("os.name").toLowerCase();
+        if (!os.contains("win")) return;
+        try {
+            new ProcessBuilder("taskkill", "/F", "/IM", "sleep.exe")
+                    .redirectErrorStream(true).start().waitFor();
+        } catch (Exception ignored) { /* 无残留或 taskkill 不可用：忽略 */ }
+    }
 
     @Rule
     public TemporaryFolder tmp = new TemporaryFolder();
