@@ -18,6 +18,8 @@ public class Config {
     private static final String DEFAULT_RESOURCE = "/config.properties";
 
     private final Map<String, String> props = new HashMap<String, String>();
+    /** classpath 默认值快照（不含外部文件覆盖）：FeatureFlags 来源追溯用（§13.1） */
+    private final Map<String, String> resourceDefaults = new HashMap<String, String>();
     private final Path externalFile;
 
     private Config(Path externalFile) { this.externalFile = externalFile; }
@@ -33,6 +35,7 @@ public class Config {
     static Config load(Path overrideDir, String defaultResource) {
         Config c = new Config(overrideDir.resolve(EXTERNAL_FILE_NAME));
         loadResource(c.props, defaultResource);
+        loadResource(c.resourceDefaults, defaultResource);
         if (Files.exists(c.externalFile)) {
             loadFile(c.props, c.externalFile);
         } else {
@@ -91,6 +94,9 @@ public class Config {
         return v == null || v.isEmpty() ? def : v;
     }
 
+    /** classpath 默认值（无外部覆盖时）；FeatureFlags 判断「显式配置 vs 默认」用（§13.1） */
+    public String defaultOf(String key) { return resourceDefaults.get(key); }
+
     public String skillsDir()    { return get("skills.dir", "./skills"); }
     /** 所有工作空间共用的只读 Markdown 知识库目录；留空则只使用项目知识库。 */
     public String sharedKnowledgeDir() { return get("knowledge.shared.dir", ""); }
@@ -124,6 +130,19 @@ public class Config {
 
     /** v2.4 §9.1：transcript JSONL 双写层（默认 false=legacy 单写；replica-offline 开启双写） */
     public boolean transcriptJsonl() { return Boolean.parseBoolean(get("session.transcript.jsonl", "false")); }
+
+    /**
+     * v2.4 §3.1/§4.5 Read/Edit/Write 的 CC 语义：Read 去重 stub、read-before-write、
+     * 整文件哈希冲突校验。默认 false 完整保留 V68（14.3 开关表）。读状态登记本身
+     * 无条件（纯簿记不影响行为），仅消费侧受此开关控制。
+     */
+    public boolean readCcSemantics() { return Boolean.parseBoolean(get("read.ccSemantics", "false")); }
+
+    /**
+     * v2.4 §4.6 SecretStore 加固（默认 true，0.3 明示安全修复例外）：随机主密钥 + DPAPI/PBKDF2
+     * + AES/GCM + 旧 CBC 数据迁移。false 完整回退旧实现（可预测密钥 CBC，仅应急排障）。
+     */
+    public boolean secretStoreV2() { return Boolean.parseBoolean(get("secret.store.v2", "true")); }
 
     public boolean permissionEngineV2() { return Boolean.parseBoolean(get("permission.engine.v2", "true")); }
     /** read-only / workspace-write / full；未知值回落 workspace-write。 */

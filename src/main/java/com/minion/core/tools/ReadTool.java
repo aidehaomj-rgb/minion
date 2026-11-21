@@ -33,6 +33,10 @@ public class ReadTool implements Tool {
     private final String skillsDir;
     private final String tmpDir;
     private final ConfirmGate confirm;
+    /** 会话级读状态（v2.4 §4.5）；null=未接线（独立构造/旧测试），跳过登记与去重 */
+    private final com.minion.core.security.ReadStateStore readState;
+    /** v2.4 §3.1 read.ccSemantics：去重 stub 消费侧开关（登记是无条件簿记） */
+    private final boolean ccSemantics;
 
     public ReadTool(Workspace workspace) { this(workspace, null); }
 
@@ -43,10 +47,17 @@ public class ReadTool implements Tool {
     }
 
     public ReadTool(Workspace workspace, String skillsDir, String tmpDir, ConfirmGate confirm) {
+        this(workspace, skillsDir, tmpDir, confirm, null, false);
+    }
+
+    public ReadTool(Workspace workspace, String skillsDir, String tmpDir, ConfirmGate confirm,
+                    com.minion.core.security.ReadStateStore readState, boolean ccSemantics) {
         this.workspace = workspace;
         this.skillsDir = skillsDir;
         this.tmpDir = tmpDir;
         this.confirm = confirm;
+        this.readState = readState;
+        this.ccSemantics = ccSemantics;
     }
 
     @Override
@@ -196,7 +207,32 @@ public class ReadTool implements Tool {
             sb.append("... 共 ").append(lines.size()).append(" 行，已显示 ")
               .append(shown).append(" 行（可用 offset/limit 翻页）\n");
         }
-        return ToolResult.success(sb.toString());
+        return finishTextRead(p, offset, shown, shown < lines.size() || offset > 0, sb.toString());
+    }
+
+    /** §4.5 读状态登记（无条件簿记）+ ccSemantics 去重 stub（正文逐字仍在上下文且整文件哈希未变） */
+    private ToolResult finishTextRead(Path p, int offset, int shown, boolean partialRange, String body) throws IOException {
+        if (readState == null) return ToolResult.success(body);
+        String key = com.minion.core.security.ReadStateStore.keyOf(p);
+        com.minion.core.security.ReadStateStore.Entry prev = readState.get(key);
+        String wholeHash = com.minion.core.security.ReadStateStore.sha256(p);
+        long mtime;
+        try { mtime = Files.getLastModifiedTime(p).toMillis(); } catch (IOException absent) { mtime = 0L; }
+        // 去重判据全部满足才回 stub：正文与上次逐字相同（同范围仍在上下文=ledger 命中）
+        // 且整文件 SHA-256 未变（规格：未变化判断需复核整文件哈希）
+        if (ccSemantics && prev != null && body.equals(prev.content)
+                && prev.offset == offset && prev.limit == shown && !prev.isPartialView
+                && wholeHash.equals(prev.contentHash)
+                && readState.contextLedger().present(key, offset, shown)) {
+            readState.record(key, body, wholeHash, prev.rangeHash, mtime, offset, shown, false, partialRange);
+            readState.contextLedger().note(key, offset, shown);
+            return ToolResult.success("[文件未变化：与上下文中最近一次读取（offset=" + offset
+                    + ", " + shown + " 行）逐字一致，整文件 SHA-256 未变，未重复注入正文]");
+        }
+        readState.record(key, body, wholeHash,
+                com.minion.core.security.ReadStateStore.sha256(body), mtime, offset, shown, false, partialRange);
+        readState.contextLedger().note(key, offset, shown);
+        return ToolResult.success(body);
     }
 
     /** full 模式单行裁剪：返回串（含「该行超长、无法 offset 续读、请用 Bash」说明）总长 ≤ maxLen——

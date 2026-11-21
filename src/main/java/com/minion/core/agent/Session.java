@@ -151,6 +151,8 @@ public class Session {
     public long journalSequence;
     public TodoList todos = new TodoList();
     public TaskState taskState = new TaskState();
+    /** 会话级读状态（v2.4 §4.5）：Read 登记 / Edit-Write 消费 / 压缩回退失效 ledger。transient：纯内存簿记 */
+    public transient volatile com.minion.core.security.ReadStateStore readState = new com.minion.core.security.ReadStateStore();
     public List<QueuedTask> queuedTasks = new ArrayList<QueuedTask>();
     public static class QueuedTask {
         public String id=java.util.UUID.randomUUID().toString();

@@ -20,6 +20,10 @@ public class WriteTool implements Tool {
     private final String tmpDir;
     private final CheckpointStore checkpoints;
     private final ConfirmGate confirm;
+    /** 会话级读状态（v2.4 §4.5）；null=未接线，跳过校验 */
+    private final com.minion.core.security.ReadStateStore readState;
+    /** v2.4 §3.1 read.ccSemantics：覆盖已有文件须已读且整文件哈希一致 */
+    private final boolean ccSemantics;
 
     public WriteTool(Workspace workspace) { this(workspace, null); }
 
@@ -39,11 +43,19 @@ public class WriteTool implements Tool {
 
     public WriteTool(Workspace workspace, String skillsDir, String tmpDir,
                      CheckpointStore checkpoints, ConfirmGate confirm) {
+        this(workspace, skillsDir, tmpDir, checkpoints, confirm, null, false);
+    }
+
+    public WriteTool(Workspace workspace, String skillsDir, String tmpDir,
+                     CheckpointStore checkpoints, ConfirmGate confirm,
+                     com.minion.core.security.ReadStateStore readState, boolean ccSemantics) {
         this.workspace = workspace;
         this.skillsDir = skillsDir;
         this.tmpDir = tmpDir;
         this.checkpoints = checkpoints;
         this.confirm = confirm;
+        this.readState = readState;
+        this.ccSemantics = ccSemantics;
     }
 
     @Override
@@ -75,6 +87,10 @@ public class WriteTool implements Tool {
         if (guard != null && (confirm == null || !confirm.checkEscapeWrite(this, args, p.toString()))) {
             return guard;
         }
+        // §3.1：覆盖已有文件须已读且整文件哈希一致（新建不受限）；切片读算已读但提示整文件覆盖风险
+        boolean overwrite = Files.exists(p);
+        ToolResult readGate = checkReadState(p, overwrite);
+        if (readGate != null) return readGate;
         if (p.getParent() != null) Files.createDirectories(p.getParent());
         String content = args.get("content").getAsString();
         boolean append = args.has("mode") && "append".equalsIgnoreCase(args.get("mode").getAsString());
@@ -105,8 +121,42 @@ public class WriteTool implements Tool {
         } finally {
             lock.unlock();
         }
+        updateReadState(p);
+        String risk = overwrite && readState != null && ccSemantics && partialReadWarning(p)
+                ? "\n注意：此前仅读取过该文件的部分内容，本次为整文件覆盖，请确认未丢失未读部分"
+                : "";
         return ToolResult.success((append ? "已追加 " : "已写入 ") + p
-                + " (" + content.length() + " 字符)");
+                + " (" + content.length() + " 字符)" + risk);
+    }
+
+    /** §3.1/§4.5：覆盖校验（read.ccSemantics）；新建文件直接放行。null=放行 */
+    private ToolResult checkReadState(Path p, boolean overwrite) throws IOException {
+        if (!ccSemantics || readState == null || !overwrite) return null;
+        com.minion.core.security.ReadStateStore.Entry e =
+                readState.get(com.minion.core.security.ReadStateStore.keyOf(p));
+        if (e == null)
+            return ToolResult.error("文件已存在且本会话尚未 Read，拒绝整文件覆盖；请先 Read（切片读也可）再 Write: " + p);
+        if (e.isPartialView)
+            return ToolResult.error("文件已存在且此前只有自动注入的部分视图；请先显式 Read 再覆盖: " + p);
+        if (!com.minion.core.security.ReadStateStore.sha256(p).equals(e.contentHash))
+            return ToolResult.error("文件自上次 Read 后已被修改（整文件 SHA-256 不一致），未覆盖；请重新 Read 合并修改: " + p);
+        return null;
+    }
+
+    /** 覆盖前的切片读风险提示判据：最近读取未覆盖全文件 */
+    private boolean partialReadWarning(Path p) throws IOException {
+        com.minion.core.security.ReadStateStore.Entry e =
+                readState.get(com.minion.core.security.ReadStateStore.keyOf(p));
+        return e != null && e.partialRange;
+    }
+
+    /** 写入成功后回写读状态（时间戳+新整文件哈希；追加/覆盖后旧正文均作废） */
+    private void updateReadState(Path p) throws IOException {
+        if (readState == null) return;
+        long mtime;
+        try { mtime = Files.getLastModifiedTime(p).toMillis(); } catch (IOException absent) { mtime = 0L; }
+        readState.updateAfterWrite(com.minion.core.security.ReadStateStore.keyOf(p),
+                com.minion.core.security.ReadStateStore.sha256(p), mtime);
     }
 
     /** 越界守卫：已存在路径交给 PathsGuard（toRealPath 防符号链接）；不存在路径向上找最深已存在祖先做真实路径校验 */

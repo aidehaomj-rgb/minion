@@ -696,6 +696,9 @@ public class AgentLoop {
             }
             session.messages = compacted;
         }
+        // §4.5 ContextReadLedger：压缩清理正文后，"仍在上下文"账本整体失效——
+        // Read 去重不能再凭旧账本回 stub，必须重新注入正文
+        if(session.readState!=null)session.readState.contextLedger().invalidateAll();
         compactionTicket.remove();
         // 运行中压缩只交接工作状态，不自动回读历史。仅保留用户明确追问原文的检索。
         historyRetrievalPending = historyRetrievalPending && explicitHistoryRecall(recallUserText);

@@ -130,6 +130,8 @@ public class SessionManager {
     private final McpManager mcp; // 可为 null（测试）；MCP 服务器管理：惰性连接 + 工具补注册
     private final CommandDispatcher dispatcher; // 斜杠命令本地分发（GUI 输入路径）
     private final SecretStore secretStore;
+    /** §13.1 FeatureFlags：全部行为开关统一读取（/config 视图 + 会话内存覆盖） */
+    private final com.minion.core.config.FeatureFlags featureFlags;
     private final java.util.Map<SessionHandle,com.minion.core.agent.LocalJobs> localJobs=new java.util.concurrent.ConcurrentHashMap<SessionHandle,com.minion.core.agent.LocalJobs>();
     private final java.util.Map<String,String> localJobErrors=new java.util.concurrent.ConcurrentHashMap<String,String>();
     private final java.util.concurrent.ScheduledExecutorService jobClock=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"minion-local-jobs");t.setDaemon(true);return t;});
@@ -183,8 +185,10 @@ public class SessionManager {
         this.mcp = mcp;
         DiagnosticLog.initialize(jarDir);
         DiagnosticLog.info("startup", "SessionManager 初始化，jarDir=" + jarDir);
-        this.secretStore = new SecretStore(jarDir);
-        this.dispatcher = new CommandDispatcher();
+        // §4.6 SecretStore v2（secret.store.v2 默认 true）：随机主密钥 + DPAPI/GCM；false 应急回退旧实现
+        this.secretStore = new SecretStore(jarDir, config.secretStoreV2(), null);
+        this.featureFlags = new com.minion.core.config.FeatureFlags(config);
+        this.dispatcher = new CommandDispatcher().featureFlags(() -> featureFlags);
         if (mcp != null) {
             // 连接完成（后台线程）：补注册 MCP 工具进所有存活会话（下一轮 schemas() 可见）
             mcp.addListener(new McpManager.Listener() {
@@ -535,11 +539,14 @@ public class SessionManager {
         String tmpDir = tmpDirOf(sessionId).toString();
         CheckpointStore checkpoints = new CheckpointStore(Paths.get(workspace.workDir()),
                 Paths.get(workspace.workDir()).resolve(".minion").resolve("checkpoints").resolve(sessionId));
-        registry.register(new ReadTool(workspace, skillsDir, tmpDir, gate));
+        // §4.5 读状态：同一会话的 Read/Edit/Write 共用 session.readState；ccSemantics 只控制消费侧
+        com.minion.core.security.ReadStateStore readState = session.readState;
+        boolean ccSemantics = config.readCcSemantics();
+        registry.register(new ReadTool(workspace, skillsDir, tmpDir, gate, readState, ccSemantics));
         registry.register(new com.minion.core.tools.ViewImageTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new com.minion.core.tools.artwork.ArtworkTool(workspace,tmpDir));
-        registry.register(new WriteTool(workspace, skillsDir, tmpDir, checkpoints, gate));
-        registry.register(new EditTool(workspace, skillsDir, tmpDir, checkpoints, gate));
+        registry.register(new WriteTool(workspace, skillsDir, tmpDir, checkpoints, gate, readState, ccSemantics));
+        registry.register(new EditTool(workspace, skillsDir, tmpDir, checkpoints, gate, readState, ccSemantics));
         registry.register(new GlobTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new GrepTool(workspace, skillsDir, tmpDir, gate));
         registry.register(new BashTool(workspace, tmpDirOf(sessionId), config));

@@ -99,6 +99,8 @@ public final class RewindService {
                 // 目标消息之后截断（保留目标消息本身：回到"该消息已发送"状态）
                 session.messages = new ArrayList<Message>(session.messages.subList(0, index + 1));
                 result.messagesAfter = session.messages.size();
+                // §4.5：截断淘汰 Read 回执 → "正文仍在上下文"账本失效，重读必须回正文
+                if (session.readState != null) session.readState.contextLedger().invalidateAll();
                 result.notes.add("对话已回退到目标消息（transcript/journal 保留完整审计链，未物理删除）");
             } else {
                 result.notes.add("会话内未找到目标消息 eventId，对话未截断");

@@ -17,11 +17,20 @@ public class CommandDispatcher {
 
     public CommandDispatcher() { }
 
+    /** /config 的 FeatureFlags 视图（§13.1：值、来源、生效范围）；未接线时命令返回不可用提示 */
+    private java.util.function.Supplier<com.minion.core.config.FeatureFlags> flags = () -> null;
+
+    public CommandDispatcher featureFlags(java.util.function.Supplier<com.minion.core.config.FeatureFlags> supplier) {
+        this.flags = supplier;
+        return this;
+    }
+
     public String dispatch(SessionHandle h, String input) {
         if (input == null || !input.trim().startsWith("/")) return null;
         String[] parts = input.trim().split("\\s+");
         String cmd = parts[0].toLowerCase(Locale.ROOT);
         if ("/help".equals(cmd)) return helpText();
+        if ("/config".equals(cmd) || "/开关".equals(cmd)) return configText(parts);
         if ("/skills".equals(cmd)) return skillsText(h);
         if ("/skill".equals(cmd)) return dispatchSkill(h, parts);
         if ("/tokens".equals(cmd)) return tokensText(h);
@@ -44,9 +53,17 @@ public class CommandDispatcher {
         return "未知命令 " + parts[0] + "（/help 查看）";
     }
 
+    /** /config [过滤词]：FeatureFlags 值/来源/生效范围视图（§13.1；只读展示，修改走 config.properties） */
+    private String configText(String[] parts) {
+        com.minion.core.config.FeatureFlags view = flags.get();
+        if (view == null) return "配置视图不可用（FeatureFlags 未接线）";
+        return view.render(parts.length > 1 ? parts[1] : null);
+    }
+
     private String helpText() {
         return "可用命令：\n"
                 + "/help            显示本帮助\n"
+                + "/config [过滤]   查看行为开关的值、来源与生效范围\n"
                 + "/skills          列出可用技能\n"
                 + "/skill <名> [参数]  加载技能到当前会话（可附参数，下一轮请求生效）\n"
                 + "/compact         立即压缩上下文\n"

@@ -18,6 +18,10 @@ public class EditTool implements Tool {
     private final String tmpDir;
     private final CheckpointStore checkpoints;
     private final ConfirmGate confirm;
+    /** 会话级读状态（v2.4 §4.5）；null=未接线，跳过校验 */
+    private final com.minion.core.security.ReadStateStore readState;
+    /** v2.4 §3.1 read.ccSemantics：read-before-write 与整文件哈希校验开关 */
+    private final boolean ccSemantics;
 
     public EditTool(Workspace workspace) { this(workspace, null); }
 
@@ -37,11 +41,19 @@ public class EditTool implements Tool {
 
     public EditTool(Workspace workspace, String skillsDir, String tmpDir,
                     CheckpointStore checkpoints, ConfirmGate confirm) {
+        this(workspace, skillsDir, tmpDir, checkpoints, confirm, null, false);
+    }
+
+    public EditTool(Workspace workspace, String skillsDir, String tmpDir,
+                    CheckpointStore checkpoints, ConfirmGate confirm,
+                    com.minion.core.security.ReadStateStore readState, boolean ccSemantics) {
         this.workspace = workspace;
         this.skillsDir = skillsDir;
         this.tmpDir = tmpDir;
         this.checkpoints = checkpoints;
         this.confirm = confirm;
+        this.readState = readState;
+        this.ccSemantics = ccSemantics;
     }
 
     @Override
@@ -73,10 +85,14 @@ public class EditTool implements Tool {
         if (guard != null && (confirm == null || !confirm.checkEscapeWrite(this, args, p.toString()))) {
             return guard;
         }
+        // §3.1/§4.5 read-before-write + 整文件哈希冲突校验（read.ccSemantics；null=放行）
+        ToolResult readGate = checkReadState(p);
+        if (readGate != null) return readGate;
 
         String oldString = args.get("oldString").getAsString();
         if (oldString.isEmpty()) return ToolResult.error("oldString 不能为空");
         String newString = args.get("newString").getAsString();
+        if (oldString.equals(newString)) return ToolResult.error("oldString 与 newString 相同，无变更不写入");
         ReentrantLock lock = PathLocks.forPath(p);
         try {
             if (!lock.tryLock(PathLocks.WAIT_SECONDS, TimeUnit.SECONDS))
@@ -119,16 +135,46 @@ public class EditTool implements Tool {
             try { checkpoint=checkpoints.create(p, "Edit"); }
             catch (IOException e) { return ToolResult.error("创建编辑前检查点失败，未修改文件: " + e.getMessage()); }
         }
+        // §3.1 写入原子段内二次校验：锁内整文件哈希与读取时一致才落盘（防校验后外部修改）
+        if (ccSemantics && readState != null) {
+            com.minion.core.security.ReadStateStore.Entry e =
+                    readState.get(com.minion.core.security.ReadStateStore.keyOf(p));
+            if (e != null && !com.minion.core.security.ReadStateStore.sha256(p).equals(e.contentHash))
+                return ToolResult.error("写入前二次校验失败：文件在编辑过程中被外部修改，未写入。请重新 Read: " + p);
+        }
         AtomicFiles.writeBytes(p, updated.getBytes(d.charset)); // 按原编码写回，不破坏文件其余内容
         if(checkpoint!=null)checkpoints.seal(checkpoint);
+        updateReadState(p);
         return ToolResult.success("已替换 " + (replaceAll ? count : 1) + " 处: " + p);
         } finally {
             lock.unlock();
         }
     }
 
-    private static int countOccurrences(String s, String sub) {
-        int count = 0;
+    /** §3.1/§4.5：read.ccSemantics 时校验已读（含切片读）且整文件哈希未变；null=放行 */
+    private ToolResult checkReadState(Path p) throws IOException {
+        if (!ccSemantics || readState == null) return null;
+        com.minion.core.security.ReadStateStore.Entry e =
+                readState.get(com.minion.core.security.ReadStateStore.keyOf(p));
+        if (e == null)
+            return ToolResult.error("本会话尚未 Read 该文件，拒绝盲改；请先 Read 再 Edit（offset/limit 切片读也算已读）: " + p);
+        if (e.isPartialView)
+            return ToolResult.error("该文件此前只有自动注入的部分视图，未经显式 Read；请先 Read 再 Edit: " + p);
+        if (!com.minion.core.security.ReadStateStore.sha256(p).equals(e.contentHash))
+            return ToolResult.error("文件自上次 Read 后已被修改（整文件 SHA-256 不一致），未写入；请重新 Read 合并修改: " + p);
+        return null;
+    }
+
+    /** 写入成功后回写读状态：时间戳与新整文件哈希，旧正文作废（防下次去重误判） */
+    private void updateReadState(Path p) throws IOException {
+        if (readState == null) return;
+        long mtime;
+        try { mtime = Files.getLastModifiedTime(p).toMillis(); } catch (IOException absent) { mtime = 0L; }
+        readState.updateAfterWrite(com.minion.core.security.ReadStateStore.keyOf(p),
+                com.minion.core.security.ReadStateStore.sha256(p), mtime);
+    }
+
+    private static int countOccurrences(String s, String sub) {        int count = 0;
         int idx = 0;
         while ((idx = s.indexOf(sub, idx)) != -1) {
             count++;
