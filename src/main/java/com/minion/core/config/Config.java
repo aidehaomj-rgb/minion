@@ -144,6 +144,27 @@ public class Config {
      */
     public boolean secretStoreV2() { return Boolean.parseBoolean(get("secret.store.v2", "true")); }
 
+    /**
+     * v2.4 §4.8 SSH TOFU（默认 true，0.3 明示安全修复例外）：首次连接未知主机警告并询问
+     * （确认后记录 known_hosts），指纹变化按中间人拒绝。false 回退旧 StrictHostKeyChecking=no。
+     */
+    public boolean sshStrictHostKey() { return Boolean.parseBoolean(get("ssh.strictHostKey", "true")); }
+
+    /**
+     * v2.4 §4.7 CC 语义 Hook 系统（hooks.enabled 默认 false=legacy 不启用；replica-offline 开启）。
+     * 启用后仍需会话内批准 cc-hooks.json 快照；hooks.disableAll 为应急总闸（true 时强制关）。
+     */
+    public boolean hooksEnabled() { return Boolean.parseBoolean(get("hooks.enabled", "false")); }
+
+    /** §4.7 应急总闸：true 时 Hook 系统整体关闭（优先于 hooks.enabled） */
+    public boolean hooksDisableAll() { return Boolean.parseBoolean(get("hooks.disableAll", "false")); }
+
+    /** §4.7 超时/失败行为：仅 ask|deny（无 continue 放行分支）；非法值回落 ask */
+    public String hooksTimeoutBehavior() {
+        String v = get("hooks.timeoutBehavior", "ask").toLowerCase(java.util.Locale.ROOT);
+        return "deny".equals(v) ? "deny" : "ask";
+    }
+
     public boolean permissionEngineV2() { return Boolean.parseBoolean(get("permission.engine.v2", "true")); }
     /** read-only / workspace-write / full；未知值回落 workspace-write。 */
     public String permissionMode() { String mode=get("permission.mode","workspace-write").toLowerCase(); return mode.matches("read-only|workspace-write|full")?mode:"workspace-write"; }

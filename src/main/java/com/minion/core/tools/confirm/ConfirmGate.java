@@ -42,6 +42,18 @@ public class ConfirmGate {
         this.ui = ui;
     }
 
+    /** §4.8 SSH TOFU 首次主机指纹确认：不走规则，直接问用户；APPROVE 系（一次/白名单/会话）均算信任 */
+    public boolean askHostKeyTrust(String host, int port, String fingerprint) {
+        ConfirmUi.Decision d = ui.ask("SSH 首次连接未知主机: " + host + ":" + port
+                + "\n主机公钥指纹: " + fingerprint
+                + "\n确认信任并记录到 known_hosts？（拒绝将不发送任何凭据）");
+        return d == ConfirmUi.Decision.APPROVE || d == ConfirmUi.Decision.APPROVE_WHITELIST
+                || d == ConfirmUi.Decision.APPROVE_SESSION;
+    }
+
+    /** §4.8：ssh.strictHostKey（默认 true）；false 时 SshExecutor 回退 StrictHostKeyChecking=no */
+    public boolean sshTofuEnabled() { return config.sshStrictHostKey(); }
+
     /** 项目/本地层 settings.json（SessionManager 装配时按 workspace 注入；规则下次构建时生效） */
     public void setProjectSettings(Path projectSettings, Path localSettings) {
         this.projectSettings = projectSettings;
@@ -85,7 +97,8 @@ public class ConfirmGate {
                 sessionBypass ? PermissionContext.Mode.BYPASS : PermissionContext.mapLegacyMode(config.permissionMode()),
                 tc,
                 false,                                         // requiresUserInteraction（§2.1 接线）
-                false,                                         // §4.2 敏感路径检测接线前恒 false
+                com.minion.core.security.permission.SensitivePaths.hits(target)
+                        || com.minion.core.security.permission.SensitivePaths.hits(real),   // §4.2 敏感路径（bypass 免疫）
                 target, real, null);                           // workspaceRoot 未接线：acceptEdits fail-closed 不放行
         // MCP 整 server allow 规则（§3.7）：server 键形如 mcp:<server>，作为独立工具名域匹配
         if (tool instanceof com.minion.core.tools.mcp.McpProxyTool

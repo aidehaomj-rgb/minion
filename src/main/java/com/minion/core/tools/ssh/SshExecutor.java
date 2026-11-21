@@ -31,11 +31,29 @@ import java.util.Vector;
  * 默认 120s 属工具层（SshExecTool.DEFAULT_TIMEOUT），超时断开连接并把已产出的部分输出
  * 随错误文案返回——远端可能残留进程（提示不谎报）。
  * StrictHostKeyChecking=no：不做 known_hosts 指纹管理（限内网/测试服务器，README「ssh」小节已注明）。
+ * §4.8 TOFU（默认启用，ssh.strictHostKey=true）：注入 {@link SshKnownHosts} 时按 known_hosts
+ * 三态校验——已知一致放行；未知经 {@link HostKeyDecider} 询问（拒绝即断开，未发送凭据）；
+ * 指纹变化按中间人拒绝。旧两参/无参构造保留 legacy "no" 行为（开关 false 应急回退）。
  */
 public class SshExecutor {
 
     /** 连接/认证/socket 读写超时（毫秒）；exec 命令超时由调用方按秒传 */
     public static final int CONNECT_TIMEOUT_MS = 10000;
+
+    /** §4.8 首次主机指纹确认回调（返回 true=信任并记录 known_hosts；false=拒绝连接） */
+    public interface HostKeyDecider {
+        boolean trustFirstUse(String host, int port, String fingerprint);
+    }
+
+    private final SshKnownHosts knownHosts;
+    private final HostKeyDecider decider;
+
+    public SshExecutor() { this(null, null); }
+
+    public SshExecutor(SshKnownHosts knownHosts, HostKeyDecider decider) {
+        this.knownHosts = knownHosts;
+        this.decider = decider;
+    }
 
     /** exec 结果：exitCode + 截断组装后的文本（含截断提示与落盘路径） */
     public static class ExecResult {
@@ -73,27 +91,75 @@ public class SshExecutor {
                     throw new SshOpException("私钥加载失败（" + key + "）: " + firstLine(e.getMessage()), e);
                 }
             }
-            Session session = jsch.getSession(c.user.trim(), c.host.trim(), c.port);
-            if (!SshAuth.isKey(c)) {
-                session.setPassword(c.password == null ? "" : c.password);
+            Session session = createSession(jsch, c);
+            try {
+                session.connect(CONNECT_TIMEOUT_MS);
+                return session;
+            } catch (Exception e) {
+                return connectWithTofu(jsch, c, e);
             }
-            Properties conf = new Properties();
-            conf.put("StrictHostKeyChecking", "no");
-            session.setConfig(conf);
-            session.setTimeout(CONNECT_TIMEOUT_MS);
-            session.connect(CONNECT_TIMEOUT_MS);
-            return session;
         } catch (SshOpException e) {
             throw e;
         } catch (Exception e) {
-            String hostPort = c.host.trim() + ":" + c.port;
-            String m = firstLine(e.getMessage());
-            if (m.contains("Auth") || m.contains("auth") || m.contains("Publickey") || m.contains("password")) {
-                throw new SshOpException("ssh 认证失败（" + hostPort + " / " + c.user.trim()
-                        + "）：用户名、密码或私钥不正确", e);
-            }
-            throw new SshOpException("ssh 连接失败（" + hostPort + "）: " + m, e);
+            throw connectError(c, e);
         }
+    }
+
+    private Session createSession(JSch jsch, SshConnection c) throws Exception {
+        boolean strict = knownHosts != null;
+        if (strict) {
+            jsch.setHostKeyRepository(knownHosts);
+            // 非 22 端口以 host:port 记录，防同主机多端口指纹混淆
+            knownHosts.setAlias(c.host.trim(),
+                    c.port == 22 ? c.host.trim() : c.host.trim() + ":" + c.port);
+        }
+        Session session = jsch.getSession(c.user.trim(), c.host.trim(), c.port);
+        if (!SshAuth.isKey(c)) {
+            session.setPassword(c.password == null ? "" : c.password);
+        }
+        Properties conf = new Properties();
+        conf.put("StrictHostKeyChecking", strict ? "yes" : "no");
+        session.setConfig(conf);
+        session.setTimeout(CONNECT_TIMEOUT_MS);
+        return session;
+    }
+
+    /** §4.8 TOFU 分流（仅注入 knownHosts 时生效）：未知→询问后重试一次；变化→按中间人拒绝 */
+    private Session connectWithTofu(JSch jsch, SshConnection c, Exception first) throws Exception {
+        if (knownHosts == null) throw first;
+        String hostPort = c.host.trim() + ":" + c.port;
+        String effectiveKey = c.port == 22 ? c.host.trim() : c.host.trim() + ":" + c.port;
+        com.jcraft.jsch.HostKey pendingKey = knownHosts.pendingKey();
+        // 守卫 check 状态属于本次连接的主机：上次连接留下的状态不能张冠李戴
+        if (knownHosts.lastCheckWas(effectiveKey, com.jcraft.jsch.HostKeyRepository.NOT_INCLUDED)
+                && pendingKey != null) {
+            String fp = SshKnownHosts.fingerprint(
+                    java.util.Base64.getDecoder().decode(pendingKey.getKey()));
+            boolean trust = decider != null && decider.trustFirstUse(c.host.trim(), c.port, fp);
+            if (!trust)
+                throw new SshOpException("未知主机（首次连接需确认指纹）: " + hostPort + " " + fp
+                        + " —— 未获确认，已拒绝连接（凭据未发送）", first);
+            knownHosts.add(pendingKey, null);
+            Session retry = createSession(jsch, c);
+            retry.connect(CONNECT_TIMEOUT_MS);
+            return retry;
+        }
+        if (knownHosts.lastCheckWas(effectiveKey, com.jcraft.jsch.HostKeyRepository.CHANGED)) {
+            String known = knownHosts.fingerprintOf(c.host.trim());
+            throw new SshOpException("主机指纹与 known_hosts 记录不一致（疑似中间人攻击），已拒绝连接: "
+                    + hostPort + "（记录指纹 " + known + "）", first);
+        }
+        throw first;   // 与主机键无关的连接失败（网络/认证等），走通用文案
+    }
+
+    private static SshOpException connectError(SshConnection c, Exception e) {
+        String hostPort = c.host.trim() + ":" + c.port;
+        String m = firstLine(e.getMessage());
+        if (m.contains("Auth") || m.contains("auth") || m.contains("Publickey") || m.contains("password")) {
+            return new SshOpException("ssh 认证失败（" + hostPort + " / " + c.user.trim()
+                    + "）：用户名、密码或私钥不正确", e);
+        }
+        return new SshOpException("ssh 连接失败（" + hostPort + "）: " + m, e);
     }
 
     /** 执行远端命令；stdout/stderr 分开读（stderr 行加 [stderr] 前缀），合并返回；

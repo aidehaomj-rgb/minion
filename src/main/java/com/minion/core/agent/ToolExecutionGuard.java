@@ -92,6 +92,9 @@ public final class ToolExecutionGuard {
         return "Knowledge".equals(name)&&args.has("action")&&Arrays.asList("search","list","read").contains(args.get("action").getAsString());
     }
     private SessionHooks hooks;
+    private com.minion.core.hooks.HookSystem ccHooks;
+    /** §4.7 CC 语义 Hook（默认 null=未接线；PreToolUse/PostToolUse/PostToolUseFailure） */
+    public void ccHooks(com.minion.core.hooks.HookSystem system){this.ccHooks=system;}
     private java.util.function.Supplier<JsonObject> metadata=JsonObject::new;
     private java.util.function.BooleanSupplier admission=()->true;
     public void lifecycle(SessionHooks hooks,java.util.function.Supplier<JsonObject> metadata,
@@ -99,6 +102,20 @@ public final class ToolExecutionGuard {
         this.hooks=hooks;if(metadata!=null)this.metadata=metadata;if(admission!=null)this.admission=admission;
     }
     public ToolResult execute(Tool tool,JsonObject args) throws Exception {
+        // §4.7 PreToolUse：先于权限/执行；hook deny 阻断、updatedInput 替换后重过全部校验、
+        // ask 不放宽（后续管线按自身规则询问）。allow 不跳过任何自检（只收紧不放宽）。
+        com.minion.core.hooks.HookSystem cc=ccHooks;
+        if(cc!=null&&cc.enabled()&&cc.matches(com.minion.core.hooks.HookSystem.PRE_TOOL_USE,tool.name())) {
+            JsonObject payload=metadata.get().deepCopy();
+            payload.addProperty("tool_name",tool.name());
+            payload.add("tool_input",args.deepCopy());
+            com.minion.core.hooks.HookSystem.Outcome pre=
+                    cc.run(com.minion.core.hooks.HookSystem.PRE_TOOL_USE,tool.name(),payload);
+            if(pre.blocked)
+                return ToolResult.errorWithoutSideEffects("Hook 阻断（PreToolUse）: "+pre.reason);
+            if(pre.updatedInput!=null)args=pre.updatedInput;   // 换参后由下方管线重新完整校验
+        }
+        final JsonObject callArgs=args;   // lambda 捕获需 effectively final
         if(readOnlyTurn&&!readOnly(tool.name(),args))
             return ToolResult.errorWithoutSideEffects("当前为计划/审查只读回合；"+tool.name()+" 的此动作不会执行");
         Set<String> scheduled=scheduledTools;
@@ -108,8 +125,24 @@ public final class ToolExecutionGuard {
         // Approved commands may touch unknown resources; serialize only matching hook invocations.
         boolean hooked=scheduled==null&&hooks!=null&&(hooks.matches("before_tool",tool.name(),args)||hooks.matches("after_tool",tool.name(),args));
         if(hooked)FILE_LOCK.writeLock().lockInterruptibly();
-        try{return ToolInvocationPipeline.run(tool.name(),args,hooked?hooks:null,metadata.get(),admission,
-                ()->executeCore(tool,args));}
+        try{ToolResult result=ToolInvocationPipeline.run(tool.name(),callArgs,hooked?hooks:null,metadata.get(),admission,
+                ()->executeCore(tool,callArgs));
+            // §4.7 PostToolUse / PostToolUseFailure：事后反馈（systemMessage 进日志；阻断仅记录，无法回滚）
+            if(cc!=null&&cc.enabled()){
+                String postEvent=result.ok?com.minion.core.hooks.HookSystem.POST_TOOL_USE
+                        :com.minion.core.hooks.HookSystem.POST_TOOL_USE_FAILURE;
+                if(cc.matches(postEvent,tool.name())){
+                    JsonObject payload=metadata.get().deepCopy();
+                    payload.addProperty("tool_name",tool.name());
+                    payload.add("tool_input",args.deepCopy());
+                    payload.addProperty("tool_response",result.preview());
+                    com.minion.core.hooks.HookSystem.Outcome post=cc.run(postEvent,tool.name(),payload);
+                    if(post.blocked)com.minion.core.diagnostics.DiagnosticLog.warn("hooks",
+                            "PostToolUse hook 阻断（事后，仅记录）: "+post.reason);
+                }
+            }
+            return result;
+        }
         catch(InterruptedException cancelled){Thread.currentThread().interrupt();throw cancelled;}
         finally{if(hooked)FILE_LOCK.writeLock().unlock();}
     }

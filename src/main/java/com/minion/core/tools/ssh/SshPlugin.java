@@ -41,7 +41,12 @@ public class SshPlugin implements ToolPlugin {
 
     @Override
     public List<Tool> createTools(ToolContext ctx) {
-        SshExecutor executor = new SshExecutor();
+        // §4.8 TOFU（ssh.strictHostKey 默认 true）：known_hosts 按工作区存 .minion/ssh/，首次指纹经 ConfirmGate 询问
+        SshExecutor executor = ctx != null && ctx.confirmGate != null && ctx.confirmGate.sshTofuEnabled()
+                ? new SshExecutor(new SshKnownHosts(
+                        java.nio.file.Paths.get(ctx.workspace.workDir(), ".minion", "ssh", "known_hosts")),
+                        (host, port, fp) -> ctx.confirmGate.askHostKeyTrust(host, port, fp))
+                : new SshExecutor();
         List<Tool> list = new ArrayList<Tool>();
         list.add(new SshExecTool(config, ctx, executor));
         list.add(new SftpLsTool(config, ctx, executor));
