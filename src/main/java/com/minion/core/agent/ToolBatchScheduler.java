@@ -17,9 +17,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class ToolBatchScheduler {
     public interface Runner { ToolResult run(ToolCall call) throws Exception; }
     private final ToolSchedulingPolicy policy;
+    /** §2.2 元数据驱动并行（tools.parallel.metadataDriven）：null/false=legacy 按名判定 */
+    private final com.minion.core.tools.ToolRegistry registry;
+    private final boolean metadataDriven;
 
-    public ToolBatchScheduler(ToolSchedulingPolicy policy) {
+    public ToolBatchScheduler(ToolSchedulingPolicy policy) { this(policy, null, false); }
+
+    public ToolBatchScheduler(ToolSchedulingPolicy policy, com.minion.core.tools.ToolRegistry registry,
+                              boolean metadataDriven) {
         this.policy = policy == null ? ToolSchedulingPolicy.conservative() : policy;
+        this.registry = registry;
+        this.metadataDriven = metadataDriven;
     }
 
     /** Each stage is contiguous: no later read is moved ahead of an earlier write/confirmation. */
@@ -148,8 +156,21 @@ public final class ToolBatchScheduler {
             reads.clear();
         }
     }
-    private static boolean parallel(ToolCall call) {
-        try { return call != null && ToolResourceScope.parallelReadOnly(call.name,
+    private boolean parallel(ToolCall call) {
+        if (call == null) return false;
+        if (metadataDriven && registry != null) {
+            // §2.2：按工具元数据判定（isConcurrencySafe）；判定异常/未知工具=串行（fail-closed）。
+            // ToolResourceScope 的文件锁/资源冲突闸在 runner 内继续生效——元数据通过不绕过资源锁。
+            try {
+                com.minion.core.tools.Tool tool = registry.get(call.name);
+                return tool != null && tool.isEnabled()
+                        && tool.isConcurrencySafe(JsonParser.parseString(
+                                call.arguments == null ? "{}" : call.arguments).getAsJsonObject());
+            } catch (RuntimeException invalid) {
+                return false;
+            }
+        }
+        try { return ToolResourceScope.parallelReadOnly(call.name,
                 JsonParser.parseString(call.arguments == null ? "{}" : call.arguments).getAsJsonObject()); }
         catch (RuntimeException invalid) { return false; }
     }

@@ -308,6 +308,8 @@ public class AgentLoop {
     public int llmMaxContinueRecovery = 12;
     /** §1.5 预算开关（budget.enabled 默认 true；无预算输入零影响） */
     public boolean budgetEnabled = true;
+    /** §2.2 元数据驱动并行（tools.parallel.metadataDriven 默认 false=按名判定的 V68 现状） */
+    public boolean toolsParallelMetadataDriven = false;
     private boolean lengthEscalationUsed;
     private Long turnTokenBudget;
     private long turnUsedTokens, lastRoundTokens = -1, prevRoundTokens = -1;
@@ -2316,7 +2318,8 @@ public class AgentLoop {
                 long toolBatchStarted=System.nanoTime();
                 for (ToolCall call : calls) schemaRouter.remember(call.name);
                 final ToolOwner owner=new ToolOwner(this);
-                List<Future<ToolResult>> futures = new ToolBatchScheduler(toolSchedulingPolicy).submit(calls,pool,call->runOneTool(call,owner));
+                List<Future<ToolResult>> futures = new ToolBatchScheduler(toolSchedulingPolicy,
+                        registry, toolsParallelMetadataDriven).submit(calls,pool,call->runOneTool(call,owner));
                 synchronized (inFlight) {
                     inFlight.addAll(futures);
                     if(interrupted)for(Future<ToolResult> future:futures)future.cancel(true);

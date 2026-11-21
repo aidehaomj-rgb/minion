@@ -36,6 +36,9 @@ public final class CodeIndexTool implements Tool {
         this.cancellation = Objects.requireNonNull(cancellation);
     }
     @Override public String name() { return "CodeIndex"; }
+    /** §2.1 标注：查询类，只读、并发安全 */
+    @Override public boolean isReadOnly(com.google.gson.JsonObject args) { return true; }
+    @Override public boolean isConcurrencySafe(com.google.gson.JsonObject args) { return true; }
     @Override public String description() {
         return "按需 Java/Python/JS/TS 词法近似索引 symbols/references/impact；非 LSP/语义证明，impact 非传递调用图。返回行号、SHA-256、片段及截断/取消状态。";
     }

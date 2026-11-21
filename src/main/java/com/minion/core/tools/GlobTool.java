@@ -44,6 +44,10 @@ public class GlobTool implements Tool {
     @Override
     public String name() { return "Glob"; }
 
+    /** §2.1 标注：只读、并发安全 */
+    @Override public boolean isReadOnly(JsonObject args) { return true; }
+    @Override public boolean isConcurrencySafe(JsonObject args) { return true; }
+
     @Override
     public String description() { return "按 glob 模式在工作路径内查找文件，如 **/*.java"; }
 

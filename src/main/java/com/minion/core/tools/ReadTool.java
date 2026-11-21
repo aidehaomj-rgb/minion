@@ -63,6 +63,10 @@ public class ReadTool implements Tool {
     @Override
     public String name() { return "Read"; }
 
+    /** §2.1 标注：纯读取、并发安全（与 Glob/Grep/CodeIndex 同批只读波次） */
+    @Override public boolean isReadOnly(JsonObject args) { return true; }
+    @Override public boolean isConcurrencySafe(JsonObject args) { return true; }
+
     @Override
     public String description() {
         return "读取文本；OFD返回前3页文字预览，完整按页读取用Document ofd_read。GD用Document gd_read（支持PDF/OFD内容及书生阅读器的导出副本）。PNG/JPEG/GIF/BMP/WebP图片会将真实像素附入模型上下文（WebP需本地解码器），大图附局部视图；旋转、指定裁剪或只读原图请用ViewImage。支持行号、偏移与行数限制；单次输出上限 " + MAX_OUTPUT_CHARS

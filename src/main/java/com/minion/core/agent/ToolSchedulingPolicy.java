@@ -15,7 +15,7 @@ public final class ToolSchedulingPolicy {
     private ToolSchedulingPolicy(int parallel, int chunk) {
         this(parallel,chunk,parallel);
     }
-    private ToolSchedulingPolicy(int parallel,int chunk,int generated) {
+    ToolSchedulingPolicy(int parallel,int chunk,int generated) {   // 包内可见：§2.2 批调度测试装配
         maxParallelReads = parallel;
         writeChunkCharacters = chunk;
         maxGeneratedCalls=generated;

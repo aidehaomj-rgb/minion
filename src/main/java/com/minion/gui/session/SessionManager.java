@@ -798,6 +798,7 @@ public class SessionManager {
         loop.llmEscalatedMaxTokens = config.llmEscalatedMaxTokens();
         loop.llmMaxContinueRecovery = config.llmMaxContinueRecovery();
         loop.budgetEnabled = config.budgetEnabled();
+        loop.toolsParallelMetadataDriven = config.toolsParallelMetadataDriven();
         loop.setToolProfileSupplier(()->{
             try {
                 ModelConfig current=parent.runtimeModelConfig==null?modelForSession(parent):parent.runtimeModelConfig;

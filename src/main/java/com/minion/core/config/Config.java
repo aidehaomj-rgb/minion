@@ -177,6 +177,12 @@ public class Config {
     /** v2.4 §1.5 token 预算（默认 true；无预算输入时零影响） */
     public boolean budgetEnabled() { return Boolean.parseBoolean(get("budget.enabled", "true")); }
 
+    /**
+     * v2.4 §2.2 元数据驱动并行（tools.parallel.metadataDriven 默认 false=沿用按名判定；
+     * replica-offline 开启）。批大小上限 tools.maxConcurrency 仅新调度器生效（replica 默认 2）。
+     */
+    public boolean toolsParallelMetadataDriven() { return Boolean.parseBoolean(get("tools.parallel.metadataDriven", "false")); }
+
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
         catch (Exception e) { return fallback; }

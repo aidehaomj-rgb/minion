@@ -14,6 +14,9 @@ public class TodoWriteTool implements Tool {
     @Override
     public String name() { return "TodoWrite"; }
 
+    /** §2.1 显式标注：全量替换任务列表，必须串行（默认 fail-closed 亦为串行，此处落档防误标） */
+    @Override public boolean isConcurrencySafe(com.google.gson.JsonObject args) { return false; }
+
     @Override
     public String description() { return "维护任务清单：create/update 整体替换任务列表，mark 勾选完成任务"; }
 

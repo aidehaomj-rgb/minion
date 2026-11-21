@@ -53,6 +53,10 @@ public class GrepTool implements Tool {
     @Override
     public String name() { return "Grep"; }
 
+    /** §2.1 标注：只读、并发安全 */
+    @Override public boolean isReadOnly(JsonObject args) { return true; }
+    @Override public boolean isConcurrencySafe(JsonObject args) { return true; }
+
     @Override
     public String description() { return "在工作路径内按正则搜索文件内容，输出 文件:行号:内容"; }
 

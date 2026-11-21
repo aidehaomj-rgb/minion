@@ -66,6 +66,16 @@ public class BashTool implements Tool {
     @Override
     public String name() { return "Bash"; }
 
+    /** §2.1/§2.2：按命令分析结果判定——可证明只读才并行；写入、未知参数、解析失败一律 false（fail-closed） */
+    @Override
+    public boolean isReadOnly(com.google.gson.JsonObject args) {
+        return args != null && args.has("command") && !args.get("command").isJsonNull()
+                && provablyReadOnly(args.get("command").getAsString());
+    }
+
+    @Override
+    public boolean isConcurrencySafe(com.google.gson.JsonObject args) { return isReadOnly(args); }
+
     @Override
     public String description() {
         return "在工作目录执行 shell 命令（默认超时120秒，危险命令需确认）。"
