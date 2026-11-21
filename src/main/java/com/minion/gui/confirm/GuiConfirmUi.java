@@ -1,6 +1,7 @@
 package com.minion.gui.confirm;
 
 import com.minion.core.tools.confirm.ConfirmUi;
+import com.minion.core.tools.confirm.PermissionExplainer;
 import com.minion.gui.dialog.ConfirmSheet;
 import javafx.application.Platform;
 
@@ -13,8 +14,11 @@ import java.util.concurrent.LinkedBlockingQueue;
  * IllegalStateException，捕获后安全默认 REJECT 不挂死。
  * 点击即送达、无限等待：工具线程一直等到用户点击（或会话关闭中断），
  * 杜绝「用户已点同意但超时被抢先判拒绝」的竞态。
+ * §10.3：askDetailed 渲染富卡片（来源/风险/diff/可编辑规则）；editedRule 回传编辑文本。
  */
 public class GuiConfirmUi implements ConfirmUi {
+
+    private volatile String lastEditedRule;
 
     @Override
     public Decision ask(String message) {
@@ -33,4 +37,30 @@ public class GuiConfirmUi implements ConfirmUi {
             return Decision.REJECT;
         }
     }
+
+    /** §10.3 结构化富卡片；「允许并写规则」先记录用户编辑的规则文本再回决策 */
+    @Override
+    public Decision askDetailed(final PermissionExplainer.Explanation ex, String message) {
+        lastEditedRule = null;
+        final LinkedBlockingQueue<Decision> q = new LinkedBlockingQueue<Decision>(1);
+        try {
+            Platform.runLater(new Runnable() {
+                @Override public void run() {
+                    ConfirmSheet.show(ex, message, q::offer, text -> lastEditedRule = text);
+                }
+            });
+        } catch (IllegalStateException e) {
+            return Decision.REJECT;
+        }
+        try {
+            return q.take();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return Decision.REJECT;
+        }
+    }
+
+    /** §10.3 用户编辑后的规则文本（仅 APPROVE_WHITELIST 后有意义；null=未编辑） */
+    @Override
+    public String editedRule() { return lastEditedRule; }
 }

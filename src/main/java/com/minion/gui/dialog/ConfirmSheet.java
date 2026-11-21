@@ -15,6 +15,8 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextArea;
+import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
@@ -64,6 +66,125 @@ public class ConfirmSheet {
         };
         if (showing) { pending.add(job); return; }
         job.run();
+    }
+
+    /** §10.3 结构化富卡片：来源/风险/diff/可编辑规则建议 + 「允许并写规则」取编辑文本 */
+    public static void show(final com.minion.core.tools.confirm.PermissionExplainer.Explanation ex,
+            String message, final Consumer<ConfirmUi.Decision> callback,
+            final java.util.function.Consumer<String> ruleCollector) {
+        if (host == null) {
+            callback.accept(ConfirmUi.Decision.REJECT);
+            return;
+        }
+        Runnable job = new Runnable() {
+            @Override public void run() { display(ex, message, callback, ruleCollector); }
+        };
+        if (showing) { pending.add(job); return; }
+        job.run();
+    }
+
+    private static void display(final com.minion.core.tools.confirm.PermissionExplainer.Explanation ex,
+            String message, final Consumer<ConfirmUi.Decision> callback,
+            final java.util.function.Consumer<String> ruleCollector) {
+        showing = true;
+        if (visibilityListener != null) visibilityListener.accept(true);
+        final Region scrim = new Region();
+        scrim.getStyleClass().add("sheet-scrim");
+        final VBox card = buildRichCard(ex, message, ruleCollector);
+        StackPane.setAlignment(card, Pos.BOTTOM_CENTER);
+        StackPane.setMargin(card, new Insets(0, 16, 24, 16));
+        card.maxWidthProperty().bind(Bindings.min(640, host.widthProperty().subtract(32)));
+        currentCard = card;
+        currentScrim = scrim;
+        currentCallback = callback;
+        host.getScene().addEventFilter(MouseEvent.ANY, mouseFilter);
+        host.getScene().addEventFilter(KeyEvent.ANY, keyFilter);
+        host.getChildren().addAll(scrim, card);
+        card.requestFocus();
+    }
+
+    /** §10.3 富卡片：判定来源行 | 风险行 | Write/Edit 对照 | 可编辑规则建议 | 四键 */
+    private static VBox buildRichCard(
+            final com.minion.core.tools.confirm.PermissionExplainer.Explanation ex,
+            String message, final java.util.function.Consumer<String> ruleCollector) {
+        VBox card = new VBox();
+        card.getStyleClass().add("sheet-card");
+        card.setPrefWidth(600);
+        card.setMaxHeight(Region.USE_PREF_SIZE);
+
+        Region accent = new Region();
+        accent.getStyleClass().add("sheet-accent");
+
+        Label body = new Label(message);
+        body.setWrapText(true);
+        body.getStyleClass().add("sheet-message");
+
+        Label source = new Label("[判定来源] " + ex.decisionSource);
+        source.setWrapText(true);
+        source.getStyleClass().add("sheet-meta");
+        Label risk = new Label("[风险] " + ex.riskLevel + " — " + ex.riskDetail);
+        risk.setWrapText(true);
+        risk.getStyleClass().add("sheet-meta");
+
+        VBox content = new VBox(6);
+        content.setPadding(new Insets(8, 14, 8, 14));
+        content.getChildren().addAll(body, source, risk);
+
+        // Write/Edit 自绘对照（数据展示；路径 + 旧/新文本块，各限 6 行可见）
+        if (ex.diffNew != null || ex.diffOld != null) {
+            Label path = new Label("[文件] " + (ex.diffPath == null ? "?" : ex.diffPath));
+            path.getStyleClass().add("sheet-meta");
+            content.getChildren().add(path);
+            if (ex.diffOld != null && !ex.diffOld.isEmpty()) {
+                TextArea old = new TextArea(ex.diffOld);
+                styleDiffArea(old, "旧内容（-）");
+                content.getChildren().add(old);
+            }
+            if (ex.diffNew != null) {
+                TextArea fresh = new TextArea(ex.diffNew);
+                styleDiffArea(fresh, "新内容（+）");
+                content.getChildren().add(fresh);
+            }
+        }
+
+        // 可编辑规则建议（「允许并写规则」取此文本）
+        final TextField rule = new TextField(ex.suggestedRule);
+        Label ruleLabel = new Label("[规则建议·可编辑] 作用域 " + ex.ruleScope);
+        ruleLabel.getStyleClass().add("sheet-meta");
+        HBox ruleBox = new HBox(8, ruleLabel);
+        VBox ruleArea = new VBox(4, ruleBox, rule);
+
+        Button reject = new Button("拒绝");
+        reject.getStyleClass().add("btn-ghost");
+        reject.setOnAction(e -> finish(ConfirmUi.Decision.REJECT));
+        Button session = new Button("本次会话批准");
+        session.getStyleClass().add("btn-ghost");
+        session.setOnAction(e -> finish(ConfirmUi.Decision.APPROVE_SESSION));
+        Button saveRule = new Button("允许并写规则");
+        saveRule.getStyleClass().add("btn-ghost");
+        saveRule.setOnAction(e -> {
+            if (ruleCollector != null) ruleCollector.accept(rule.getText());
+            finish(ConfirmUi.Decision.APPROVE_WHITELIST);
+        });
+        Button approve = new Button("同意");
+        approve.getStyleClass().add("btn-approve");
+        approve.setDefaultButton(true);
+        approve.setOnAction(e -> finish(ConfirmUi.Decision.APPROVE));
+        HBox buttons = new HBox(8);
+        buttons.setAlignment(Pos.CENTER_RIGHT);
+        buttons.getChildren().addAll(reject, session, saveRule, approve);
+
+        content.getChildren().addAll(ruleArea, buttons);
+        card.getChildren().addAll(accent, content);
+        return card;
+    }
+
+    private static void styleDiffArea(TextArea area, String prompt) {
+        area.setEditable(false);
+        area.setWrapText(true);
+        area.setPrefRowCount(4);
+        area.setMaxHeight(96);
+        area.setPromptText(prompt);
     }
 
     /** 坐标落卡片外一律拦截：实现「点遮罩无反应 + 弹窗期间全窗点击拦截（含侧栏）」 */

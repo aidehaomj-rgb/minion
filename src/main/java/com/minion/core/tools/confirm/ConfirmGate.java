@@ -134,7 +134,10 @@ public class ConfirmGate {
         }
         // ask：交互决策（拒绝理由回传见 §10.3 UI 增强）
         String detail = highRiskDetail(tool, args);
-        ConfirmUi.Decision d = ui.ask("! 高危操作 " + detail);
+        // §10.3 结构化解释（来源/风险/diff/可编辑规则建议）；默认实现回落纯文本询问
+        PermissionExplainer.Explanation ex =
+                PermissionExplainer.explain(v, tool, args, content);
+        ConfirmUi.Decision d = ui.askDetailed(ex, "! 高危操作 " + detail);
         if (d == ConfirmUi.Decision.APPROVE) {
             DiagnosticLog.info("permission", "ALLOW once(v2) " + detail);
             return true;
@@ -144,7 +147,7 @@ public class ConfirmGate {
             return false;
         }
         if (d == ConfirmUi.Decision.APPROVE_WHITELIST) {
-            rememberAllow(tool, args, content);
+            rememberAllow(tool, args, content, ex, ui.editedRule());
             return true;
         }
         if (d == ConfirmUi.Decision.APPROVE_SESSION) {
@@ -155,14 +158,40 @@ public class ConfirmGate {
         return false;
     }
 
-    /** 用户选择"允许并写规则"：会话规则立即生效 + V68 旧白名单双写（写盘迁移随 §13.1） */
-    private void rememberAllow(Tool tool, JsonObject args, String content) {
-        if (tool instanceof BashTool && args.has("command")) {
-            String prefix = DangerousCommands.firstToken(args.get("command").getAsString());
-            rules().sessionAllow("Bash", prefix + ":*");
-            config.appendWhitelist("confirm.whitelist.commands", prefix);
-        } else {
+    /**
+     * 用户选择「允许并写规则」（§10.3）：会话规则立即生效 + 按作用域落盘 settings.json
+     * permissions.allow（原子写保留其他键；用户编辑文本优先）+ 落盘失败回落 V68 旧白名单。
+     * 落盘成功后重建规则库（新规则经完整管线生效，不形成第二真源）。
+     */
+    private void rememberAllow(Tool tool, JsonObject args, String content,
+            PermissionExplainer.Explanation ex, String editedRule) {
+        String spec = editedRule != null && !editedRule.trim().isEmpty()
+                ? editedRule.trim() : ex.suggestedRule;
+        try {
+            com.minion.core.security.permission.PermissionRule parsed =
+                    com.minion.core.security.permission.PermissionRule.parse(spec,
+                            com.minion.core.security.permission.PermissionRule.Behavior.ALLOW,
+                            com.minion.core.security.permission.PermissionRule.Source.PROJECT);
+            rules().sessionAllow(parsed.toolName, parsed.content);   // 会话层立即生效（含内容限定）
+        } catch (Exception bad) {
             rules().sessionAllow(tool.name(), null);
+        }
+        Path settingsFile = "local".equals(ex.ruleScope) ? localSettings : projectSettings;
+        if (settingsFile != null) {
+            try {
+                com.minion.core.security.permission.RuleWriter.writeAllow(settingsFile, spec);
+                DiagnosticLog.info("permission", "RULE saved " + spec + " → " + settingsFile);
+                ruleStore = null;   // 下次构建重读（新规则经完整管线生效）
+                return;
+            } catch (Exception e) {
+                DiagnosticLog.warn("permission", "规则落盘失败（会话规则仍生效）: " + e.getMessage());
+            }
+        }
+        // 落盘不可用（无 workspace 注入）或失败：回落 V68 旧白名单双写
+        if (tool instanceof BashTool && args.has("command")) {
+            config.appendWhitelist("confirm.whitelist.commands",
+                    DangerousCommands.firstToken(args.get("command").getAsString()));
+        } else {
             config.appendWhitelist("confirm.whitelist.tools", tool.name());
         }
     }
