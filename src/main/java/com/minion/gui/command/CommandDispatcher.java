@@ -29,6 +29,10 @@ public class CommandDispatcher {
     /** §7.2 /plugin 插件管理（列表/安装/启停/回退/市场）；未接线时返回提示 */
     private java.util.function.Function<String[], String> plugin = parts -> null;
 
+    /** §10.7 会话 → 后台任务注册表（ProcessTool 唯一真源；null=无后台段） */
+    private java.util.function.Function<SessionHandle, com.minion.core.agent.RuntimeJobRegistry>
+            taskRegistry = h -> null;
+
     /** /queue add 的优先发送通道（§2.3 now 含中断在途）；未接线时走普通入队 */
     public interface QueuePriority {
         void apply(SessionHandle h, String text, String priority);
@@ -48,6 +52,12 @@ public class CommandDispatcher {
 
     public CommandDispatcher plugin(java.util.function.Function<String[], String> handler) {
         this.plugin = handler;
+        return this;
+    }
+
+    public CommandDispatcher taskRegistry(
+            java.util.function.Function<SessionHandle, com.minion.core.agent.RuntimeJobRegistry> registryOf) {
+        this.taskRegistry = registryOf;
         return this;
     }
 
@@ -80,6 +90,14 @@ public class CommandDispatcher {
         if ("/stats".equals(cmd) || "/统计".equals(cmd)) return statsText();
         if ("/rewind".equals(cmd) || "/回退".equals(cmd)) return rewindText(h, parts);
         if ("/cost".equals(cmd) || "/费用".equals(cmd)) return costText(h);
+        if ("/tasks".equals(cmd) || "/bashes".equals(cmd) || "/任务面板".equals(cmd)) {
+            // §10.6/§10.7 共用可视化模型（只读快照；变更走 TaskV2/TodoWrite/TaskStop 工具）
+            if (h == null || h.loop == null) return "无活动会话";
+            com.minion.core.agent.RuntimeJobRegistry jobs = null;
+            try { jobs = taskRegistry.apply(h); } catch (Exception ignored) { }
+            return com.minion.core.agent.TaskBoardModel.render(
+                    com.minion.core.agent.TaskBoardModel.snapshot(h.loop.session(), jobs));
+        }
         if ("/plugin".equals(cmd) || "/插件".equals(cmd) || "/reload-plugins".equals(cmd)) {
             // §7.2 /plugin 系（/reload-plugins 等价 /plugin reload）
             String[] effective = "/reload-plugins".equals(cmd)

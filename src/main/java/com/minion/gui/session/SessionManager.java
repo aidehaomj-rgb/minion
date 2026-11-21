@@ -135,6 +135,9 @@ public class SessionManager {
     /** §10.9 每工作空间信任闸门缓存（workspace realpath → ProjectTrustStore+ConfirmUi 弹窗） */
     private final java.util.Map<String, com.minion.core.security.TrustGate> trustGates =
             new java.util.concurrent.ConcurrentHashMap<String, com.minion.core.security.TrustGate>();
+    /** §10.7 会话 → 后台进程唯一真源（newRegistry 登记；/tasks 与任务面板经此取注册表） */
+    private final java.util.Map<String, com.minion.core.tools.dev.ProcessTool> processBySession =
+            new java.util.concurrent.ConcurrentHashMap<String, com.minion.core.tools.dev.ProcessTool>();
     private final java.util.Map<SessionHandle,com.minion.core.agent.LocalJobs> localJobs=new java.util.concurrent.ConcurrentHashMap<SessionHandle,com.minion.core.agent.LocalJobs>();
     private final java.util.Map<String,String> localJobErrors=new java.util.concurrent.ConcurrentHashMap<String,String>();
     private final java.util.concurrent.ScheduledExecutorService jobClock=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"minion-local-jobs");t.setDaemon(true);return t;});
@@ -197,6 +200,7 @@ public class SessionManager {
                 .stats(this::statsText)
                 .doctor(this::doctorText)
                 .plugin(this::pluginCommand)
+                .taskRegistry(h -> backgroundRegistryOf(h.id))
                 .queuePriority((h, text, priority) -> sendPrioritized(h, text, priority))
                 .rewind(new CommandDispatcher.RewindApi() {
                     public String list(com.minion.core.agent.Session s) { return rewindList(s); }
@@ -669,6 +673,7 @@ public class SessionManager {
         registry.register(new GrepTool(workspace, skillsDir, tmpDir, gate));
         ProcessTool processTool = new ProcessTool(workspace);
         registry.register(processTool);
+        processBySession.put(session.id, processTool);   // §10.7 /tasks 与任务面板取后台账本
         // §3.2：Bash run_in_background 委托同一后台账本（唯一真源）；TaskOutput/TaskStop/Sleep 补齐
         {
             BashTool bash = new BashTool(workspace, tmpDirOf(sessionId), config);
@@ -957,6 +962,29 @@ public class SessionManager {
                         + runtime.pendingTrust);
         } catch (Exception e) {
             notifyError("插件装载失败: " + e.getMessage());
+        }
+    }
+
+    /** §10.7 后台账本只读访问（任务面板/停止；null=无该会话注册表） */
+    public com.minion.core.agent.RuntimeJobRegistry backgroundRegistryOf(String sessionId) {
+        com.minion.core.tools.dev.ProcessTool p = processBySession.get(sessionId);
+        if (p == null) return null;
+        try { return p.runtimeJobs(); } catch (Exception e) { return null; }
+    }
+
+    /** §10.7 停止后台任务（用户手势直达 ProcessTool.stop；进程树清理由其负责） */
+    public String stopBackgroundTask(String sessionId, String jobId) {
+        com.minion.core.tools.dev.ProcessTool p = processBySession.get(sessionId);
+        if (p == null) return "无该会话的后台任务注册表";
+        try {
+            com.google.gson.JsonObject args = new com.google.gson.JsonObject();
+            args.addProperty("action", "stop");
+            args.addProperty("id", jobId);
+            com.minion.core.tools.ToolResult r = p.execute(args);
+            return r.ok ? "已请求停止 " + jobId + (r.output == null ? "" : "\n" + r.output)
+                    : "停止失败: " + r.output;
+        } catch (Exception e) {
+            return "停止失败: " + e.getMessage();
         }
     }
 

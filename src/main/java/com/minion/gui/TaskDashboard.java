@@ -23,7 +23,8 @@ public final class TaskDashboard {
     private final SessionManager manager;
     private final SessionHandle handle;
     private final Stage stage=new Stage();
-    private final TextArea task=area(), budget=area();
+    private final TextArea task=area(), budget=area(), board=area();
+    private final TextField stopId=new TextField();
     private final Label feedback=new Label();
     private final TableView<TaskState.Child> agents=new TableView<TaskState.Child>();
     private final ListView<String> queue=new ListView<String>();
@@ -34,6 +35,7 @@ public final class TaskDashboard {
         this.manager=manager; this.handle=handle;
         stage.initOwner(owner); stage.setTitle("任务面板 — "+(handle.title==null?handle.id:handle.title));
         TabPane tabs=new TabPane(tab("主任务与断点",taskPane()),tab("子 Agent",agentsPane()),
+                tab("任务/后台 §10.6/§10.7",boardPane()),
                 tab("记忆解释",new ProjectMemoryPane(stage,manager,handle)),tab("多Agent只读复核",reviewPane()),
                 tab("Hooks",new SessionHooksPane(stage,manager,handle)),tab("上下文预算",contextPane()),tab("待执行队列",queuePane()),tab("旁支提问",sidePane()),
                 tab("可靠执行工作台",new ReliabilityPanel(stage,manager,handle)));
@@ -44,6 +46,29 @@ public final class TaskDashboard {
         stage.setOnHidden(e -> timer.stop()); refresh();
     }
     public void show() { stage.show(); timer.play(); }
+
+    /** §10.6/§10.7 任务/后台面板：共用可视化模型只读快照（变更走 TaskV2/TodoWrite/TaskStop 工具） */
+    private VBox boardPane() {
+        stopId.setPromptText("后台任务 id（任务/后台 段第一列）");
+        Button refresh=button("刷新",() -> refreshBoard());
+        Button stop=button("停止后台任务",() -> {
+            String id=stopId.getText().trim();
+            if(id.isEmpty()) { feedback.setText("先填后台任务 id"); return; }
+            feedback.setText(manager.stopBackgroundTask(handle.id,id));
+            refreshBoard();
+        });
+        Label note=new Label("面板只读——所有变更经 TaskV2/TodoWrite/TaskStop 工具串行提交；每秒自动刷新（含实时输出尾部与进程树停止）");
+        note.setWrapText(true);
+        VBox box=new VBox(8,note,new HBox(8,refresh,stopId,stop),board);
+        VBox.setVgrow(board,Priority.ALWAYS);
+        return box;
+    }
+
+    private void refreshBoard() {
+        com.minion.core.agent.RuntimeJobRegistry jobs=manager.backgroundRegistryOf(handle.id);
+        setIfChanged(board, com.minion.core.agent.TaskBoardModel.render(
+                com.minion.core.agent.TaskBoardModel.snapshot(handle.session,jobs)));
+    }
     private static TextArea area() { TextArea a=new TextArea(); a.setEditable(false); a.setWrapText(true); return a; }
     private static Tab tab(String title,javafx.scene.Node body) { Tab t=new Tab(title,body); t.setClosable(false); return t; }
     private Button button(String text,Runnable action) { Button b=new Button(text); b.setOnAction(e -> {
@@ -184,6 +209,7 @@ public final class TaskDashboard {
     private static void setIfChanged(TextArea area,String value) { if(!area.getText().equals(value)) { double scroll=area.getScrollTop(); area.setText(value); area.setScrollTop(scroll); } }
     private void refresh() {
         if(handle.deleted) { stage.close(); return; }
+        refreshBoard();
         setIfChanged(task,"执行状态: "+(handle.running?"运行中":"空闲/暂停")+handle.session.taskState.render(null));
         com.minion.core.context.ContextManager cm=handle.loop.contextManager();
         String live="当前实时设置：配置窗口 " + cm.configuredMaxTokens() + "；安全窗口 " + cm.maxTokens()

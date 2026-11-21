@@ -483,6 +483,20 @@ public class MainWindow {
         scene.getStylesheets().addAll(Theme.STYLESHEET, Theme.WORKBENCH);
         stage.setScene(scene);
 
+        // §10.6/§10.7 Ctrl+T=任务面板（§10.6 任务/后台页含 Todo/TaskV2/后台统一快照）；
+        // Ctrl+B=后台任务面板（同一面板聚焦任务/后台页）。输入框聚焦时不吞 T/B 本键，
+        // 只在 Ctrl 组合时打开（切片 34 键位注册表落地后统一迁移）
+        scene.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, e -> {
+            if (e.isControlDown() && !e.isAltDown() && !e.isShiftDown()) {
+                if (e.getCode() == javafx.scene.input.KeyCode.T
+                        || e.getCode() == javafx.scene.input.KeyCode.B) {
+                    e.consume();
+                    SessionHandle h = manager.currentSession();
+                    if (h != null) new TaskDashboard(stage, manager, h).show();
+                }
+            }
+        });
+
         // 系统关闭事件（Alt+F4/任务栏关闭）与自绘 ✕ 共用 confirmClose
         stage.setOnCloseRequest(e -> {
             e.consume(); // 统一走 confirmClose（stage.close() 不触发 onCloseRequest，须自行 close）
