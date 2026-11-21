@@ -238,6 +238,26 @@ public class Config {
 
     public int toolResultsBudgetChars() { return (int) longOf("toolResults.budget.chars", 2000); }
 
+    /** v2.4 §5.7 会话记忆辅助压缩（compact.sessionMemory.enabled 默认 false=legacy） */
+    public boolean compactSessionMemoryEnabled() { return Boolean.parseBoolean(get("compact.sessionMemory.enabled", "false")); }
+
+    /** v2.4 §5.8 工具调用摘要（toolSummary.enabled 默认 false=legacy；replica-offline 开启） */
+    public boolean toolSummaryEnabled() { return Boolean.parseBoolean(get("toolSummary.enabled", "false")); }
+
+    /** v2.4 §3.1 LSP（lsp.enabled 默认 false 保守起步；Win7 x64 实机验收覆盖开启态） */
+    public boolean lspEnabled() { return Boolean.parseBoolean(get("lsp.enabled", "false")); }
+
+    /** §3.1 LSP server 命令表（lsp.servers.<lang>=<command>；如 lsp.servers.python=pylsp） */
+    public java.util.Map<String, String> lspServers() {
+        java.util.Map<String, String> out = new java.util.LinkedHashMap<String, String>();
+        for (String key : keysWithPrefix("lsp.servers.")) {
+            String lang = key.substring("lsp.servers.".length());
+            String command = get(key, "");
+            if (!lang.isEmpty() && !command.trim().isEmpty()) out.put(lang, command.trim());
+        }
+        return out;
+    }
+
     /** v2.4 §3.9 内网 WebFetch（tools.webfetch.intranet.enabled 默认 false；总验收覆盖开启态） */
     public boolean toolsWebfetchIntranetEnabled() { return Boolean.parseBoolean(get("tools.webfetch.intranet.enabled", "false")); }
 

@@ -312,6 +312,10 @@ public class AgentLoop {
     public boolean toolsParallelMetadataDriven = false;
     /** §8.2 协调器模式（agent.coordinatorMode 默认 false）：system prompt 增补分工段 */
     public boolean coordinatorMode;
+    /** §5.7 会话记忆辅助压缩（compact.sessionMemory.enabled 默认 false=legacy） */
+    public boolean sessionMemoryCompactEnabled;
+    /** §5.8 工具批摘要（toolSummary.enabled 默认 false=legacy；经 SideQuery 异步） */
+    public boolean toolSummaryEnabled;
     /** §5.3 压缩后文件重读（compact.restore.enabled 默认 true；无读状态时零影响） */
     public boolean compactRestoreEnabled = true;
     /** §5.1 microcompact（microcompact.enabled 默认 false=legacy；replica-offline 开启） */
@@ -1754,7 +1758,31 @@ public class AgentLoop {
                         List<Message> beforeMessages = session.messages;
                         ui.onWarning("上下文达到本地稳定性软阈值，正在自动压缩（" + beforeTokens + "/"
                                 + contextManager.autoCompressAtTokens() + " token；当前安全窗口 " + contextManager.maxTokens() + "）");
-                        List<Message> compacted = compressSnapshot(beforeMessages,false);
+                        List<Message> compacted;
+                        // §5.7 会话记忆辅助压缩（compact.sessionMemory.enabled 默认 false）：
+                        // 三条件复用缓存（覆盖范围/来源哈希/任务锚点）——缓存摘要替换被压缩前缀，
+                        // 保留最近上下文尾窗；否则回退完整压缩
+                        if (sessionMemoryCompactEnabled) {
+                            com.minion.core.context.SessionMemoryCompact memory =
+                                    new com.minion.core.context.SessionMemoryCompact(workspace.workDir());
+                            com.minion.core.context.SessionMemoryCompact.Cached cached = memory.load();
+                            if (memory.reusable(cached, session, beforeMessages.size())) {
+                                compacted = new ArrayList<Message>();
+                                Message memorySummary = Message.taskControl(cached.summary);
+                                memorySummary.summary = true;   // 摘要消息不再参与后续压缩
+                                compacted.add(memorySummary);
+                                int keepFrom = Math.max(0, beforeMessages.size()
+                                        - (contextManager == null ? 10 : contextManager.keepRecentWindow()));
+                                compacted.addAll(beforeMessages.subList(keepFrom, beforeMessages.size()));
+                                DiagnosticLog.info("session-memory", "复用缓存记忆（覆盖 "
+                                        + cached.coversMessages + " 条，保留尾窗 " + (beforeMessages.size() - keepFrom) + " 条）");
+                            } else {
+                                compacted = null;   // 走完整压缩
+                            }
+                        } else {
+                            compacted = null;
+                        }
+                        if (compacted == null) compacted = compressSnapshot(beforeMessages,false);
                         if(!compactionTicket.get().current(this)){continue;}
                         int afterTokens = contextManager.estimate(compacted);
                         if (afterTokens >= contextManager.autoCompressAtTokens() && afterTokens >= beforeTokens) {
@@ -2618,6 +2646,31 @@ public class AgentLoop {
                     }
                 }
                 pushContextStats(); // 工具结果入历史：进度增长
+                // §5.8 工具批摘要（toolSummary.enabled 默认 false）：SideQuery 异步生成面向
+                // 用户的短摘要；失败只省略；子代理批（owner 非根）不生成
+                if (toolSummaryEnabled && !scheduledTurn && batchResults.size() >= 2) {
+                    try {
+                        final List<String> names = new ArrayList<String>();
+                        final List<String> previews = new ArrayList<String>();
+                        for (ToolCall call : calls) {
+                            names.add(call.name);
+                            previews.add(call.arguments == null ? "" : call.arguments);
+                        }
+                        final String goal = session.taskState.latestRequirement();
+                        pool.submit(() -> {
+                            try {
+                                Message summary = com.minion.core.context.ToolUseSummarizer
+                                        .summarize(llm, names, previews, goal);
+                                if (summary != null) {
+                                    synchronized (session.messages) {
+                                        session.messages.add(summary);
+                                    }
+                                    persistSession();
+                                }
+                            } catch (Exception ignored) { /* 摘要失败静默省略 */ }
+                        });
+                    } catch (Exception ignored) { /* 线程池拒绝同样静默 */ }
+                }
                 // 运行中补充注入检查点：工具结果全部入历史后、下一轮请求前；
                 // AskUserQuestion 挂起时补充等回答的 TOOL 消息入历史后同请求发出；
                 // interrupted 不注入——半轮 tool_call 未配对时插入 user 消息会破坏契约（400）

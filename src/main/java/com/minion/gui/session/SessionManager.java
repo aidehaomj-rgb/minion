@@ -625,6 +625,10 @@ public class SessionManager {
             }
             registry.register(new com.minion.core.tools.ConfigViewTool(featureFlags));
             registry.register(new com.minion.core.tools.StructuredOutputTool());
+            // §3.1 LSP（lsp.enabled 默认 false；server 表空时工具 isEnabled=false）
+            if (config.lspEnabled() && !config.lspServers().isEmpty())
+                registry.register(new com.minion.core.tools.dev.LspTool(
+                        workspace.workDir(), config.lspServers()));
             // §5.4 ToolSearch 工具（toolsearch.enabled 默认 false）；§3.2 Monitor（tools.monitor.enabled 默认 false）
             if (config.toolSearchEnabled())
                 registry.register(new com.minion.core.tools.ToolSearchTool(registry));
@@ -1095,6 +1099,8 @@ public class SessionManager {
         loop.budgetEnabled = config.budgetEnabled();
         loop.toolsParallelMetadataDriven = config.toolsParallelMetadataDriven();
         loop.coordinatorMode = config.agentCoordinatorMode();   // §8.2 协调器分工段（默认 false）
+        loop.sessionMemoryCompactEnabled = config.compactSessionMemoryEnabled();   // §5.7
+        loop.toolSummaryEnabled = config.toolSummaryEnabled();   // §5.8
         // §5.1/5.2/5.3 上下文体系（默认值=V68 现状；microcompact 默认关、公式制默认关、恢复默认开）
         loop.microcompactEnabled = config.microcompactEnabled();
         loop.microcompactIdleMinutes = config.microcompactIdleMinutes();

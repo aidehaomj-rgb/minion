@@ -417,6 +417,9 @@ public class ContextManager {
         return applyToolResultBudget(out);
     }
 
+    /** §5.7 记忆复用窗口（压缩保留尾窗条数；与压缩 keepRecent 同源） */
+    public int keepRecentWindow() { return keepRecent; }
+
     // ==================== §5.6 工具结果预算（toolResults.budget.enabled 默认 false） ====================
 
     /** 旧工具结果超预算时在请求副本中替换为摘要（保留尾部保护窗原样；会话原文不动） */
