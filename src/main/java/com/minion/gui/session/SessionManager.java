@@ -191,6 +191,7 @@ public class SessionManager {
         this.dispatcher = new CommandDispatcher().featureFlags(() -> featureFlags)
                 .stats(this::statsText)
                 .doctor(this::doctorText)
+                .queuePriority((h, text, priority) -> sendPrioritized(h, text, priority))
                 .rewind(new CommandDispatcher.RewindApi() {
                     public String list(com.minion.core.agent.Session s) { return rewindList(s); }
                     public String execute(com.minion.core.agent.Session s, String eventId, String mode) {
@@ -1077,7 +1078,11 @@ public class SessionManager {
         loop.microcompactIdleMinutes = config.microcompactIdleMinutes();
         loop.compactRestoreEnabled = config.compactRestoreEnabled();
         ContextManager cmFormula = loop.contextManager();
-        if (cmFormula != null) cmFormula.setAutocompactFormula(config.autocompactFormula());
+        if (cmFormula != null) {
+            cmFormula.setAutocompactFormula(config.autocompactFormula());
+            // §5.6 工具结果预算（默认 false；请求副本折叠旧超限结果，会话原文不动）
+            cmFormula.setToolResultBudget(config.toolResultsBudgetEnabled(), config.toolResultsBudgetChars());
+        }
         // §6.1 MINION.md 自动发现（默认关；projectMd 原行为不变）
         if (config.instructionsEnabled())
             loop.setInstructionLoader(new com.minion.core.context.InstructionLoader(
@@ -1860,6 +1865,35 @@ public class SessionManager {
 
     /** 运行中补充：入 AgentLoop 挂起队列 + 发聊天标识事件（UI 事件仅在点击时发一次，注入不重发） */
     public void sendSupplement(final SessionHandle h, final String text) { sendSupplement(h, text, null); }
+
+    /**
+     * §2.3 三档优先发送：now=运行中则中断在途工具（loop.interrupt：已完成结果保留、
+     * 未执行 tool_use 由既有中断路径补 interrupted 结果）并以队首任务续跑；
+     * next=插队首（当前工具结束后优先）；later=队尾（既有语义）。空闲会话立即派发。
+     */
+    public String sendPrioritized(final SessionHandle h, final String text, final String priority) {
+        if (h == null || text == null || text.trim().isEmpty()) return "消息为空";
+        if (!ensureLoaded(h)) return "会话不可用";
+        if ("now".equals(priority) && h.running && h.loop != null) {
+            h.loop.interrupt();
+            h.controller.onWarning("已请求中断当前任务（now 优先级），队列任务将接续执行");
+        }
+        int position = h.enqueue(text, null, false, priority);
+        h.loop.persistQueue();
+        if (!h.running) dispatchQueuedIfIdle(h);
+        return "已按 " + priority + " 优先级入队，位置 " + position;
+    }
+
+    /** 空闲且有队列时立即派发队首（now/next 直达；失败保留在队列） */
+    private void dispatchQueuedIfIdle(SessionHandle h) {
+        try {
+            SessionHandle.QueuedMessage next = h.pollQueued();
+            if (next != null) {
+                h.loop.persistQueue();
+                send(h, next.text, next.images, true);
+            }
+        } catch (Exception ignored) { }
+    }
 
     /** 运行中补充（带图）：图片占位并入聊天标识事件（聊天区不渲染图片本体） */
     public void sendSupplement(final SessionHandle h, final String text, final List<ImagePart> images) {

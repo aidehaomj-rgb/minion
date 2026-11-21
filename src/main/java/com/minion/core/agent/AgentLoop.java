@@ -385,6 +385,9 @@ public class AgentLoop {
 
     /** §4.7 CC 语义 Hook 系统（PreToolUse 等工具事件已由 guard 接线；其余事件点见 runCcHook） */
     private final com.minion.core.hooks.HookSystem ccHookSystem;
+
+    /** 武装/解除本会话工具只读门禁（计划/审查模式内部使用；宿主与测试可直呼） */
+    public void armReadOnlyGuard(boolean on) { executionGuard.setReadOnlyTurn(on); }
     /** SessionStart 只在会话首次用户输入触发一次 */
     private boolean ccSessionStarted;
 
@@ -3140,11 +3143,28 @@ public class AgentLoop {
                     externalOpenedThisTurn.add(externalKey);externalReserved=true;
                 }
             }
+            // §4.7 PreToolUse：先于权限门禁——deny 阻断；updatedInput 替换 args 后由下方
+            // confirmGate.check 重过完整确认管线；ask 在门禁后显式询问（只收紧不放宽）
+            ToolExecutionGuard.PreToolUseOutcome ccPre = executionGuard.runCcPreToolUse(tool, args);
+            if (ccPre.blocked) {
+                ToolResult result = ToolResult.errorWithoutSideEffects(
+                        "Hook 阻断（PreToolUse）: " + ccPre.reason);
+                DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                return result;
+            }
+            if (ccPre.updatedInput != null) args = ccPre.updatedInput;
             if (!confirmGate.check(tool, args)) {
                 if(externalReserved)synchronized(externalOpenedThisTurn){externalOpenedThisTurn.remove(externalKey);}
                 String detail = args.has("command") ? args.get("command").getAsString()
                         : (args.has("path") ? args.get("path").getAsString() : args.toString());
                 ToolResult result = ToolResult.error("用户拒绝了该操作（" + call.name + " → " + detail + "），请调整方案");
+                DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                return result;
+            }
+            if (ccPre.ask && !confirmGate.hookAsk(tool, args)) {
+                if(externalReserved)synchronized(externalOpenedThisTurn){externalOpenedThisTurn.remove(externalKey);}
+                ToolResult result = ToolResult.errorWithoutSideEffects(
+                        "Hook 要求确认该操作，用户未批准；请调整方案");
                 DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
                 return result;
             }

@@ -233,6 +233,11 @@ public class Config {
 
     public int memoryDreamMinHours() { return (int) longOf("memory.dream.minHours", 24); }
 
+    /** v2.4 §5.6 工具结果预算（toolResults.budget.enabled 默认 false；超预算旧结果请求侧折叠） */
+    public boolean toolResultsBudgetEnabled() { return Boolean.parseBoolean(get("toolResults.budget.enabled", "false")); }
+
+    public int toolResultsBudgetChars() { return (int) longOf("toolResults.budget.chars", 2000); }
+
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
         catch (Exception e) { return fallback; }

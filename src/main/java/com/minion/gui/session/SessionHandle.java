@@ -106,12 +106,25 @@ public class SessionHandle {
     }
 
     public synchronized int enqueue(String text, List<com.minion.core.llm.ImagePart> images, boolean guide) {
+        return enqueue(text, images, guide, "later");
+    }
+
+    /**
+     * §2.3 三档入队：next=插队首（当前工具结束/下一轮优先处理）；later=队尾（本轮结束后，
+     * 既有语义）；now 的「中断在途并发送」由 SessionManager.sendPrioritized 承担
+     * （中断+队首），入队侧与 next 同位。
+     */
+    public synchronized int enqueue(String text, List<com.minion.core.llm.ImagePart> images,
+                                    boolean guide, String priority) {
         synchronized (queue()) {
             if (text == null || text.trim().isEmpty()) return queue().size();
             Session.QueuedTask task = new Session.QueuedTask();
             task.text=text.trim(); task.createdAt=System.currentTimeMillis(); task.guidance=guide;
+            task.priority = "next".equals(priority) || "now".equals(priority) ? priority : "later";
             if(images!=null) task.images.addAll(images);
-            queue().add(task); return queue().size();
+            if ("later".equals(task.priority)) queue().add(task);
+            else queue().add(0, task);
+            return queue().size();
         }
     }
 

@@ -414,7 +414,32 @@ public class ContextManager {
             }
             out.add(m);
         }
-        return out;
+        return applyToolResultBudget(out);
+    }
+
+    // ==================== §5.6 工具结果预算（toolResults.budget.enabled 默认 false） ====================
+
+    /** 旧工具结果超预算时在请求副本中替换为摘要（保留尾部保护窗原样；会话原文不动） */
+    private volatile boolean toolResultBudgetEnabled;
+    private volatile int toolResultBudgetChars = 2000;
+
+    public void setToolResultBudget(boolean enabled, int chars) {
+        this.toolResultBudgetEnabled = enabled;
+        this.toolResultBudgetChars = Math.max(500, chars);
+    }
+
+    private List<Message> applyToolResultBudget(List<Message> projected) {
+        if (!toolResultBudgetEnabled || projected.size() <= 12) return projected;
+        int protectedFrom = projected.size() - 12;   // 最近 12 条消息（保护窗）不替换
+        for (int i = 0; i < protectedFrom; i++) {
+            Message m = projected.get(i);
+            if (m.role != Message.Role.TOOL || m.content == null) continue;
+            if (m.summary || m.content.length() <= toolResultBudgetChars) continue;
+            m.content = m.content.substring(0, Math.min(500, m.content.length()))
+                    + "\n…[旧工具结果超预算已折叠（原 " + m.content.length()
+                    + " 字符）；需要完整内容请用工具重新获取]";
+        }
+        return projected;
     }
 
     private static boolean internalControl(String name) {

@@ -164,6 +164,8 @@ public class Session {
         public String text;
         public long createdAt;
         public boolean guidance;
+        /** §2.3 排队优先级：now（中断在途+队首）/next（队首）/later（队尾，默认） */
+        public String priority = "later";
         public List<ImagePart> images = new ArrayList<ImagePart>();
     }
     public UsageTracker usage = new UsageTracker();

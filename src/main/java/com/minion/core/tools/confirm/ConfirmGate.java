@@ -51,6 +51,21 @@ public class ConfirmGate {
                 || d == ConfirmUi.Decision.APPROVE_SESSION;
     }
 
+    /**
+     * §4.7 PreToolUse permissionDecision=ask 的显式询问：hook ask 必须真正问到用户，
+     * 不能被低危直通路径吞掉（只收紧不放宽）；拒绝/关闭视为否。
+     */
+    public boolean hookAsk(Tool tool, com.google.gson.JsonObject args) {
+        String detail = highRiskDetail(tool, args);
+        ConfirmUi.Decision d = ui.ask("! Hook 要求确认 " + detail);
+        DiagnosticLog.info("permission", (d == ConfirmUi.Decision.APPROVE
+                || d == ConfirmUi.Decision.APPROVE_WHITELIST
+                || d == ConfirmUi.Decision.APPROVE_SESSION ? "ALLOW" : "DENY")
+                + " hook-ask " + detail);
+        return d == ConfirmUi.Decision.APPROVE || d == ConfirmUi.Decision.APPROVE_WHITELIST
+                || d == ConfirmUi.Decision.APPROVE_SESSION;
+    }
+
     /** §4.8：ssh.strictHostKey（默认 true）；false 时 SshExecutor 回退 StrictHostKeyChecking=no */
     public boolean sshTofuEnabled() { return config.sshStrictHostKey(); }
 

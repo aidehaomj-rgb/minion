@@ -26,6 +26,18 @@ public class CommandDispatcher {
     /** /doctor 环境与配置诊断（§13.1）；未接线时命令返回不可用提示 */
     private java.util.function.Supplier<String> doctor = () -> null;
 
+    /** /queue add 的优先发送通道（§2.3 now 含中断在途）；未接线时走普通入队 */
+    public interface QueuePriority {
+        void apply(SessionHandle h, String text, String priority);
+    }
+
+    private volatile QueuePriority queuePriority;
+
+    public CommandDispatcher queuePriority(QueuePriority channel) {
+        this.queuePriority = channel;
+        return this;
+    }
+
     public CommandDispatcher doctor(java.util.function.Supplier<String> supplier) {
         this.doctor = supplier;
         return this;
@@ -265,10 +277,24 @@ public class CommandDispatcher {
             return sb.toString();
         }
         if ("add".equalsIgnoreCase(parts[1])) {
-            String text = joinTail(parts, 2);
-            if (text.isEmpty()) return "用法: /queue add <任务内容>";
-            int position=h.enqueue(text); h.loop.persistQueue();
-            return "已加入任务队列，当前位置 " + position;
+            // §2.3 三档：/queue add now|next|later <任务>（缺省 later）
+            String priority = "later";
+            int textFrom = 2;
+            if (parts.length >= 4 && java.util.Arrays.asList("now", "next", "later").contains(parts[2].toLowerCase(Locale.ROOT))) {
+                priority = parts[2].toLowerCase(Locale.ROOT);
+                textFrom = 3;
+            }
+            String text = joinTail(parts, textFrom);
+            if (text.isEmpty()) return "用法: /queue add [now|next|later] <任务内容>";
+            int position;
+            if (queuePriority != null) {   // 接线了优先发送（now 含中断在途）
+                position = -1;
+                queuePriority.apply(h, text, priority);
+            } else {
+                position = h.enqueue(text, null, false, priority);
+                if (h.loop != null) h.loop.persistQueue();
+            }
+            return position < 0 ? "已按 " + priority + " 优先级提交" : "已加入任务队列，当前位置 " + position;
         }
         if ("remove".equalsIgnoreCase(parts[1])) {
             if (parts.length < 3) return "用法: /queue remove <序号>";
