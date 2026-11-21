@@ -42,7 +42,8 @@ public final class RewindService {
 
     /** 目标消息及之后的消息将被回退；messageId 必须存在快照（无快照返回不可代码回退） */
     public Result rewind(Session session, String messageId, String mode, List<Path> currentTracked) throws IOException {
-        MessageFileHistory.Snapshot snapshot = history.snapshot(messageId);
+        // history 可为 null（/rewind conversation/summarize 不需要文件快照库）
+        MessageFileHistory.Snapshot snapshot = history == null ? null : history.snapshot(messageId);
         if (snapshot == null) {
             Result r = new Result();
             r.notes.add("该消息点没有文件快照（checkpoint.messageLevel 关闭或已淘汰），不可代码回退；可用 conversation/summarize 模式");

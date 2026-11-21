@@ -322,6 +322,29 @@ public class AgentLoop {
     public void setInstructionLoader(com.minion.core.context.InstructionLoader loader) {
         this.instructionLoader = loader;
     }
+
+    /** §4.7 CC 语义 Hook 系统（PreToolUse 等工具事件已由 guard 接线；其余事件点见 runCcHook） */
+    private final com.minion.core.hooks.HookSystem ccHookSystem;
+    /** SessionStart 只在会话首次用户输入触发一次 */
+    private boolean ccSessionStarted;
+
+    public com.minion.core.hooks.HookSystem ccHookSystem() { return ccHookSystem; }
+
+    /** 运行非工具类 Hook 事件；blocked 时返回原因（调用方决定是否中止），异常不外抛 */
+    private String runCcHook(String event, com.google.gson.JsonObject payload) {
+        try {
+            com.minion.core.hooks.HookSystem hs = ccHookSystem;
+            if (hs == null || !hs.enabled() || !hs.matches(event, "")) return null;
+            com.minion.core.hooks.HookSystem.Outcome o = hs.run(event, "", payload);
+            return o.blocked ? (o.reason == null ? "Hook 阻断" : o.reason) : null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "Hook 被中断";
+        } catch (Exception failed) {
+            DiagnosticLog.warn("hooks", event + " 执行失败（忽略）: " + failed.getMessage());
+            return null;
+        }
+    }
     private boolean lengthEscalationUsed;
     private Long turnTokenBudget;
     private long turnUsedTokens, lastRoundTokens = -1, prevRoundTokens = -1;
@@ -422,6 +445,9 @@ public class AgentLoop {
         this.session = session;
         this.sessionHooks = new SessionHooks(workspace);
         this.executionGuard = new ToolExecutionGuard(workspace,false);
+        // §4.7 CC 语义 Hook（默认 disabled；SessionManager 装配快照批准后经 ccHooks 装入）
+        this.ccHookSystem = new com.minion.core.hooks.HookSystem(java.nio.file.Paths.get(workspace.workDir()));
+        this.executionGuard.ccHooks(ccHookSystem);
         this.executionGuard.lifecycle(sessionHooks,this::hookMetadata,()->{
             ToolOwner owner=toolOwners.get();return !interrupted&&(owner==null||owner.current(this));
         });
@@ -812,6 +838,12 @@ public class AgentLoop {
             } catch (Exception restoreFailure) {
                 DiagnosticLog.warn("compact", "压缩后文件重读失败（不影响压缩结果）: " + restoreFailure.getMessage());
             }
+        }
+        // §4.7 PostCompact（压缩采纳成功后）
+        {
+            com.google.gson.JsonObject post = new com.google.gson.JsonObject();
+            post.addProperty("messages", session.messages.size());
+            runCcHook(com.minion.core.hooks.HookSystem.POST_COMPACT, post);
         }
         // §4.5 ContextReadLedger：压缩清理正文后，"仍在上下文"账本整体失效——
         // Read 去重不能再凭旧账本回 stub，必须重新注入正文
@@ -1426,6 +1458,19 @@ public class AgentLoop {
         lastRoundTokens = -1;
         prevRoundTokens = -1;
         budgetContinuations = 0;
+        // §4.7 生命周期事件：SessionStart（首条用户输入）与 UserPromptSubmit（阻断=丢弃本轮输入）
+        if (!ccSessionStarted) {
+            ccSessionStarted = true;
+            runCcHook(com.minion.core.hooks.HookSystem.SESSION_START, new com.google.gson.JsonObject());
+        }
+        com.google.gson.JsonObject promptPayload = new com.google.gson.JsonObject();
+        promptPayload.addProperty("prompt", input);
+        String promptBlocked = runCcHook(com.minion.core.hooks.HookSystem.USER_PROMPT_SUBMIT, promptPayload);
+        if (promptBlocked != null) {
+            lastTurnSucceeded = false;
+            ui.onError("UserPromptSubmit Hook 阻断，本轮输入未执行: " + promptBlocked);
+            return;
+        }
         runTurn(input,images,forceNewTask,false);
     }
 
@@ -1602,6 +1647,13 @@ public class AgentLoop {
                         && (lastIneffectiveAutoCompressTokens < 0
                         || currentTokens >= lastIneffectiveAutoCompressTokens + 1024)) {
                     notifyCompressing(true);
+                    // §4.7 PreCompact（压缩前；payload 带触发词与当前 token）
+                    {
+                        com.google.gson.JsonObject pre = new com.google.gson.JsonObject();
+                        pre.addProperty("trigger", "auto");
+                        pre.addProperty("tokens", currentTokens);
+                        runCcHook(com.minion.core.hooks.HookSystem.PRE_COMPACT, pre);
+                    }
                     try {
                         int beforeTokens = currentTokens;
                         List<Message> beforeMessages = session.messages;
@@ -2501,6 +2553,19 @@ public class AgentLoop {
             appendCompletionTime(java.time.Clock.systemUTC());
         }
         if(!lastTurnSucceeded && exitCode==null) exitCode="unclassified";
+        // §4.7 Stop Hook：仅在任务成功结束（StopGate 已放行）时执行；阻断=保持任务开启，
+        // 不伪造 success（自动续跑的完整状态机接线随 §2.6 统一结束切片）
+        if (lastTurnSucceeded && !interrupted) {
+            com.google.gson.JsonObject stopPayload = new com.google.gson.JsonObject();
+            stopPayload.addProperty("stop_reason", exitCode == null ? "end_turn" : exitCode);
+            String stopBlocked = runCcHook(com.minion.core.hooks.HookSystem.STOP, stopPayload);
+            if (stopBlocked != null) {
+                lastTurnSucceeded = false;
+                exitCode = "stop_hook";
+                exitReason = "Stop Hook 阻断: " + stopBlocked;
+                ui.onWarning(exitReason + "；任务保持未完成，请继续对话推进");
+            }
+        }
         lastTurnToolRounds=rounds;
         session.taskState.finish(lastTurnSucceeded,exitReason,exitCode);
         DiagnosticLog.info("agent-exit","task="+session.taskState.id+" state="+session.taskState.status

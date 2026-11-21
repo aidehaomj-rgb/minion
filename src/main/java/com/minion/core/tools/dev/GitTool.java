@@ -26,6 +26,14 @@ import java.util.concurrent.TimeUnit;
 public final class GitTool implements Tool {
     private static final int MAX_OUTPUT=80_000;
     private final Workspace workspace;
+    /** §13.2 提交归因（attribution.commit 默认 true）：模型显示名；null=不加 */
+    private volatile String attributionModel;
+    public void setAttribution(String modelDisplayName){this.attributionModel=modelDisplayName;}
+    private String attributed(String message){
+        String model=attributionModel;
+        if(model==null||model.trim().isEmpty())return message;
+        return message+"\n\nGenerated with Minion\nCo-Authored-By: "+model.trim();
+    }
     public GitTool(Workspace workspace){this.workspace=workspace;}
     @Override public String name(){return "Git";}
     @Override public String description(){return "Git 工作台：status/diff/log/branches/review/review_snapshot/worktree_list；review_snapshot返回staged+unstaged+untracked只读内容快照(JSON)，truncated时必须收窄paths，不代表语义审查通过；写操作需确认，worktree只用于代码仓库";}
@@ -54,7 +62,7 @@ public final class GitTool implements Tool {
         else if("review_snapshot".equals(a)){return reviewSnapshot(args);}
         else if("stage".equals(a)){cmd.add("add");List<String> p=paths(args);if(p.isEmpty())cmd.add("-A");else{cmd.add("--");cmd.addAll(p);}}
         else if("unstage".equals(a)){cmd.addAll(Arrays.asList("reset","HEAD","--"));cmd.addAll(paths(args));}
-        else if("commit".equals(a)){String m=text(args,"message");if(m.trim().isEmpty())return ToolResult.error("commit 缺少 message");cmd.addAll(Arrays.asList("commit","-m",m));}
+        else if("commit".equals(a)){String m=text(args,"message");if(m.trim().isEmpty())return ToolResult.error("commit 缺少 message");cmd.addAll(Arrays.asList("commit","-m",attributed(m)));}
         else if("branch".equals(a)){String n=text(args,"name");if(!validRef(n))return ToolResult.error("分支名非法");cmd.addAll(Arrays.asList("branch",n));}
         else if("checkout".equals(a)){String n=text(args,"name");if(!validRef(n))return ToolResult.error("分支名非法");cmd.addAll(Arrays.asList("checkout",n));}
         else if("pull".equals(a)){cmd.add("pull");appendRemoteBranch(cmd,args);}

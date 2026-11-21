@@ -182,14 +182,22 @@ public class BashToolTest {
         assertNoProcess("sleep.exe");
     }
 
-    /** Windows 上按进程名查 tasklist，断言无残留进程（子进程树已清杀） */
+    /** Windows 上按进程名查 tasklist，断言无残留进程（子进程树已清杀）。
+     *  有界轮询（≤6s）：组杀在 OS 层生效有延迟——前序测试垂死的进程会被立即断言误捕
+     *  （全类运行实测时序竞态）；真实泄漏 6 秒后仍存活，照样失败不掩盖回归。 */
     private static void assertNoProcess(String imageName) throws Exception {
-        String os = System.getProperty("os.name", "").toLowerCase();
+        String os = System.getProperty("os.name").toLowerCase();
         if (!os.contains("win")) return; // 非 Windows 环境跳过（进程组杀由 kill -9 覆盖）
-        Process p = new ProcessBuilder("tasklist", "/FI", "IMAGENAME eq " + imageName)
-                .redirectErrorStream(true).start();
-        String out = new String(readAll(p.getInputStream()), "GBK");
-        p.waitFor();
+        String out = "";
+        long deadline = System.currentTimeMillis() + 6000;
+        do {
+            Process p = new ProcessBuilder("tasklist", "/FI", "IMAGENAME eq " + imageName)
+                    .redirectErrorStream(true).start();
+            out = new String(readAll(p.getInputStream()), "GBK");
+            p.waitFor();
+            if (!out.contains(imageName)) return;   // 已清杀干净
+            Thread.sleep(250);                      // 等组杀在 OS 层生效后复查
+        } while (System.currentTimeMillis() < deadline);
         assertFalse("残留进程: " + imageName + "\n" + out, out.contains(imageName));
     }
 

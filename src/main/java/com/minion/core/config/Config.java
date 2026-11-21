@@ -203,6 +203,9 @@ public class Config {
     /** v2.4 §8.2/§8.3 团队（team.enabled 默认 false；replica-offline 开启时注册 Team 工具） */
     public boolean teamEnabled() { return Boolean.parseBoolean(get("team.enabled", "false")); }
 
+    /** v2.4 §13.2 提交归因（attribution.commit 默认 true）：commit 追加 Generated with Minion + Co-Authored-By */
+    public boolean attributionCommit() { return Boolean.parseBoolean(get("attribution.commit", "true")); }
+
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
         catch (Exception e) { return fallback; }

@@ -20,8 +20,26 @@ public class CommandDispatcher {
     /** /config 的 FeatureFlags 视图（§13.1：值、来源、生效范围）；未接线时命令返回不可用提示 */
     private java.util.function.Supplier<com.minion.core.config.FeatureFlags> flags = () -> null;
 
+    /** /stats 本地使用统计视图（§13.3）；未接线时命令返回不可用提示 */
+    private java.util.function.Supplier<String> stats = () -> null;
+
+    /** /rewind 回退执行器（§9.3）：list=列出可回退消息；execute=按 eventId+mode 回退 */
+    public interface RewindApi {
+        String list(com.minion.core.agent.Session session);
+        String execute(com.minion.core.agent.Session session, String eventId, String mode);
+    }
+
+    private volatile RewindApi rewind;
+
+    public CommandDispatcher rewind(RewindApi api) { this.rewind = api; return this; }
+
     public CommandDispatcher featureFlags(java.util.function.Supplier<com.minion.core.config.FeatureFlags> supplier) {
         this.flags = supplier;
+        return this;
+    }
+
+    public CommandDispatcher stats(java.util.function.Supplier<String> supplier) {
+        this.stats = supplier;
         return this;
     }
 
@@ -31,6 +49,8 @@ public class CommandDispatcher {
         String cmd = parts[0].toLowerCase(Locale.ROOT);
         if ("/help".equals(cmd)) return helpText();
         if ("/config".equals(cmd) || "/开关".equals(cmd)) return configText(parts);
+        if ("/stats".equals(cmd) || "/统计".equals(cmd)) return statsText();
+        if ("/rewind".equals(cmd) || "/回退".equals(cmd)) return rewindText(h, parts);
         if ("/skills".equals(cmd)) return skillsText(h);
         if ("/skill".equals(cmd)) return dispatchSkill(h, parts);
         if ("/tokens".equals(cmd)) return tokensText(h);
@@ -58,6 +78,22 @@ public class CommandDispatcher {
         com.minion.core.config.FeatureFlags view = flags.get();
         if (view == null) return "配置视图不可用（FeatureFlags 未接线）";
         return view.render(parts.length > 1 ? parts[1] : null);
+    }
+
+    /** /stats：本地使用统计（§13.3；会话/消息/token 累计，快照落 stats.json） */
+    private String statsText() {
+        String text = stats.get();
+        return text == null ? "统计不可用（数据源未接线）" : text;
+    }
+
+    /** /rewind [eventId] [conversation|summarize|code|both]：无参列出可回退消息（§9.3） */
+    private String rewindText(SessionHandle h, String[] parts) {
+        RewindApi api = rewind;
+        if (api == null) return "/rewind 不可用（回退执行器未接线）";
+        if (h.session == null) return "/rewind 不可用（会话未装载）";
+        if (parts.length == 1) return api.list(h.session);
+        String mode = parts.length >= 3 ? parts[2].toLowerCase(Locale.ROOT) : "conversation";
+        return api.execute(h.session, parts[1], mode);
     }
 
     private String helpText() {

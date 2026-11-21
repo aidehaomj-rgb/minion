@@ -188,7 +188,14 @@ public class SessionManager {
         // §4.6 SecretStore v2（secret.store.v2 默认 true）：随机主密钥 + DPAPI/GCM；false 应急回退旧实现
         this.secretStore = new SecretStore(jarDir, config.secretStoreV2(), null);
         this.featureFlags = new com.minion.core.config.FeatureFlags(config);
-        this.dispatcher = new CommandDispatcher().featureFlags(() -> featureFlags);
+        this.dispatcher = new CommandDispatcher().featureFlags(() -> featureFlags)
+                .stats(this::statsText)
+                .rewind(new CommandDispatcher.RewindApi() {
+                    public String list(com.minion.core.agent.Session s) { return rewindList(s); }
+                    public String execute(com.minion.core.agent.Session s, String eventId, String mode) {
+                        return rewindExecute(s, eventId, mode);
+                    }
+                });
         if (mcp != null) {
             // 连接完成（后台线程）：补注册 MCP 工具进所有存活会话（下一轮 schemas() 可见）
             mcp.addListener(new McpManager.Listener() {
@@ -569,7 +576,12 @@ public class SessionManager {
         }
         PythonRuntime python = new PythonRuntime(config.pythonPath());
         registry.register(new FilesTool(workspace));
-        registry.register(new GitTool(workspace));
+        {   // §13.2 提交归因（attribution.commit 默认 true）：commit 追加 Generated with Minion + 模型共同作者
+            GitTool git = new GitTool(workspace);
+            if (config.attributionCommit()) git.setAttribution(session.modelDisplayName == null
+                    ? session.modelName : session.modelDisplayName);
+            registry.register(git);
+        }
         registry.register(new com.minion.core.tools.dev.CodeIndexTool(workspace));
         registry.register(new ProjectTool(workspace));
         registry.register(new BuildTool(workspace, python, processTool));
@@ -774,6 +786,100 @@ public class SessionManager {
     public LlmClient newLlm(ModelConfig mc) {
         return new DeepSeekClient(mc.url, mc.apiKey, mc.modelName,
                 mc.thinking, mc.reasoningEffort, mc.provider, mc.maxOutputTokens, mc.sessionId);
+    }
+
+    /** §13.3 /stats：本地使用统计（会话数/消息数/token 累计，数据源当前空间已装载会话 +
+     * UsageTracker），快照持久化 {jarDir}/.minion/stats.json（覆盖写，含生成时间）。
+     */
+    /** /rewind 消息清单（§9.3）：最近 10 条带 eventId 的用户消息 */
+    private String rewindList(Session s) {
+        StringBuilder sb = new StringBuilder("可回退的用户消息（/rewind <eventId> <conversation|summarize>）:\n");
+        int shown = 0;
+        for (int i = s.messages.size() - 1; i >= 0 && shown < 10; i--) {
+            Message m = s.messages.get(i);
+            if (m.eventId == null || !m.isUserInstruction()) continue;
+            String preview = m.content == null ? "" : m.content.replace('\n', ' ');
+            if (preview.length() > 40) preview = preview.substring(0, 40) + "…";
+            sb.append("  ").append(m.eventId).append("  ").append(preview).append('\n');
+            shown++;
+        }
+        if (shown == 0) sb.append("  （无带 eventId 的用户消息）");
+        sb.append("\nmode：conversation=仅对话回退（transcript 审计链保留）；summarize=压缩到该点");
+        return sb.toString();
+    }
+
+    /** /rewind 执行：conversation/summarize 经 RewindService；code/both 需 §9.2 快照接线（诚实报未就绪） */
+    private String rewindExecute(Session s, String eventId, String mode) {
+        if (!java.util.Arrays.asList("conversation", "summarize", "code", "both").contains(mode))
+            return "mode 只支持 conversation/summarize/code/both";
+        if ("code".equals(mode) || "both".equals(mode))
+            return "code/both 回退需要 checkpoint.messageLevel 文件快照跟踪（§9.2 生产接线随消息级检查点切片）；"
+                    + "当前可用 conversation/summarize";
+        try {
+            com.minion.core.storage.RewindService svc =
+                    new com.minion.core.storage.RewindService(null, Paths.get(s.workDir));
+            com.minion.core.storage.RewindService.Result r = svc.rewind(s, eventId, mode, null);
+            SessionHandle h = handleOf(s);
+            if (h != null) {
+                h.controller.replayHistory(s.messages);
+                persist(h);
+            }
+            StringBuilder sb = new StringBuilder("回退" + (r.ok ? "完成" : "未完成") + "（mode=" + mode + "）\n");
+            for (String n : r.notes) sb.append("  ").append(n).append('\n');
+            return sb.toString();
+        } catch (Exception e) {
+            return "回退失败: " + e.getMessage();
+        }
+    }
+
+    private SessionHandle handleOf(Session s) {
+        for (WorkspaceCtx ctx : ctxByName.values())
+            for (SessionHandle h : ctx.sessions)
+                if (h.session == s) return h;
+        return null;
+    }
+
+    public String statsText() {
+        int sessionCount = 0, messageCount = 0;
+        long inputTokens = 0, outputTokens = 0;
+        List<SessionHandle> all = sessions(currentWorkspaceName, true);
+        StringBuilder per = new StringBuilder();
+        for (SessionHandle h : all) {
+            Session s = h.session;
+            if (s == null) continue;   // 未打开的历史会话无内存运行时
+            sessionCount++;
+            messageCount += s.messages == null ? 0 : s.messages.size();
+            inputTokens += s.usage.sessionInput();
+            outputTokens += s.usage.sessionOutput();
+            if (per.length() < 2000)
+                per.append("\n  ").append(s.title == null ? s.id : s.title)
+                        .append("：").append(s.messages == null ? 0 : s.messages.size())
+                        .append(" 条消息，").append(s.usage.sessionInput()).append(" in/")
+                        .append(s.usage.sessionOutput()).append(" out");
+        }
+        StringBuilder out = new StringBuilder("本地使用统计（当前工作空间，")
+                .append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm")
+                        .format(new java.util.Date())).append("）\n")
+                .append("会话数: ").append(sessionCount)
+                .append("（已装载；未打开的历史会话不计数）\n")
+                .append("消息数: ").append(messageCount).append("\n")
+                .append("token 累计: 输入 ").append(inputTokens).append(" / 输出 ").append(outputTokens)
+                .append("（含估算口径；详情见 /tokens）")
+                .append(per.length() == 0 ? "" : "\n各会话:" + per);
+        try {
+            Path statsFile = jarDir.resolve(".minion").resolve("stats.json");
+            Files.createDirectories(statsFile.getParent());
+            com.google.gson.JsonObject snap = new com.google.gson.JsonObject();
+            snap.addProperty("generatedAt", System.currentTimeMillis());
+            snap.addProperty("sessions", sessionCount);
+            snap.addProperty("messages", messageCount);
+            snap.addProperty("inputTokens", inputTokens);
+            snap.addProperty("outputTokens", outputTokens);
+            Files.write(statsFile, snap.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception persistFailure) {
+            com.minion.core.diagnostics.DiagnosticLog.warn("stats", "stats.json 写入失败: " + persistFailure.getMessage());
+        }
+        return out.toString();
     }
 
     /**
@@ -1440,6 +1546,18 @@ public class SessionManager {
                         h.session.title = h.title;
                         persist(h);
                         notifyTitleChanged(h);
+                        // §6.3 LLM 标题升级：SideQuery 异步（≤8 字；失败静默保留本地标题，不阻塞首轮）
+                        final String titleSource = text;
+                        h.pool.submit(() -> {
+                            try {
+                                String upgraded = TitleGenerator.llmTitle(h.llm, titleSource);
+                                if (upgraded == null || h.deleted || h.titlePending) return;
+                                h.title = upgraded;
+                                h.session.title = upgraded;
+                                persist(h);
+                                notifyTitleChanged(h);
+                            } catch (Exception ignored) { /* 标题升级失败保留本地截取 */ }
+                        });
                     }
                     h.running = true;
                     notifyRunningChanged(h, true);
