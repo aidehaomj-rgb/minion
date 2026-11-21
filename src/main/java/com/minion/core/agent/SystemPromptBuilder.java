@@ -90,7 +90,13 @@ public class SystemPromptBuilder {
         return buildStable(policy) + buildDynamic(allSkills);
     }
 
+    /** 独立系统提示词构建 */
     public String buildStable() { return buildStable(ToolSchedulingPolicy.conservative()); }
+
+    /** replica 布局追加段开关（instructions.enabled=true 时追加 D.2 四段） */
+    private volatile boolean replicaLayout;
+
+    public SystemPromptBuilder setReplicaLayout(boolean enabled) { this.replicaLayout = enabled; return this; }
 
     /** Independent of task state, cwd, project.md contents, skill list and discovery order. */
     public String buildStable(ToolSchedulingPolicy policy) {
@@ -100,6 +106,7 @@ public class SystemPromptBuilder {
             sb.append("\n12.工具执行成功但无输出时，返回结果将为「输出内容为空」（如 mvn -q 输出重定向、读取空文件）：")
               .append("表示命令成功、无输出内容，请按成功结果处理，不要视为失败或重复调用同一工具。\n");
         }
+        if (replicaLayout) sb.append('\n').append(ReplicaPromptTemplate.replicaSections());
         return sb.toString();
     }
 

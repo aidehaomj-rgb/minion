@@ -447,7 +447,8 @@ public class SessionManager {
         if (restored150k) controller.onWarning("已清除旧版会话学习到的低安全窗口，并将误填的 150K 手动安全上限改为自动；本会话会按 150K 稳定工作区重新尝试。若服务端明确报上下文超限，仍会自动收紧。");
         AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s),
                 new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
-                        tmpDirOf(h.id).toString(), config.emptyOutputPlaceholder(), projSkills),
+                        tmpDirOf(h.id).toString(), config.emptyOutputPlaceholder(), projSkills)
+                        .setReplicaLayout(config.instructionsEnabled()),   // D.2 四段（replica-offline）
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
         loop.configureTaskBudget(config.taskContinuationWindows(), 0 /* no cumulative token cap, including restored tasks */);
@@ -764,7 +765,8 @@ public class SessionManager {
         SessionController controller = new SessionController();
         AgentLoop loop = new AgentLoop(llm, newRegistry(ctx, s),
                 new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
-                        tmpDirOf(s.id).toString(), config.emptyOutputPlaceholder(), projSkills),
+                        tmpDirOf(s.id).toString(), config.emptyOutputPlaceholder(), projSkills)
+                        .setReplicaLayout(config.instructionsEnabled()),
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
         loop.setAllSkills(sk.skills);   // 会话级快照：本会话独享、不可变
@@ -1111,7 +1113,8 @@ public class SessionManager {
             // §5.6 工具结果预算（默认 false；请求副本折叠旧超限结果，会话原文不动）
             cmFormula.setToolResultBudget(config.toolResultsBudgetEnabled(), config.toolResultsBudgetChars());
         }
-        // §6.1 MINION.md 自动发现（默认关；projectMd 原行为不变）
+        // §6.1 MINION.md 自动发现（默认关；projectMd 原行为不变）+ 附录 D.2 replica 布局
+        // （setReplicaLayout 在 SystemPromptBuilder 构造处接线，见 AgentLoop 构造调用）
         if (config.instructionsEnabled())
             loop.setInstructionLoader(new com.minion.core.context.InstructionLoader(
                     Paths.get(loop.workspace().workDir()), jarDir, true));
