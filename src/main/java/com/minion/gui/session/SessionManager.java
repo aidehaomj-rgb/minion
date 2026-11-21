@@ -2273,9 +2273,76 @@ public class SessionManager {
         return ctx == null ? null : ctx.workspace.workDir();
     }
 
+    /** §10.10 转录：全量消息含完整工具输入输出（与消息/事件层同源——session.messages） */
+    private String transcriptOf(SessionHandle h) {
+        StringBuilder sb = new StringBuilder("转录（全量消息；q/Esc 关闭窗口退出）");
+        synchronized (h.session.messages) {
+            for (com.minion.core.llm.Message m : h.session.messages) {
+                sb.append("\n[").append(m.role).append(']');
+                if (m.content != null && !m.content.isEmpty()) sb.append(' ').append(m.content);
+                if (m.toolCalls != null && !m.toolCalls.isEmpty())
+                    for (com.minion.core.llm.ToolCall c : m.toolCalls)
+                        sb.append("\n  → ").append(c.name).append('(').append(c.arguments).append(')');
+            }
+        }
+        return sb.length() > 60000 ? sb.substring(0, 60000) + "\n…（已截断，完整见会话 JSONL）" : sb.toString();
+    }
+
+    /** §10.1 Alt+T：会话思考开关（model.thinking 翻转；下一轮请求生效） */
+    public void toggleThinking() {
+        boolean next = !Boolean.parseBoolean(config.get("model.thinking", "true"));
+        config.set("model.thinking", String.valueOf(next));
+        SessionHandle h = currentSession;
+        if (h != null && h.controller != null)
+            h.controller.onSystem("思考模式已" + (next ? "开启" : "关闭") + "（下一轮请求生效）");
+    }
+
+    /** §10.1 Shift+Tab：权限模式循环 read-only → workspace-write → full（会话内即时生效） */
+    public String cyclePermissionMode() {
+        String current = config.permissionMode();
+        String next = "read-only".equals(current) ? "workspace-write"
+                : "workspace-write".equals(current) ? "full" : "read-only";
+        config.set("permission.mode", next);
+        return current + " → " + next;
+    }
+
+    /** §10.1 Vim 模式（/vim 开关，默认关） */
+    private volatile boolean vimEnabled;
+    private volatile com.minion.core.ui.vim.VimMachine vim;
+    public boolean vimEnabled() { return vimEnabled; }
+    public com.minion.core.ui.vim.VimMachine vim() { return vim; }
+
+    /** §10.1 快捷键注册表（默认表 + {jarDir}/.minion/keybindings.json 覆盖） */
+    private volatile com.minion.core.ui.keybindings.KeyBindingRegistry keyBindings;
+    public com.minion.core.ui.keybindings.KeyBindingRegistry keyBindings() {
+        com.minion.core.ui.keybindings.KeyBindingRegistry k = keyBindings;
+        if (k == null) {
+            synchronized (this) {
+                if (keyBindings == null)
+                    keyBindings = new com.minion.core.ui.keybindings.KeyBindingRegistry()
+                            .loadOverrides(jarDir.resolve(".minion").resolve("keybindings.json"));
+                k = keyBindings;
+            }
+        }
+        return k;
+    }
+
     /** 斜杠命令本地分发：命中 → 聊天区回显命令 + 系统行结果（不入 LLM 历史）；未命中 → 按普通消息发送 */
     public void dispatchCommand(SessionHandle h, String text) {
         if (!ensureLoaded(h)) return;
+        // §10.1 前缀模式：! = Bash 直执（不经过模型；输出经 taskControl 入上下文）；
+        // & = 后台执行（立即返回任务 id，输出见 /tasks 任务面板）
+        String trimmedPrefix = text == null ? "" : text.trim();
+        if (trimmedPrefix.length() > 1 && trimmedPrefix.startsWith("!")) {
+            h.controller.onUserMessage(text);
+            h.controller.onSystem(bashDirect(h, trimmedPrefix.substring(1)));
+            return;
+        }
+        if (trimmedPrefix.length() > 1 && trimmedPrefix.startsWith("&")) {
+            h.controller.onUserMessage(text);
+            h.controller.onSystem(backgroundDirect(h, trimmedPrefix.substring(1)));
+            return;
+        }
         String sessionResult = dispatchSessionCommand(h, text);
         if (sessionResult != null) {
             h.controller.onUserMessage(text);
@@ -2288,10 +2355,56 @@ public class SessionManager {
         h.controller.onSystem(result);
     }
 
+    /** §10.1 ! 前缀：Bash 直执（过 ConfirmGate 权限门；结果入上下文，不入模型往返） */
+    private String bashDirect(SessionHandle h, String command) {
+        try {
+            WorkspaceCtx ctx = ctxByName.get(h.workspaceName);
+            if (ctx == null) return "无工作空间上下文";
+            com.minion.core.tools.BashTool bash =
+                    new com.minion.core.tools.BashTool(ctx.workspace, null, config);
+            com.google.gson.JsonObject args = new com.google.gson.JsonObject();
+            args.addProperty("command", command);
+            if (!ctx.confirmGate.check(bash, args)) return "已拒绝（权限确认未通过）";
+            com.minion.core.tools.ToolResult r = bash.execute(args);
+            String output = (r.output == null ? "" : r.output);
+            String summary = "[! 直接执行] " + command + "\n" + (output.isEmpty() ? "（无输出）" : output);
+            h.session.messages.add(com.minion.core.llm.Message.taskControl(summary));
+            persist(h);
+            return output.isEmpty() ? "（无输出，exit " + (r.ok ? 0 : "非零") + "）" : output;
+        } catch (Exception e) {
+            return "执行失败: " + e.getMessage();
+        }
+    }
+
+    /** §10.1 & 前缀：后台执行（ProcessTool 唯一真源；实时输出与停止见 /tasks） */
+    private String backgroundDirect(SessionHandle h, String command) {
+        try {
+            com.minion.core.tools.dev.ProcessTool process = processBySession.get(h.id);
+            if (process == null) return "会话后台任务机制未初始化";
+            com.google.gson.JsonObject args = new com.google.gson.JsonObject();
+            args.addProperty("action", "start");
+            args.addProperty("command", command);
+            com.minion.core.tools.ToolResult r = process.execute(args);
+            return r.ok ? "已转后台: " + (r.output == null ? command : r.output)
+                    : "后台启动失败: " + r.output;
+        } catch (Exception e) {
+            return "后台启动失败: " + e.getMessage();
+        }
+    }
+
     /** 会话目录需要访问 manager/store，因此在通用 CommandDispatcher 之前本地处理。 */
     private String dispatchSessionCommand(SessionHandle h, String input) {
         if (input == null) return null;
         String trimmed = input.trim();
+        if("/vim".equalsIgnoreCase(trimmed)) {   // §10.1 Vim 模式开关（默认关；不干扰普通输入）
+            vimEnabled = !vimEnabled;
+            vim = vimEnabled ? com.minion.core.ui.vim.VimMachine.create() : null;
+            return "Vim 模式已" + (vimEnabled ? "开启（NORMAL；i 插入、Esc 返回；键位见 core/ui/vim）" : "关闭");
+        }
+        if("/keybindings".equalsIgnoreCase(trimmed) || "/键位".equalsIgnoreCase(trimmed))
+            return keyBindings().describe();   // §10.1 快捷键注册表（keybindings.json 可覆盖）
+        if("/verbose".equalsIgnoreCase(trimmed) || "/转录".equalsIgnoreCase(trimmed))
+            return transcriptOf(h);           // §10.10 转录模式：全量消息含完整工具输入输出
         if("/budget".equalsIgnoreCase(trimmed)) return h.loop.contextBudget();
         if("/agents".equalsIgnoreCase(trimmed)) return h.session.taskState.render(null);
         if(trimmed.toLowerCase(java.util.Locale.ROOT).startsWith("/agent ")) {

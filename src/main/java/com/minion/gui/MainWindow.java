@@ -485,20 +485,32 @@ public class MainWindow {
         scene.getStylesheets().addAll(Theme.STYLESHEET, Theme.WORKBENCH);
         stage.setScene(scene);
 
-        // §10.6/§10.7 Ctrl+T=任务面板（§10.6 任务/后台页含 Todo/TaskV2/后台统一快照）；
-        // Ctrl+B=后台任务面板（同一面板聚焦任务/后台页）。输入框聚焦时不吞 T/B 本键，
-        // 只在 Ctrl 组合时打开（切片 34 键位注册表落地后统一迁移）
+        // §10.1 快捷键注册表驱动（keybindings.json 可覆盖；切片 34）：
+        // Ctrl+T/B 任务与后台面板、Ctrl+O 转录、Alt+T 思考开关、Shift+Tab 权限模式循环、
+        // Alt+P 模型选择（提示经 /model）、Ctrl+R 历史搜索（提示经 /resume）；Esc 序列独立处理
         scene.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, e -> {
-            if (e.isControlDown() && !e.isAltDown() && !e.isShiftDown()) {
-                if (e.getCode() == javafx.scene.input.KeyCode.T
-                        || e.getCode() == javafx.scene.input.KeyCode.B) {
-                    e.consume();
-                    SessionHandle h = manager.currentSession();
-                    if (h != null) new TaskDashboard(stage, manager, h).show();
+            String action = manager.keyBindings().match(e.isControlDown(), e.isAltDown(),
+                    e.isShiftDown(), e.getCode().getName().toLowerCase());
+            if (action != null) {
+                SessionHandle h = manager.currentSession();
+                if (h == null) return;
+                e.consume();
+                if ("task_panel".equals(action) || "background_panel".equals(action)) {
+                    new TaskDashboard(stage, manager, h).show();
+                } else if ("transcript_toggle".equals(action)) {
+                    manager.dispatchCommand(h, "/verbose");
+                } else if ("thinking_toggle".equals(action)) {
+                    manager.toggleThinking();
+                } else if ("permission_mode_cycle".equals(action)) {
+                    h.controller.onSystem("权限模式循环: " + manager.cyclePermissionMode());
+                } else if ("model_select".equals(action)) {
+                    manager.dispatchCommand(h, "/model");
+                } else if ("history_search".equals(action)) {
+                    manager.dispatchCommand(h, "/resume");
                 }
                 return;
             }
-            // §9.3 双击 Esc（400ms 内两次）= Rewind 选择器；输入框有文本时不触发
+            // §9.3 双击 Esc（400ms 内两次）= Rewind 选择器
             if (e.getCode() == javafx.scene.input.KeyCode.ESCAPE) {
                 long now = System.currentTimeMillis();
                 if (now - lastEscAt < 400) {
