@@ -44,6 +44,14 @@ public class MinionCliTest {
         assertEquals("test", args.prompt);
     }
 
+    /** §13.1 --settings：可重复收集（CLI 层分层链输入） */
+    @Test public void settingsFilesRepeatable() {
+        MinionCli.Args args = MinionCli.parse(new String[]{
+                "-p", "--settings", "a.json", "--settings", "b.json", "提示"});
+        assertEquals(Arrays.asList("a.json", "b.json"), args.settingsFiles);
+        assertEquals("提示", args.prompt);
+    }
+
     @Test public void resumeAndBare() {
         MinionCli.Args args = MinionCli.parse(new String[]{"-c", "--bare", "继续"});
         assertTrue(args.resume);

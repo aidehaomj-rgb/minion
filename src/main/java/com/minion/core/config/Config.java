@@ -21,8 +21,14 @@ public class Config {
     /** classpath 默认值快照（不含外部文件覆盖）：FeatureFlags 来源追溯用（§13.1） */
     private final Map<String, String> resourceDefaults = new HashMap<String, String>();
     private final Path externalFile;
+    /** §13.1 settings.json 分层链（可空=未装配，V68 原行为）；值优先于 config.properties */
+    private volatile SettingsChain settingsChain;
 
     private Config(Path externalFile) { this.externalFile = externalFile; }
+
+    /** §13.1 附加分层链（SessionManager/HeadlessRunner 按 workspace 装配；null=卸下） */
+    public void attachSettingsChain(SettingsChain chain) { this.settingsChain = chain; }
+    public SettingsChain settingsChain() { return settingsChain; }
 
     public static Config load() { return load(jarDir()); }
 
@@ -90,6 +96,13 @@ public class Config {
     }
 
     public String get(String key, String def) {
+        // §13.1 分层链（企业→用户→项目→本地→CLI→env）优先于 config.properties；
+        // 链未装配/未命中时完全保持 V68（classpath 默认 + config.properties 覆盖）
+        SettingsChain chain = settingsChain;
+        if (chain != null) {
+            String layered = chain.resolve(key);
+            if (layered != null && !layered.isEmpty()) return layered;
+        }
         String v = props.get(key);
         return v == null || v.isEmpty() ? def : v;
     }
@@ -156,6 +169,14 @@ public class Config {
      * （确认后记录 known_hosts），指纹变化按中间人拒绝。false 回退旧 StrictHostKeyChecking=no。
      */
     public boolean sshStrictHostKey() { return Boolean.parseBoolean(get("ssh.strictHostKey", "true")); }
+
+    /**
+     * v2.4 §10.9 可执行配置持续信任（默认 true，第 7 个 0.3 明示安全修复例外，2026-11-22 裁决）：
+     * 项目 Hook/MCP stdio/LSP/statusLine/Skill 内联 shell 等启动命令按指纹持久批准，
+     * 内容变化（git pull/外部编辑/升级）即失效待重新批准，未批准不启动子进程。
+     * false 仅应急排障（回退无持续复核的旧行为）。
+     */
+    public boolean trustStoreEnabled() { return Boolean.parseBoolean(get("trust.store.v2", "true")); }
 
     /**
      * v2.4 §4.7 CC 语义 Hook 系统（hooks.enabled 默认 false=legacy 不启用；replica-offline 开启）。

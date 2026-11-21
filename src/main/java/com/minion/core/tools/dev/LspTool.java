@@ -52,6 +52,8 @@ public final class LspTool implements Tool {
             new java.util.concurrent.ConcurrentHashMap<String, LanguageSession>();
     private final String workDir;
     private final java.util.Map<String, String> serverCommands;   // 语言 → 启动命令
+    /** §10.9 持续信任闸门（可空=不复核：单测/旧装配）；server 命令变化须重新批准才启动子进程 */
+    private final com.minion.core.security.TrustGate trustGate;
     /** 最近的 publishDiagnostics（per filePath）——被动通道 */
     private final java.util.Map<String, JsonArray> cachedDiagnostics =
             new java.util.concurrent.ConcurrentHashMap<String, JsonArray>();
@@ -60,9 +62,15 @@ public final class LspTool implements Tool {
     private static final int REQUEST_TIMEOUT_MS = 10000;
 
     public LspTool(String workDir, java.util.Map<String, String> serverCommands) {
+        this(workDir, serverCommands, null);
+    }
+
+    public LspTool(String workDir, java.util.Map<String, String> serverCommands,
+            com.minion.core.security.TrustGate trustGate) {
         this.workDir = workDir;
         this.serverCommands = serverCommands == null
                 ? java.util.Collections.<String, String>emptyMap() : serverCommands;
+        this.trustGate = trustGate;
     }
 
     @Override public String name() { return "LSP"; }
@@ -176,13 +184,32 @@ public final class LspTool implements Tool {
         return r;
     }
 
-    /** 会话获取/初始化（initialize + initialized 通知 + didOpen） */
+    /** §10.9 server 命令启动前持续信任复核：未批准/指纹变化 → 拒绝（不启动子进程） */
+    private void trustCheck(String language, String serverCommand, List<String> cmdParts) {
+        com.minion.core.security.TrustGate gate = trustGate;
+        if (gate == null) return;
+        java.nio.file.Path root = java.nio.file.Paths.get(workDir);
+        com.minion.core.security.TrustedExecutable spec = com.minion.core.security.TrustedExecutable.of(
+                com.minion.core.security.TrustedExecutable.TYPE_LSP, language, "user",
+                cmdParts.isEmpty() ? serverCommand : cmdParts.get(0),
+                cmdParts.isEmpty() ? java.util.Collections.<String>emptyList()
+                        : cmdParts.subList(1, cmdParts.size()),
+                java.util.Collections.<String, String>emptyMap(), workDir,
+                com.minion.core.security.TrustedExecutable.referencedScripts(serverCommand, root));
+        if (!gate.ensureTrusted(spec))
+            throw new IllegalStateException("LSP server(" + language + ") 启动命令未通过持续信任复核"
+                    + "（命令/参数已变化或未批准，§10.9），已拒绝启动子进程");
+    }
+
+    /** 会话获取/初始化（initialize + initialized 通知 + didOpen）；§10.9 启动前信任复核
+     *  （复核在 compute 外：拒绝原因直达调用方，不被会话失败兜底吞成「不可用」） */
     private LanguageSession sessionOf(String language, String serverCommand) {
+        List<String> cmd = new ArrayList<String>();
+        for (String part : serverCommand.trim().split("\\s+")) cmd.add(part);
+        trustCheck(language, serverCommand, cmd);
         return sessions.compute(language, (lang, existing) -> {
             if (existing != null && existing.healthy) return existing;
             try {
-                List<String> cmd = new ArrayList<String>();
-                for (String part : serverCommand.trim().split("\\s+")) cmd.add(part);
                 Process p = new ProcessBuilder(cmd)
                         .directory(new java.io.File(workDir))
                         .redirectErrorStream(false)

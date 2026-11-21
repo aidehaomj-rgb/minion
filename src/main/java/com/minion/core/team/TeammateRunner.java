@@ -150,6 +150,12 @@ public final class TeammateRunner {
             com.minion.core.agent.AgentLoop loop = new com.minion.core.agent.AgentLoop(
                     llm, registry, new SystemPromptBuilder(workDir + "/project.md"),
                     gate, new com.minion.core.cli.HeadlessUi(null, session.id), null, workspace, session);
+            // §10.9 持续信任：仅续用已批准 Hook 指纹（无弹窗；新/变化项在 teammate 内保持禁用）
+            if (Boolean.parseBoolean(config.get("trust.store.v2", "true"))) {
+                loop.ccHookSystem().attachTrustStore(
+                        com.minion.core.security.ProjectTrustStore.load(Paths.get(workDir)));
+                loop.ccHookSystem().tryResumeFromTrust();
+            }
             loop.roundLimit = 50;
             loop.runUserTurn("[teammate:" + name + "] 来自 " + from + " 的任务:\n" + prompt);
             boolean ok = loop.lastTurnSucceeded();

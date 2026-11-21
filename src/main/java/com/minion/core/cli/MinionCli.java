@@ -41,6 +41,7 @@ public final class MinionCli {
         public String appendSystemPrompt;          // --append-system-prompt（追加）
         public boolean bare;                       // --bare（极简：跳过 hooks/MINION.md/插件）
         public boolean verbose;                    // --verbose
+        public List<String> settingsFiles = new ArrayList<String>();   // --settings（可重复，§13.1 CLI 层）
         public boolean resume;                     // -c/--continue
         public String resumeId;                    // -r/--resume <id|词>
 
@@ -85,10 +86,13 @@ public final class MinionCli {
                 case "--verbose": args.verbose = true; break;
                 case "-c": case "--continue": args.resume = true; break;
                 case "-r": case "--resume": args.resume = true; args.resumeId = value(argv, ++i, a); break;
+                case "--settings":   // §13.1 CLI 层：可重复，settings.json 文件路径
+                    args.settingsFiles.add(value(argv, ++i, a));
+                    break;
                 case "--json-schema": case "--fallback-model": case "--agent": case "--agents":
                 case "--session-id": case "--fork-session": case "--no-session-persistence":
                 case "--disallowedTools": case "--tools": case "--add-dir": case "--mcp-config":
-                case "--strict-mcp-config": case "--settings": case "--setting-sources":
+                case "--strict-mcp-config": case "--setting-sources":
                 case "--plugin-dir": case "--disable-slash-commands": case "-n": case "--name":
                     ++i;   // 带值参数：跳过值（当前版本不消费）
                     break;

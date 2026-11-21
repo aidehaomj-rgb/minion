@@ -110,10 +110,50 @@ public final class HookSystem {
     private volatile List<Hook> approvedHooks;
     private volatile String approvedHash;
     private final AtomicLong epoch = new AtomicLong();
+    /** §10.9 持续信任：附加后 approve 落盘指纹、tryResumeFromTrust 跨会话续用、执行前逐条复核 */
+    private volatile com.minion.core.security.ProjectTrustStore trustStore;
 
     public HookSystem(Path projectRoot) {
         this.root = projectRoot.toAbsolutePath().normalize();
         this.config = root.resolve(".minion").resolve("cc-hooks.json");
+    }
+
+    /** §10.9 附加持久信任存储（SessionManager/Headless/Teammate 装配；null=旧会话内快照模型） */
+    public void attachTrustStore(com.minion.core.security.ProjectTrustStore store) { this.trustStore = store; }
+    public com.minion.core.security.ProjectTrustStore trustStore() { return trustStore; }
+
+    /** 单 hook 的可执行指纹规格：id=event|matcher|command 压缩（重排不影响），引用脚本纳入内容 */
+    com.minion.core.security.TrustedExecutable specOf(Hook h) {
+        String rawId = h.event + "|" + (h.matcher == null ? "" : h.matcher) + "|" + h.command;
+        return com.minion.core.security.TrustedExecutable.of(
+                com.minion.core.security.TrustedExecutable.TYPE_HOOK,
+                com.minion.core.security.TrustedExecutable.shortId(rawId),
+                "project", h.command,
+                java.util.Collections.<String>emptyList(),
+                java.util.Collections.<String, String>emptyMap(),
+                root.toString(),
+                com.minion.core.security.TrustedExecutable.referencedScripts(h.command, root));
+    }
+
+    /**
+     * §10.9 跨会话恢复：全部条目指纹与持久信任匹配才自动启用（未变化项免再批准）；
+     * 任一变化/缺记录/库损坏 → false（走人工批准，approve 会重写整组指纹）。
+     */
+    public synchronized boolean tryResumeFromTrust() {
+        com.minion.core.security.ProjectTrustStore ts = trustStore;
+        if (ts == null || ts.corrupted()) return false;
+        byte[] bytes;
+        List<Hook> parsed;
+        try {
+            bytes = readConfig();
+            parsed = parse(bytes);
+        } catch (IOException e) {
+            return false;   // 无配置/配置无效：保持禁用
+        }
+        for (Hook h : parsed) if (!ts.isTrusted(specOf(h))) return false;
+        approvedHooks = parsed;
+        approvedHash = sha256(bytes);
+        return true;
     }
 
     public Path configFile() { return config; }
@@ -124,13 +164,21 @@ public final class HookSystem {
         return new String(bytes, StandardCharsets.UTF_8);
     }
 
-    /** 用户确认后启用（UI 路由专用；批准仅本会话内存态，不落项目文件） */
+    /** 用户确认后启用（UI 路由专用）；附加信任库后批准同时整组落盘指纹（§10.9 持续信任，
+     *  已删除条目的旧信任一并清除），下个会话 tryResumeFromTrust 免提示续用 */
     public synchronized void approve(String expectedHash) throws IOException {
         byte[] bytes = readConfig();
         String actual = sha256(bytes);
         if (!actual.equals(expectedHash)) throw new IOException("cc-hooks.json 在预览后已改变，请重新查看并批准");
         approvedHooks = parse(bytes);
         approvedHash = actual;
+        com.minion.core.security.ProjectTrustStore ts = trustStore;
+        if (ts != null) {
+            List<com.minion.core.security.TrustedExecutable> specs =
+                    new ArrayList<com.minion.core.security.TrustedExecutable>();
+            for (Hook h : approvedHooks) specs.add(specOf(h));
+            ts.replaceType(com.minion.core.security.TrustedExecutable.TYPE_HOOK, specs);
+        }
     }
 
     public synchronized void disable() {
@@ -196,6 +244,14 @@ public final class HookSystem {
 
     private Outcome executeOne(Hook h, JsonObject stdin, long myEpoch) {
         if (Thread.currentThread().isInterrupted()) return new Outcome(false, true, "hook 取消", null, null, 1);
+        // §10.9 执行前逐条复核：指纹变化（git pull/外部编辑/引用脚本内容变化）→ 不执行新内容，
+        // 该条跳过（视为不存在），其余未变化 hook 照常；零子进程保证——检查在 ProcessBuilder 之前
+        com.minion.core.security.ProjectTrustStore ts = trustStore;
+        if (ts != null && !ts.isTrusted(specOf(h))) {
+            DiagnosticLog.warn("hooks", "hook 指纹变化未重新批准，跳过执行: " + clip(h.command, 120));
+            return new Outcome(false, false, null,
+                    "Hook 配置已变化，未重新批准前不执行（" + clip(h.command, 80) + "）", null, 0);
+        }
         // SessionEnd 未显式配 timeout 时默认 1.5s（会话收尾不得被慢 hook 拖住）
         long timeout = SESSION_END.equals(h.event) && !h.explicitTimeout
                 ? Math.min(SESSION_END_TIMEOUT_MS, h.timeoutMs) : h.timeoutMs;

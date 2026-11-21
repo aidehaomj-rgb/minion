@@ -41,7 +41,22 @@ public class Main {
         List<Skill> skills = skillManager.scanWithBuiltins();
 
         // MCP 服务器管理（mcp.json；惰性连接，退出钩子关停子进程）
+        // §10.9：stdio 启动命令经持续信任闸门（jarDir 根——用户作用域配置随配置本身保存信任）
         McpManager mcpManager = new McpManager(McpStore.load(jarDir));
+        final ConfirmUi mcpConfirmUi = new GuiConfirmUi();
+        mcpManager.setTrustGate(new com.minion.core.security.TrustGate(
+                com.minion.core.security.ProjectTrustStore.load(jarDir),
+                config.trustStoreEnabled(),
+                new com.minion.core.security.TrustGate.Prompt() {
+                    @Override public boolean askApproval(
+                            com.minion.core.security.TrustedExecutable spec,
+                            String reason, String summary) {
+                        return mcpConfirmUi.ask("MCP 服务器持续信任确认（§10.9）\n服务器: " + spec.id
+                                + "\n命令: " + summary + "\n原因: " + reason
+                                + "\n\n批准后此指纹持久生效，命令/参数/env 再变化须重新批准。是否批准启动？")
+                                == ConfirmUi.Decision.APPROVE;
+                    }
+                }));
 
         // 可插拔工具（tools.json）：浏览器懒启动 Chrome、数据库每次调用新建连接；
         // 四项默认不启用，启用状态由设置页「工具」页实时改，全局会话下一轮请求生效

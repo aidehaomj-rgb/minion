@@ -132,6 +132,9 @@ public class SessionManager {
     private final SecretStore secretStore;
     /** §13.1 FeatureFlags：全部行为开关统一读取（/config 视图 + 会话内存覆盖） */
     private final com.minion.core.config.FeatureFlags featureFlags;
+    /** §10.9 每工作空间信任闸门缓存（workspace realpath → ProjectTrustStore+ConfirmUi 弹窗） */
+    private final java.util.Map<String, com.minion.core.security.TrustGate> trustGates =
+            new java.util.concurrent.ConcurrentHashMap<String, com.minion.core.security.TrustGate>();
     private final java.util.Map<SessionHandle,com.minion.core.agent.LocalJobs> localJobs=new java.util.concurrent.ConcurrentHashMap<SessionHandle,com.minion.core.agent.LocalJobs>();
     private final java.util.Map<String,String> localJobErrors=new java.util.concurrent.ConcurrentHashMap<String,String>();
     private final java.util.concurrent.ScheduledExecutorService jobClock=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"minion-local-jobs");t.setDaemon(true);return t;});
@@ -155,6 +158,8 @@ public class SessionManager {
         final Workspace workspace;
         SessionStore store;
         final ConfirmGate confirmGate;
+        /** §13.1 settings.json 分层链（buildCtx 装配；活动空间时附加到共享 Config） */
+        com.minion.core.config.SettingsChain settingsChain;
         final String skillsDir;
         /** FX 线程增删，MCP/jobClock/导航线程遍历——CopyOnWriteArrayList 防并发修改 */
         final List<SessionHandle> sessions = new java.util.concurrent.CopyOnWriteArrayList<SessionHandle>();
@@ -524,9 +529,42 @@ public class SessionManager {
                 new SessionStore(WorkspaceManager.sessionDirFor(jarDir, w.workSpaceName),
                         config.transcriptJsonl() ? jarDir.resolve(".minion").resolve("transcripts").resolve(w.workSpaceName) : null),
                 gate, skillsDir);
+        // §13.1 settings.json 分层链（企业→用户→项目→本地→env）附加到共享 Config：
+        // GUI 单活动会话模型——链按当前活动工作空间装配（多空间后台任务读通用键时以活动空间为准，
+        // 已知且有界；权限规则不受此影响：RuleStore 经 ConfirmGate 逐空间装配）
+        ctx.settingsChain = com.minion.core.config.SettingsChain.load(
+                jarDir, java.nio.file.Paths.get(w.workDir), null);
         try { ctx.order.addAll(ctx.store.loadOrder()); }
         catch (IOException e) { notifyError("读取会话顺序失败: " + e.getMessage()); }
         return ctx;
+    }
+
+    /**
+     * §10.9 工作空间信任闸门（按 workDir 缓存；workspace realpath 为信任库根）：
+     * 未信任/指纹变化经 {@link ConfirmUi} 弹窗批准，批准落盘后续用；关闭（应急）时返回 null。
+     */
+    private com.minion.core.security.TrustGate trustGateOf(WorkspaceCtx ctx) {
+        if (!config.trustStoreEnabled()) return null;
+        String key = ctx.workspace.workDir();
+        com.minion.core.security.TrustGate gate = trustGates.get(key);
+        if (gate == null) {
+            final com.minion.core.security.ProjectTrustStore store =
+                    com.minion.core.security.ProjectTrustStore.load(java.nio.file.Paths.get(key));
+            gate = new com.minion.core.security.TrustGate(store, true,
+                    new com.minion.core.security.TrustGate.Prompt() {
+                        @Override public boolean askApproval(
+                                com.minion.core.security.TrustedExecutable spec,
+                                String reason, String summary) {
+                            return confirmUi.ask("可执行配置持续信任确认（§10.9）\n类型: " + spec.type
+                                    + "  作用域: " + spec.scope + "\n命令: " + summary
+                                    + "\n原因: " + reason
+                                    + "\n\n批准后此指纹持久生效，内容再变化须重新批准。是否批准执行？")
+                                    == ConfirmUi.Decision.APPROVE;
+                        }
+                    });
+            trustGates.put(key, gate);
+        }
+        return gate;
     }
 
     /** 会话临时目录：jarDir/.session/tmp/<sessionId>（工具落盘与模型临时文件统一位置） */
@@ -626,10 +664,10 @@ public class SessionManager {
             }
             registry.register(new com.minion.core.tools.ConfigViewTool(featureFlags));
             registry.register(new com.minion.core.tools.StructuredOutputTool());
-            // §3.1 LSP（lsp.enabled 默认 false；server 表空时工具 isEnabled=false）
+            // §3.1 LSP（lsp.enabled 默认 false；server 表空时工具 isEnabled=false）+ §10.9 启动前信任复核
             if (config.lspEnabled() && !config.lspServers().isEmpty())
                 registry.register(new com.minion.core.tools.dev.LspTool(
-                        workspace.workDir(), config.lspServers()));
+                        workspace.workDir(), config.lspServers(), trustGateOf(ctx)));
             // §5.4 ToolSearch 工具（toolsearch.enabled 默认 false）；§3.2 Monitor（tools.monitor.enabled 默认 false）
             if (config.toolSearchEnabled())
                 registry.register(new com.minion.core.tools.ToolSearchTool(registry));
@@ -953,7 +991,70 @@ public class SessionManager {
             }
         });
         check(out, "堆上限", () -> String.format("%.1f GB", Runtime.getRuntime().maxMemory() / 1e9));
+        // §13.1（切片 26b）：settings 分层 / env 显式映射未知键 / rg 哈希 / API 端点连通
+        check(out, "settings 分层", () -> {
+            com.minion.core.config.SettingsChain chain = config.settingsChain();
+            return chain == null ? "未装配（无活动工作空间；仅 config.properties）" : chain.describe();
+        });
+        check(out, "env 映射", () -> {
+            java.util.List<String> unknown = com.minion.core.config.EnvMapping.unknownMinionEnv();
+            return unknown.isEmpty() ? "无未知 MINION_* 变量"
+                    : "[警告] 未登记映射: " + unknown;
+        });
+        check(out, "rg.exe 指纹", () -> {
+            try {
+                java.nio.file.Path rg = jarDir.resolve("ripgrep").resolve("rg.exe");
+                if (!java.nio.file.Files.isRegularFile(rg)) return "未随包（Grep 回退 Java 实现）";
+                String arch = rgMachineType(rg);
+                String hash = com.minion.core.security.TrustedExecutable.sha256Hex(
+                        java.nio.file.Files.readAllBytes(rg));
+                return arch + "  SHA-256 " + hash.substring(0, 16) + "…";
+            } catch (java.io.IOException e) {
+                return "[失败] " + e.getMessage();
+            }
+        });
+        check(out, "API 端点", () -> {
+            try {
+                String url = config.get("model.url", "");
+                if (url.isEmpty()) return "未配置 model.url";
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
+                        new java.net.URL(url).openConnection();
+                conn.setConnectTimeout(3000);
+                conn.setReadTimeout(3000);
+                try {
+                    int code = conn.getResponseCode();
+                    return url + "  → HTTP " + code;
+                } finally {
+                    conn.disconnect();
+                }
+            } catch (java.io.IOException e) {
+                return "[失败] " + e.getMessage();
+            }
+        });
         return out.toString();
+    }
+
+    /** PE 头 Machine 类型（rg.exe 架构判定：0x8664=x64，0x14c=x86） */
+    private static String rgMachineType(java.nio.file.Path exe) throws java.io.IOException {
+        byte[] head = new byte[64];
+        java.io.InputStream in = java.nio.file.Files.newInputStream(exe);
+        try { if (in.read(head) != 64) return "未知架构"; } finally { in.close(); }
+        int peOffset = ((head[0x3c] & 255) | ((head[0x3d] & 255) << 8)) & 0xffff;
+        byte[] sig = new byte[6];
+        in = java.nio.file.Files.newInputStream(exe);
+        try {
+            long skipped = 0;
+            while (skipped < peOffset) {   // InputStream.skip 可能少跳，循环补足
+                long n = in.skip(peOffset - skipped);
+                if (n <= 0) break;
+                skipped += n;
+            }
+            if (skipped < peOffset || in.read(sig) != 6) return "未知架构";
+        } finally { in.close(); }
+        int machine = (sig[4] & 255) | ((sig[5] & 255) << 8);
+        if (machine == 0x8664) return "x64";
+        if (machine == 0x14c) return "x86 [警告] 目标环境需 x64";
+        return String.format("machine=0x%04x", machine);
     }
 
     private static void check(StringBuilder out, String name, java.util.function.Supplier<String> probe) {
@@ -1090,6 +1191,16 @@ public class SessionManager {
     }
 
     private void configureAgentRuntime(AgentLoop loop,WorkspaceCtx ctx,Session parent) {
+        // §13.1 分层链随活动空间装配（configureAgentRuntime 在会话创建/恢复时执行）
+        config.attachSettingsChain(ctx.settingsChain);
+        // §10.9 持续信任：Hook 附加 workspace 持久信任库并尝试跨会话恢复（全部指纹匹配才免提示启用）
+        com.minion.core.security.TrustGate gate = trustGateOf(ctx);
+        loop.ccHookSystem().attachTrustStore(gate == null ? null : gate.store());
+        if (gate != null) {
+            try { loop.ccHookSystem().tryResumeFromTrust(); }
+            catch (Exception e) { com.minion.core.diagnostics.DiagnosticLog.warn("trust",
+                    "Hook 信任恢复失败（保持禁用）: " + e.getMessage()); }
+        }
         // §1.2 retry.profile（legacy 默认；cc 复刻参数）+ §1.3 模型降级链（默认空=完全保持现状）
         loop.retryPolicy = com.minion.core.agent.RetryPolicy.fromProfile(config);
         loop.setModelFallback(config.get("model.fallbackChain", ""),

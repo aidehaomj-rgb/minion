@@ -61,6 +61,7 @@ public final class FeatureFlags {
             {"hooks.enabled", "false", "4.7", "下一轮", false},
             {"hooks.timeoutBehavior", "ask", "4.7", "下一轮", false},
             {"ssh.strictHostKey", "true", "4.8", "下一轮", true},
+            {"trust.store.v2", "true", "10.9", "重启", true},
             {"microcompact.enabled", "false", "5.1", "下一轮", false},
             {"autocompact.formula", "false", "5.2", "新会话", false},
             {"compact.restore.enabled", "true", "5.3", "新会话", false},
@@ -114,9 +115,15 @@ public final class FeatureFlags {
 
     public boolean enabled(String key) { return Boolean.parseBoolean(value(key)); }
 
-    /** 来源追溯：会话内存覆盖 / config.properties（显式覆盖默认）/ 默认值（legacy） */
+    /** 来源追溯：会话内存覆盖 / settings 分层链（§13.1）/ config.properties（显式覆盖默认）/ 默认值（legacy） */
     public String source(String key) {
         if (overrides.containsKey(key)) return "会话内存覆盖";
+        // §13.1 分层链命中 → 报告层名（企业策略/用户/项目/本地/CLI/环境变量）
+        com.minion.core.config.SettingsChain chain = config.settingsChain();
+        if (chain != null) {
+            String layer = chain.sourceOf(key);
+            if (layer != null) return "settings:" + layer;
+        }
         Flag f = CATALOG.get(key);
         String def = f != null ? f.legacyDefault : null;
         String fromDefault = config.defaultOf(key);

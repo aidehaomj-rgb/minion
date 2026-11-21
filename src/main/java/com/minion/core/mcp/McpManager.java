@@ -19,6 +19,8 @@ public class McpManager {
     }
 
     private final McpStore store;
+    /** §10.9 持续信任闸门（可空=不复核：单测/旧装配；stdio 启动子进程前必须通过） */
+    private volatile com.minion.core.security.TrustGate trustGate;
     /** 连接线程触发通知、FX 线程增删；COW 迭代器天然支持回调中 removeListener 自注销 */
     private final List<Listener> listeners = new java.util.concurrent.CopyOnWriteArrayList<Listener>();
     /** name → 已建立的客户端（连接成功后放入，disconnect/shutdown 移除） */
@@ -27,6 +29,9 @@ public class McpManager {
     public McpManager(McpStore store) {
         this.store = store;
     }
+
+    /** §10.9 装配信任闸门（Main/SessionManager；stdio 服务器启动命令/参数/env 指纹持久信任） */
+    public void setTrustGate(com.minion.core.security.TrustGate gate) { this.trustGate = gate; }
 
     public List<McpServer> servers() { return store.list(); }
 
@@ -55,9 +60,10 @@ public class McpManager {
         t.start();
     }
 
-    /** 连接流程（连接线程内执行）：建客户端 → 握手 → 工具清单 → CONNECTED；异常 → FAILED + 原因 */
+    /** 连接流程（连接线程内执行）：信任复核（stdio）→ 建客户端 → 握手 → 工具清单 → CONNECTED；异常 → FAILED + 原因 */
     private void doConnect(McpServer s) {
         try {
+            trustCheck(s);
             McpHandle client = new AjMcpClient(transportOf(s));
             try {
                 client.connect();
@@ -78,6 +84,24 @@ public class McpManager {
             }
         }
         notifyListeners(s);
+    }
+
+    /**
+     * §10.9 stdio 启动前持续信任复核：命令/参数/env（及引用脚本内容）指纹须与持久批准一致；
+     * 变化或未批准 → 抛异常（连接 FAILED，原因可见），不启动子进程。sse/streamable 无本地子进程，不适用。
+     */
+    private void trustCheck(McpServer s) throws McpException {
+        com.minion.core.security.TrustGate gate = trustGate;
+        if (gate == null || !McpServer.STDIO.equals(McpServer.normalizedTransport(s.transport))) return;
+        StringBuilder cmdLike = new StringBuilder(s.command == null ? "" : s.command);
+        for (String a : s.args) cmdLike.append(' ').append(a);
+        java.nio.file.Path confRoot = store.file() == null ? null : store.file().getParent();
+        com.minion.core.security.TrustedExecutable spec = com.minion.core.security.TrustedExecutable.of(
+                com.minion.core.security.TrustedExecutable.TYPE_MCP, s.name, "user",
+                s.command, s.args, s.env, "",
+                com.minion.core.security.TrustedExecutable.referencedScripts(cmdLike.toString(), confRoot));
+        if (!gate.ensureTrusted(spec))
+            throw new McpException("MCP 服务器 " + s.name + " 启动命令未通过持续信任复核（命令/参数/env 已变化或未批准，§10.9），已拒绝启动子进程");
     }
 
     /** 按传输类型构造库传输：stdio 经 McpCommands 组装命令；streamable 带请求头；sse 为旧版端点 */

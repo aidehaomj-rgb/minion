@@ -43,6 +43,9 @@ public class McpStore {
 
     public List<McpServer> list() { return servers; }
 
+    /** mcp.json 路径（信任复核以配置所在目录为引用脚本解析根） */
+    public Path file() { return file; }
+
     public void save() {
         // 原子写：先写 *.tmp 再 move 覆盖，避免半截文件；失败清理 tmp
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");

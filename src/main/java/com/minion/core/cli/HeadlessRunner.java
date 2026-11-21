@@ -31,6 +31,13 @@ public final class HeadlessRunner {
         this.protocol = protocol;
     }
 
+    /** --settings 字符串列表 → Path 列表 */
+    private static java.util.List<Path> toPaths(java.util.List<String> files) {
+        java.util.List<Path> out = new java.util.ArrayList<Path>();
+        for (String f : files) out.add(Paths.get(f));
+        return out;
+    }
+
     /** 执行单次 prompt；返回 exitCode（0=成功） */
     public int run() {
         long start = System.currentTimeMillis();
@@ -38,6 +45,11 @@ public final class HeadlessRunner {
         Path workDir = args.sessionDir != null ? Paths.get(args.sessionDir)
                 : Paths.get(System.getProperty("user.dir"));
         Workspace workspace = new Workspace(workDir.toString());
+        // §13.1 settings.json 分层链（含 --settings CLI 层与 env 显式映射；--bare 跳过项目层自动发现仅指
+        // hooks/MINION.md，settings 分层仍装配——env/CLI 层是显式输入，不属于「自动发现」）
+        if (!args.settingsFiles.isEmpty() || !com.minion.core.config.EnvMapping.resolved().isEmpty())
+            config.attachSettingsChain(com.minion.core.config.SettingsChain.load(jarDir,
+                    args.bare ? null : workDir, toPaths(args.settingsFiles)));
 
         // 模型：--model 覆盖 / config 默认
         String model = args.model != null ? args.model : config.get("model.name", "deepseek-v4-flash");
@@ -80,6 +92,12 @@ public final class HeadlessRunner {
         // InstructionLoader 请求侧注入实现追加语义；替换需 §11.3 系统提示词重构接线）
 
         AgentLoop loop = new AgentLoop(llm, registry, promptBuilder, gate, ui, null, workspace, session);
+        // §10.9 持续信任：附加 workspace 信任库并尝试恢复（仅续用已批准指纹；无弹窗，新/变化项保持禁用）
+        if (config.trustStoreEnabled() && !args.bare) {
+            loop.ccHookSystem().attachTrustStore(
+                    com.minion.core.security.ProjectTrustStore.load(workDir));
+            loop.ccHookSystem().tryResumeFromTrust();
+        }
         if (args.maxTurns > 0) loop.roundLimit = args.maxTurns;
         if (args.bare) {
             // --bare：跳过 hooks/MINION.md/插件（指令发现不启用）
