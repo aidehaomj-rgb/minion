@@ -106,6 +106,14 @@ public class SystemPromptBuilder {
         return this;
     }
 
+    /** D.4 工具使用总则段开关（replica 模式；默认 false=legacy 不变） */
+    private volatile boolean toolUsageSection;
+
+    public SystemPromptBuilder setToolUsageSection(boolean enabled) {
+        this.toolUsageSection = enabled;
+        return this;
+    }
+
     /** Independent of task state, cwd, project.md contents, skill list and discovery order. */
     public String buildStable(ToolSchedulingPolicy policy) {
         StringBuilder sb = new StringBuilder(BUILTIN);
@@ -115,6 +123,7 @@ public class SystemPromptBuilder {
               .append("表示命令成功、无输出内容，请按成功结果处理，不要视为失败或重复调用同一工具。\n");
         }
         if (replicaLayout) sb.append('\n').append(ReplicaPromptTemplate.replicaSections());
+        if (toolUsageSection) sb.append('\n').append(PromptTemplates.toolUsageSection()).append('\n');
         if (outputStyleBody != null) sb.append('\n').append(outputStyleBody).append('\n');
         return sb.toString();
     }

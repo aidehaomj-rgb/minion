@@ -498,7 +498,8 @@ public class SessionManager {
                 new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
                         tmpDirOf(h.id).toString(), config.emptyOutputPlaceholder(), projSkills)
                         .setReplicaLayout(config.instructionsEnabled())   // D.2 四段（replica-offline）
-                        .setOutputStyleBody(outputStyleBody()),           // §10.5 输出样式风格段
+                        .setOutputStyleBody(outputStyleBody())           // §10.5 输出样式风格段
+                        .setToolUsageSection(config.instructionsEnabled()),  // D.4 工具总则（replica）
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
         loop.configureTaskBudget(config.taskContinuationWindows(), 0 /* no cumulative token cap, including restored tasks */);
@@ -764,6 +765,7 @@ public class SessionManager {
             }
             registry.register(new com.minion.core.tools.ConfigViewTool(featureFlags));
             registry.register(new com.minion.core.tools.StructuredOutputTool());
+            registry.register(new com.minion.core.tools.BriefTool());   // §D.9 进展摘要（2026-11-22 裁决保留）
             // §3.1 LSP（lsp.enabled 默认 false；server 表空时工具 isEnabled=false）+ §10.9 启动前信任复核
             if (config.lspEnabled() && !config.lspServers().isEmpty())
                 registry.register(new com.minion.core.tools.dev.LspTool(
@@ -910,7 +912,8 @@ public class SessionManager {
                 new SystemPromptBuilder(mdAbs, ctx.workspace.workDir(),
                         tmpDirOf(s.id).toString(), config.emptyOutputPlaceholder(), projSkills)
                         .setReplicaLayout(config.instructionsEnabled())
-                        .setOutputStyleBody(outputStyleBody()),           // §10.5 输出样式风格段
+                        .setOutputStyleBody(outputStyleBody())           // §10.5 输出样式风格段
+                        .setToolUsageSection(config.instructionsEnabled()),  // D.4 工具总则（replica）
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
         loop.setAllSkills(sk.skills);   // 会话级快照：本会话独享、不可变
