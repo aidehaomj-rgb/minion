@@ -43,6 +43,15 @@ public class CommandDispatcher {
     /** §10.5 主题落盘（config ui.theme；界面随重启/重开完全应用） */
     private java.util.function.Consumer<String> themeSetter = id -> { };
 
+    /** §3.7 MCP prompts 命名空间命令：输入 /server:prompt args → 返回结果文本（null=非 prompt 命令） */
+    private java.util.function.BiFunction<SessionHandle, String, String> mcpPrompt
+            = (h, rest) -> null;
+
+    public CommandDispatcher mcpPrompt(java.util.function.BiFunction<SessionHandle, String, String> handler) {
+        this.mcpPrompt = handler;
+        return this;
+    }
+
     /** /queue add 的优先发送通道（§2.3 now 含中断在途）；未接线时走普通入队 */
     public interface QueuePriority {
         void apply(SessionHandle h, String text, String priority);
@@ -237,6 +246,15 @@ public class CommandDispatcher {
                     return dispatchSkill(h, forwarded);
                 }
             }
+        }
+        // §3.7 二期：MCP prompts 命名空间斜杠命令 /server:prompt [参数]——
+        // server 前缀防命令冲突；展开后的消息作为 prompt 发送（走正常 send 路径）
+        if (cmd.length() > 1 && cmd.indexOf(':') > 1) {
+            String tail = joinTail(parts, 1);
+            String rest = tail.isEmpty() ? cmd.substring(1)
+                    : cmd.substring(1) + " " + tail;
+            String result = mcpPrompt.apply(h, rest);
+            if (result != null) return result;
         }
         return "未知命令 " + parts[0] + "（/help 查看）";
     }

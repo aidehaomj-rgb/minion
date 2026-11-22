@@ -107,6 +107,89 @@ public class AjMcpClient implements McpHandle {
         return sb.toString();
     }
 
+    // ==================== §3.7 二期：resources / prompts（原始 JSON-RPC，不依赖库协议类） ====================
+
+    @Override
+    public List<String> listResources() throws McpException {
+        List<String> out = new ArrayList<String>();
+        JsonObject result = resultOf(rawRequest("resources/list"));
+        for (JsonElement e : arrayOf(result, "resources"))
+            out.add(e.isJsonObject() ? e.getAsJsonObject().toString() : e.toString());
+        return out;
+    }
+
+    @Override
+    public String readResource(String uri) throws McpException {
+        JsonObject params = new JsonObject();
+        params.addProperty("uri", uri);
+        JsonObject result = resultOf(rawRequest("resources/read", params));
+        StringBuilder sb = new StringBuilder();
+        for (JsonElement e : arrayOf(result, "contents")) {
+            JsonObject c = e.isJsonObject() ? e.getAsJsonObject() : new JsonObject();
+            if (sb.length() > 0) sb.append('\n');
+            if (c.has("text") && !c.get("text").isJsonNull()) sb.append(c.get("text").getAsString());
+            else sb.append(c.toString());
+        }
+        return sb.toString();
+    }
+
+    @Override
+    public List<String> listPrompts() throws McpException {
+        List<String> out = new ArrayList<String>();
+        JsonObject result = resultOf(rawRequest("prompts/list"));
+        for (JsonElement e : arrayOf(result, "prompts"))
+            out.add(e.isJsonObject() ? e.getAsJsonObject().toString() : e.toString());
+        return out;
+    }
+
+    @Override
+    public String getPrompt(String name, java.util.Map<String, Object> arguments) throws McpException {
+        JsonObject params = new JsonObject();
+        params.addProperty("name", name);
+        if (arguments != null && !arguments.isEmpty()) {
+            JsonObject args = new JsonObject();
+            for (java.util.Map.Entry<String, Object> e : arguments.entrySet())
+                args.addProperty(e.getKey(), String.valueOf(e.getValue()));
+            params.add("arguments", args);
+        }
+        JsonObject result = resultOf(rawRequest("prompts/get", params));
+        StringBuilder sb = new StringBuilder();
+        for (JsonElement e : arrayOf(result, "messages")) {
+            JsonObject m = e.isJsonObject() ? e.getAsJsonObject() : new JsonObject();
+            if (sb.length() > 0) sb.append('\n');
+            String role = m.has("role") && !m.get("role").isJsonNull() ? m.get("role").getAsString() : "";
+            JsonObject content = m.has("content") && m.get("content").isJsonObject()
+                    ? m.getAsJsonObject("content") : new JsonObject();
+            String text = content.has("text") && !content.get("text").isJsonNull()
+                    ? content.get("text").getAsString() : content.toString();
+            sb.append(role.isEmpty() ? "" : "[" + role + "] ").append(text);
+        }
+        return sb.toString();
+    }
+
+    /** 构造原始 JSON-RPC 请求（无参数） */
+    private com.ajaxjs.mcp.protocol.McpRequest rawRequest(String method) {
+        return rawRequest(method, null);
+    }
+
+    /** 构造原始 JSON-RPC 请求（库基类有 setMethod；params 经子类字段承载由 toString 拼装） */
+    private com.ajaxjs.mcp.protocol.McpRequest rawRequest(String method, JsonObject params) {
+        RawJsonRequest req = new RawJsonRequest(params == null ? null : params.toString());
+        req.setMethod(method);
+        req.setId(rawId.getAndIncrement());
+        return req;
+    }
+
+    /** 自定义 JSON-RPC 请求：getParams 带 @JsonRawValue 由 Jackson 原样嵌入（transport 用 JsonUtils.toJson 序列化） */
+    static final class RawJsonRequest extends com.ajaxjs.mcp.protocol.McpRequest {
+        private final String paramsJson;
+
+        RawJsonRequest(String paramsJson) { this.paramsJson = paramsJson; }
+
+        @com.fasterxml.jackson.annotation.JsonRawValue
+        public String getParams() { return paramsJson; }
+    }
+
     /** 发原始请求并取 result 节点（gson 视角，字段零损耗） */
     private JsonObject resultOf(com.ajaxjs.mcp.protocol.McpRequest req) throws McpException {
         JsonNode resp;

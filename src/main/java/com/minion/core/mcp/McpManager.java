@@ -166,6 +166,35 @@ public class McpManager {
         return s == null ? new ArrayList<McpToolInfo>() : new ArrayList<McpToolInfo>(s.tools);
     }
 
+    // ==================== §3.7 二期：resources / prompts（委托已连接客户端） ====================
+
+    /** 资源清单（服务器未连接/无客户端返回空表） */
+    public List<String> resourcesOf(String serverName) throws Exception {
+        McpHandle c = clients.get(serverName);
+        return c == null ? new ArrayList<String>() : c.listResources();
+    }
+
+    /** 读资源 */
+    public String readResource(String serverName, String uri) throws Exception {
+        McpHandle c = clients.get(serverName);
+        if (c == null) throw new McpException("MCP 服务器未连接: " + serverName);
+        return c.readResource(uri);
+    }
+
+    /** 提示清单 */
+    public List<String> promptsOf(String serverName) throws Exception {
+        McpHandle c = clients.get(serverName);
+        return c == null ? new ArrayList<String>() : c.listPrompts();
+    }
+
+    /** 取提示（展开消息文本） */
+    public String getPrompt(String serverName, String promptName,
+            java.util.Map<String, Object> arguments) throws Exception {
+        McpHandle c = clients.get(serverName);
+        if (c == null) throw new McpException("MCP 服务器未连接: " + serverName);
+        return c.getPrompt(promptName, arguments);
+    }
+
     /** 路由工具调用：未连接先同步重连（≤10s）；失败抛 McpException（上层映射 ToolResult.error） */
     public String call(String serverName, String toolName, JsonObject args) throws Exception {
         McpServer s = find(serverName);

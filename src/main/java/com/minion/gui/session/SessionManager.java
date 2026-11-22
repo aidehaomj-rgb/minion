@@ -204,6 +204,7 @@ public class SessionManager {
                 .styleCatalog(h -> outputStyleCatalog())
                 .styleSetter((h, name) -> config.set("output.style", name))
                 .themeSetter(id -> config.set("ui.theme", id))
+                .mcpPrompt(this::dispatchMcpPrompt)
                 .queuePriority((h, text, priority) -> sendPrioritized(h, text, priority))
                 .rewind(new CommandDispatcher.RewindApi() {
                     public String list(com.minion.core.agent.Session s) { return rewindList(s); }
@@ -851,6 +852,11 @@ public class SessionManager {
             skipped++; // 与内置工具或其它 MCP 服务器同名：本服务器此工具注册不上
         }
         server.skippedTools = skipped;
+        // §3.7 二期：MCP resources 只读工具（一次注册全局共享；服务器过滤在执行时做）
+        if (registry.get("ListMcpResources") == null && mcp != null) {
+            registry.register(new com.minion.core.tools.mcp.McpResourceTools.ListTool(mcp));
+            registry.register(new com.minion.core.tools.mcp.McpResourceTools.ReadTool(mcp));
+        }
     }
 
     /** 连接完成（工具表变化）：补注册进所有存活会话（连接线程回调，只读遍历会话列表） */
@@ -1024,6 +1030,33 @@ public class SessionManager {
                     : "停止失败: " + r.output;
         } catch (Exception e) {
             return "停止失败: " + e.getMessage();
+        }
+    }
+
+    /**
+     * §3.7 二期 MCP prompts 命名空间命令：/{server}:{prompt} [参数] → 取提示展开为
+     * prompt 发送（send 路径走完整管线）。返回 null=非 prompt 命令（含 server 前缀
+     * 防命令冲突；找不到对应 server/prompt 时返回错误文本不静默）。
+     */
+    private String dispatchMcpPrompt(SessionHandle h, String rest) {
+        if (mcp == null) return null;
+        int colon = rest.indexOf(' ');
+        String key = colon < 0 ? rest : rest.substring(0, colon);
+        String args = colon < 0 ? "" : rest.substring(colon + 1).trim();
+        int split = key.indexOf(':');
+        if (split <= 0) return null;   // 无 server 前缀，不是 prompt 命令
+        String server = key.substring(0, split);
+        String prompt = key.substring(split + 1);
+        if (server.isEmpty() || prompt.isEmpty()) return null;
+        try {
+            java.util.Map<String, Object> arguments = new java.util.LinkedHashMap<String, Object>();
+            if (!args.isEmpty()) arguments.put("input", args);
+            String expanded = mcp.getPrompt(server, prompt, arguments);
+            send(h, expanded);
+            return "已发送 MCP 提示 " + server + ":" + prompt + "（展开 " + expanded.length() + " 字符）";
+        } catch (Exception e) {
+            return "MCP 提示获取失败(" + server + ":" + prompt + "): " + e.getMessage()
+                    + "——确认服务器已连接且支持 prompts";
         }
     }
 
