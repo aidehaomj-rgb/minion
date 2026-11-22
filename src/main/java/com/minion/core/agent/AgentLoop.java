@@ -393,6 +393,41 @@ public class AgentLoop {
         this.instructionLoader = loader;
     }
 
+    /**
+     * §12.2 SDK 宿主权限回调（can_use_tool）：仅 Headless 双向协议模式接线；默认 null 不改变 GUI/legacy。
+     * 返回 allow + updatedInput 时，AgentLoop 必须重过 PreToolUse + ConfirmGate 完整管线，绝不绕过权限。
+     */
+    public interface CanUseToolCallback {
+        final class Decision {
+            public final boolean allow;
+            public final String reason;
+            public final JsonObject updatedInput;
+            public final com.google.gson.JsonArray permissionUpdates;
+            public Decision(boolean allow, String reason, JsonObject updatedInput,
+                            com.google.gson.JsonArray permissionUpdates) {
+                this.allow = allow;
+                this.reason = reason;
+                this.updatedInput = updatedInput;
+                this.permissionUpdates = permissionUpdates;
+            }
+            public static Decision allow(JsonObject updatedInput, com.google.gson.JsonArray permissionUpdates) {
+                return new Decision(true, null, updatedInput, permissionUpdates);
+            }
+            public static Decision deny(String reason) {
+                return new Decision(false, reason, null, null);
+            }
+        }
+        /** 是否对低危已放行工具也强制回调宿主（§4.7/§12.2 requireCanUseTool） */
+        boolean requireForAllTools();
+        Decision check(String toolUseId, Tool tool, JsonObject input) throws InterruptedException;
+    }
+
+    private volatile CanUseToolCallback canUseToolCallback;
+
+    public void setCanUseToolCallback(CanUseToolCallback callback) {
+        this.canUseToolCallback = callback;
+    }
+
     /** §4.7 CC 语义 Hook 系统（PreToolUse 等工具事件已由 guard 接线；其余事件点见 runCcHook） */
     private final com.minion.core.hooks.HookSystem ccHookSystem;
 
@@ -3259,7 +3294,7 @@ public class AgentLoop {
                 }
             }
             // §4.7 PreToolUse：先于权限门禁——deny 阻断；updatedInput 替换 args 后由下方
-            // confirmGate.check 重过完整确认管线；ask 在门禁后显式询问（只收紧不放宽）
+            // confirmGate 重过完整确认管线；ask 在门禁后显式询问（只收紧不放宽）
             ToolExecutionGuard.PreToolUseOutcome ccPre = executionGuard.runCcPreToolUse(tool, args);
             if (ccPre.blocked) {
                 ToolResult result = ToolResult.errorWithoutSideEffects(
@@ -3268,20 +3303,73 @@ public class AgentLoop {
                 return result;
             }
             if (ccPre.updatedInput != null) args = ccPre.updatedInput;
-            if (!confirmGate.check(tool, args)) {
-                if(externalReserved)synchronized(externalOpenedThisTurn){externalOpenedThisTurn.remove(externalKey);}
-                String detail = args.has("command") ? args.get("command").getAsString()
-                        : (args.has("path") ? args.get("path").getAsString() : args.toString());
-                ToolResult result = ToolResult.error("用户拒绝了该操作（" + call.name + " → " + detail + "），请调整方案");
-                DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
-                return result;
-            }
-            if (ccPre.ask && !confirmGate.hookAsk(tool, args)) {
-                if(externalReserved)synchronized(externalOpenedThisTurn){externalOpenedThisTurn.remove(externalKey);}
-                ToolResult result = ToolResult.errorWithoutSideEffects(
-                        "Hook 要求确认该操作，用户未批准；请调整方案");
-                DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
-                return result;
+            CanUseToolCallback hostCallback = this.canUseToolCallback;
+            if (hostCallback != null) {
+                // §12.2 SDK 双向模式：完整复用 PreToolUse → PermissionEngine → can_use_tool →
+                // updatedInput 重校验（PreToolUse + PermissionEngine）→ ToolExecutionGuard
+                com.minion.core.security.permission.PermissionEngine.Verdict verdict =
+                        confirmGate.evaluatePolicy(tool, args);
+                if (verdict.denied()) {
+                    if(externalReserved)synchronized(externalOpenedThisTurn){externalOpenedThisTurn.remove(externalKey);}
+                    ToolResult result = ToolResult.errorWithoutSideEffects(
+                            "权限策略拒绝该操作（" + call.name + "）: " + verdict.reason);
+                    DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                    return result;
+                }
+                boolean needsHostCheck = verdict.needsAsk() || ccPre.ask || hostCallback.requireForAllTools();
+                if (needsHostCheck) {
+                    CanUseToolCallback.Decision hostDecision = hostCallback.check(call.id, tool, args);
+                    if (hostDecision == null || !hostDecision.allow) {
+                        if(externalReserved)synchronized(externalOpenedThisTurn){externalOpenedThisTurn.remove(externalKey);}
+                        String denyReason = (hostDecision != null && hostDecision.reason != null)
+                                ? hostDecision.reason : "宿主拒绝或超时未响应";
+                        ToolResult result = ToolResult.errorWithoutSideEffects(
+                                "宿主拒绝执行工具（can_use_tool: " + call.name + "）: " + denyReason);
+                        DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                        return result;
+                    }
+                    if (hostDecision.permissionUpdates != null) {
+                        confirmGate.applySessionPermissionUpdates(hostDecision.permissionUpdates);
+                    }
+                    if (hostDecision.updatedInput != null) {
+                        args = hostDecision.updatedInput;
+                        // updatedInput 必须重过 PreToolUse 与完整权限管线，不能借此绕过策略或提权
+                        ToolExecutionGuard.PreToolUseOutcome rePre = executionGuard.runCcPreToolUse(tool, args);
+                        if (rePre.blocked) {
+                            if(externalReserved)synchronized(externalOpenedThisTurn){externalOpenedThisTurn.remove(externalKey);}
+                            ToolResult result = ToolResult.errorWithoutSideEffects(
+                                    "Hook 阻断（updatedInput 重校验）: " + rePre.reason);
+                            DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                            return result;
+                        }
+                        if (rePre.updatedInput != null) args = rePre.updatedInput;
+                        com.minion.core.security.permission.PermissionEngine.Verdict reVerdict =
+                                confirmGate.evaluatePolicy(tool, args);
+                        if (reVerdict.denied() || (reVerdict.needsAsk() && !verdict.needsAsk()) || rePre.ask) {
+                            if(externalReserved)synchronized(externalOpenedThisTurn){externalOpenedThisTurn.remove(externalKey);}
+                            ToolResult result = ToolResult.errorWithoutSideEffects(
+                                    "updatedInput 未通过权限重校验（" + call.name + "）: " + reVerdict.reason);
+                            DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                            return result;
+                        }
+                    }
+                }
+            } else {
+                if (!confirmGate.check(tool, args)) {
+                    if(externalReserved)synchronized(externalOpenedThisTurn){externalOpenedThisTurn.remove(externalKey);}
+                    String detail = args.has("command") ? args.get("command").getAsString()
+                            : (args.has("path") ? args.get("path").getAsString() : args.toString());
+                    ToolResult result = ToolResult.error("用户拒绝了该操作（" + call.name + " → " + detail + "），请调整方案");
+                    DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                    return result;
+                }
+                if (ccPre.ask && !confirmGate.hookAsk(tool, args)) {
+                    if(externalReserved)synchronized(externalOpenedThisTurn){externalOpenedThisTurn.remove(externalKey);}
+                    ToolResult result = ToolResult.errorWithoutSideEffects(
+                            "Hook 要求确认该操作，用户未批准；请调整方案");
+                    DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                    return result;
+                }
             }
             ui.onToolCall(call.name, args);
             if(!owner.current(this)) {

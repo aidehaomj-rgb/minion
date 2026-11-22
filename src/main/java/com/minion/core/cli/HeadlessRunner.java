@@ -77,11 +77,16 @@ public final class HeadlessRunner {
             registry = filterRegistry(registry, args.allowedTools);
         }
 
-        // 确认：--dangerously-skip-permissions 或 ask→deny
+        // 确认：--dangerously-skip-permissions 或 ask→deny；SDK 双向模式经宿主 can_use_tool
         boolean bypass = "bypassPermissions".equals(args.permissionMode)
                 || "full".equals(args.permissionMode);
         ConfirmUi confirmUi = new HeadlessConfirmUi(bypass);
         ConfirmGate gate = new ConfirmGate(config, confirmUi);
+        boolean sdkDuplex = "stream-json".equals(args.inputFormat) && "stream-json".equals(args.outputFormat);
+        // §12.2 SDK 双向：宿主桥（can_use_tool 往返 pending 管理；超时 fail-closed deny）。
+        // 工具链路由 AgentLoop 内嵌 CanUseToolCallback 完整复用（evaluatePolicy → 宿主 →
+        // updatedInput 重校验 PreToolUse+Policy → guard），不做装饰器二次包装（防双重往返）
+        final SdkHostBridge bridge = sdkDuplex ? new SdkHostBridge(protocol, SdkHostBridge.DEFAULT_TIMEOUT_MS) : null;
 
         // 会话
         Session session = Session.create(workDir.toString(), model);
@@ -109,6 +114,62 @@ public final class HeadlessRunner {
         }
 
         protocol.systemInit(session.id, model, registry.schemas().size(), args.permissionMode);
+
+        // §12.2 SDK 双向模式：stdin/stdout NDJSON 循环（initialize/interrupt/can_use_tool/
+        // set_permission_mode/set_model/keep_alive + user 帧串行跑轮）
+        if (sdkDuplex) {
+            final Config cfg = config;
+            final AgentLoop sdkLoop = loop;
+            // 宿主 can_use_tool 回调：完整链路由 AgentLoop 内嵌（evaluatePolicy → 宿主 →
+            // updatedInput 重校验 → guard）；桥超时 fail-closed deny
+            loop.setCanUseToolCallback(new AgentLoop.CanUseToolCallback() {
+                @Override public boolean requireForAllTools() { return false; }
+                @Override public AgentLoop.CanUseToolCallback.Decision check(
+                        String toolUseId, com.minion.core.tools.Tool tool,
+                        com.google.gson.JsonObject input) {
+                    com.google.gson.JsonObject resp = bridge.canUseTool(tool.name(), input);
+                    if (resp == null)
+                        return AgentLoop.CanUseToolCallback.Decision.deny("宿主无响应（超时/断连/背压）");
+                    String behavior = resp.has("behavior") && resp.get("behavior").isJsonPrimitive()
+                            ? resp.get("behavior").getAsString() : "";
+                    if ("allow".equals(behavior))
+                        return AgentLoop.CanUseToolCallback.Decision.allow(
+                                resp.has("updatedInput") && resp.get("updatedInput").isJsonObject()
+                                        ? resp.getAsJsonObject("updatedInput") : null,
+                                resp.has("permissionUpdates") && resp.get("permissionUpdates").isJsonArray()
+                                        ? resp.getAsJsonArray("permissionUpdates") : null);
+                    return AgentLoop.CanUseToolCallback.Decision.deny(
+                            "deny".equals(behavior) ? "宿主拒绝"
+                                    : "ask".equals(behavior) ? "宿主要求人工确认（SDK 无交互通道）"
+                                    : "behavior 非法: " + behavior);
+                }
+            });
+            try {
+                return new SdkDuplex(protocol, new SdkDuplex.TurnEngine() {
+                    @Override public String sessionId() { return sdkLoop.session().id; }
+                    @Override public void runUserTurn(String prompt) throws Exception { sdkLoop.runUserTurn(prompt); }
+                    @Override public boolean lastTurnSucceeded() { return sdkLoop.lastTurnSucceeded(); }
+                    @Override public int lastTurnToolRounds() { return sdkLoop.lastTurnToolRounds(); }
+                    @Override public String pauseCode() { return sdkLoop.session().taskState.pauseCode; }
+                    @Override public void interrupt() { sdkLoop.interrupt(); }
+                    @Override public String setPermissionMode(String mode) {
+                        return gate.setSessionPermissionMode(mode) ? null
+                                : "mode 仅支持 read-only|workspace-write|acceptEdits|full|plan|bypassPermissions";
+                    }
+                    @Override public String setModel(String name) {
+                        if (name == null || name.trim().isEmpty()) return "缺少 model";
+                        cfg.set("model.name", name.trim());   // 记录目标；当前 LLM 实例不热切（下一会话生效）
+                        return null;
+                    }
+                }, bridge).run(new java.io.BufferedReader(new java.io.InputStreamReader(
+                        System.in, java.nio.charset.StandardCharsets.UTF_8)));
+            } catch (java.io.IOException e) {
+                System.err.println("[sdk] stdin 读取失败: " + e.getMessage());
+                return 1;
+            } finally {
+                try { llm.close(); } catch (Exception ignored) { }
+            }
+        }
 
         // 单次执行
         String prompt = args.prompt != null ? args.prompt : "";

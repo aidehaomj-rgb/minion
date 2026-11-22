@@ -44,8 +44,10 @@ public final class MinionCli {
         public List<String> settingsFiles = new ArrayList<String>();   // --settings（可重复，§13.1 CLI 层）
         public boolean resume;                     // -c/--continue
         public String resumeId;                    // -r/--resume <id|词>
+        public boolean dangerouslySkipPermissions; // --dangerously-skip-permissions
+        public boolean allowDangerouslySkipPermissions; // --allow-dangerously-skip-permissions
 
-        boolean isCliMode() { return print || "stream-json".equals(outputFormat); }
+        boolean isCliMode() { return print || "stream-json".equals(outputFormat) || "stream-json".equals(inputFormat); }
     }
 
     private MinionCli() { }
@@ -54,6 +56,7 @@ public final class MinionCli {
     public static boolean isCliInvocation(String[] argv) {
         for (String a : argv) {
             if (a.equals("-p") || a.equals("--print") || a.startsWith("--output-format")
+                    || a.startsWith("--input-format")
                     || a.equals("doctor") || a.equals("--version") || a.equals("-v"))
                 return true;
         }
@@ -84,6 +87,8 @@ public final class MinionCli {
                     args.appendSystemPrompt = readFile(value(argv, ++i, a)); break;
                 case "--bare": args.bare = true; break;
                 case "--verbose": args.verbose = true; break;
+                case "--dangerously-skip-permissions": args.dangerouslySkipPermissions = true; break;
+                case "--allow-dangerously-skip-permissions": args.allowDangerouslySkipPermissions = true; break;
                 case "-c": case "--continue": args.resume = true; break;
                 case "-r": case "--resume": args.resume = true; args.resumeId = value(argv, ++i, a); break;
                 case "--settings":   // §13.1 CLI 层：可重复，settings.json 文件路径

@@ -107,6 +107,18 @@ public final class RuleStore {
         addRule(new PermissionRule(PermissionRule.Behavior.ALLOW, toolName, content, PermissionRule.Source.SESSION));
     }
 
+    /**
+     * §12.2 SDK 宿主 permissionUpdates 的会话级 deny/ask 规则：仅作用于本会话内存态
+     * （不落盘、会话结束失效、managedOnly 策略下非策略来源失效与 allow 同口径）。
+     */
+    public void sessionDeny(String toolName, String content) {
+        addRule(new PermissionRule(PermissionRule.Behavior.DENY, toolName, content, PermissionRule.Source.SESSION));
+    }
+
+    public void sessionAsk(String toolName, String content) {
+        addRule(new PermissionRule(PermissionRule.Behavior.ASK, toolName, content, PermissionRule.Source.SESSION));
+    }
+
     /** managedOnly（策略声明）时非策略来源全部失效 */
     public boolean managedOnly() {
         return managedOnly && policyLoaded;

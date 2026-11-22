@@ -34,12 +34,81 @@ public class ConfirmGate {
     private final Config config;
     private final ConfirmUi ui;
     private boolean sessionBypass = false;          // legacy 全局放行 + v2 BYPASS 提升
+    private volatile PermissionContext.Mode sessionModeOverride; // §12.2 会话级模式覆盖（不写盘、不影响其他会话）
     private volatile RuleStore ruleStore;           // v2 惰性构建
     private volatile Path projectSettings, localSettings;
 
     public ConfirmGate(Config config, ConfirmUi ui) {
         this.config = config;
         this.ui = ui;
+    }
+
+    /** §12.2 设置当前会话权限模式（仅影响本会话，不落盘）；未知模式返回 false */
+    public synchronized boolean setSessionPermissionMode(String rawMode) {
+        PermissionContext.Mode parsed = PermissionContext.parseMode(rawMode);
+        if (parsed == null) return false;
+        this.sessionModeOverride = parsed;
+        this.sessionBypass = (parsed == PermissionContext.Mode.BYPASS);
+        return true;
+    }
+
+    /** 当前生效的权限模式（会话覆盖优先于全局 config） */
+    public PermissionContext.Mode effectiveMode() {
+        if (sessionBypass) return PermissionContext.Mode.BYPASS;
+        PermissionContext.Mode ov = sessionModeOverride;
+        return ov != null ? ov : PermissionContext.mapLegacyMode(config.permissionMode());
+    }
+
+    /**
+     * §12.2 应用宿主 can_use_tool 返回的会话级 permissionUpdates（仅写会话规则层，不落盘、
+     * 不能覆盖策略 deny）。支持每项含 {@code behavior}（allow/deny/ask）、{@code tool}、可选 {@code pattern}。
+     */
+    public synchronized void applySessionPermissionUpdates(com.google.gson.JsonArray updates) {
+        if (updates == null || updates.size() == 0) return;
+        RuleStore store = rules();
+        for (int i = 0; i < updates.size(); i++) {
+            if (!updates.get(i).isJsonObject()) continue;
+            JsonObject item = updates.get(i).getAsJsonObject();
+            String behavior = item.has("behavior") && !item.get("behavior").isJsonNull()
+                    ? item.get("behavior").getAsString().trim().toLowerCase(java.util.Locale.ROOT) : "";
+            String tool = item.has("tool") && !item.get("tool").isJsonNull()
+                    ? item.get("tool").getAsString().trim() : "";
+            String pattern = item.has("pattern") && !item.get("pattern").isJsonNull()
+                    ? item.get("pattern").getAsString().trim() : null;
+            if (tool.isEmpty()) continue;
+            if ("allow".equals(behavior)) store.sessionAllow(tool, pattern);
+            else if ("deny".equals(behavior)) store.sessionDeny(tool, pattern);
+            else if ("ask".equals(behavior)) store.sessionAsk(tool, pattern);
+        }
+    }
+
+    /**
+     * §12.2 仅运行权限策略评估（不弹 ConfirmUi），供 SDK 双向模式在调用宿主 can_use_tool 前后
+     * 执行完整 13 步权限管线（含只读数据工作流前置、敏感路径与内容级 deny）。
+     */
+    public synchronized PermissionEngine.Verdict evaluatePolicy(Tool tool, JsonObject args) {
+        if (readOnlyDataWorkflowDeny(tool, args)) {
+            return PermissionEngine.Verdict.deny(0, "read-only 模式禁止数据写入工作流");
+        }
+        String content = contentOf(tool, args);
+        Path target = pathOf(args);
+        Path real = toReal(target);
+        PermissionContext.ToolCheck tc = tool.isHighRisk(args)
+                ? PermissionContext.ToolCheck.PASSTHROUGH : PermissionContext.ToolCheck.ALLOW;
+        PermissionContext ctx = new PermissionContext(
+                effectiveMode(),
+                tc,
+                false,
+                com.minion.core.security.permission.SensitivePaths.hits(target)
+                        || com.minion.core.security.permission.SensitivePaths.hits(real),
+                target, real, null);
+        if (tool instanceof com.minion.core.tools.mcp.McpProxyTool
+                && rules().has(((com.minion.core.tools.mcp.McpProxyTool) tool).serverWhitelistKey(),
+                        null, PermissionRule.Behavior.ALLOW)
+                && !rules().has(tool.name().toLowerCase(java.util.Locale.ROOT), null, PermissionRule.Behavior.DENY)) {
+            return PermissionEngine.Verdict.allow(6, "mcp-server allow 规则");
+        }
+        return new PermissionEngine().evaluate(tool.name(), content, rules(), ctx);
     }
 
     /** §4.8 SSH TOFU 首次主机指纹确认：不走规则，直接问用户；APPROVE 系（一次/白名单/会话）均算信任 */
@@ -86,7 +155,7 @@ public class ConfirmGate {
     // ==================== V68 read-only 数据工作流前置（两种引擎共用） ====================
 
     private boolean readOnlyDataWorkflowDeny(Tool tool, JsonObject args) {
-        if (!"read-only".equals(config.permissionMode())) return false;
+        if (effectiveMode() != PermissionContext.Mode.PLAN) return false;
         String action = args.has("action") && !args.get("action").isJsonNull()
                 ? args.get("action").getAsString().toLowerCase(java.util.Locale.ROOT) : "";
         if ((tool instanceof com.minion.core.tools.data.ExcelTool && !com.minion.core.tools.data.ExcelTool.readOnlyAction(action))
@@ -109,7 +178,7 @@ public class ConfirmGate {
         PermissionContext.ToolCheck tc = tool.isHighRisk(args)
                 ? PermissionContext.ToolCheck.PASSTHROUGH : PermissionContext.ToolCheck.ALLOW;
         PermissionContext ctx = new PermissionContext(
-                sessionBypass ? PermissionContext.Mode.BYPASS : PermissionContext.mapLegacyMode(config.permissionMode()),
+                effectiveMode(),
                 tc,
                 false,                                         // requiresUserInteraction（§2.1 接线）
                 com.minion.core.security.permission.SensitivePaths.hits(target)

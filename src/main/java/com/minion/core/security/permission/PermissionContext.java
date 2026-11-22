@@ -47,14 +47,20 @@ public final class PermissionContext {
 
     /** 旧配置值到新模式空间的映射（read-only→PLAN、workspace-write→ACCEPT_EDITS、full→BYPASS；未知回落 DEFAULT） */
     public static Mode mapLegacyMode(String raw) {
-        if (raw == null) return Mode.DEFAULT;
+        Mode parsed = parseMode(raw);
+        return parsed != null ? parsed : Mode.DEFAULT;
+    }
+
+    /** 严格解析模式名（含 CC 名称与旧配置值）；未知返回 null（供 SDK set_permission_mode 校验） */
+    public static Mode parseMode(String raw) {
+        if (raw == null) return null;
         String v = raw.trim().toLowerCase(java.util.Locale.ROOT);
         if (v.equals("read-only") || v.equals("plan")) return Mode.PLAN;
-        if (v.equals("workspace-write") || v.equals("acceptEdits") || v.equals("accept-edits")) return Mode.ACCEPT_EDITS;
-        if (v.equals("full") || v.equals("bypassPermissions") || v.equals("bypass")) return Mode.BYPASS;
+        if (v.equals("workspace-write") || v.equals("acceptedits") || v.equals("accept-edits")) return Mode.ACCEPT_EDITS;
+        if (v.equals("full") || v.equals("bypasspermissions") || v.equals("bypass")) return Mode.BYPASS;
         if (v.equals("dontask") || v.equals("dont-ask")) return Mode.DONT_ASK;
         if (v.equals("default")) return Mode.DEFAULT;
-        return Mode.DEFAULT;
+        return null;
     }
 
     /** acceptEdits 的自动放行条件：文件类目标在工作区内（整文件级 startsWith，realpath 优先） */

@@ -30,7 +30,13 @@ public final class PermissionEngine {
 
         public boolean allowed() { return outcome == Outcome.ALLOW; }
         public boolean denied() { return outcome == Outcome.DENY; }
+        /** §12.2 SDK：ask 裁决（需宿主/用户确认；evaluatePolicy 无交互路径用） */
+        public boolean needsAsk() { return outcome == Outcome.ASK; }
         @Override public String toString() { return outcome + "@step" + step + " " + reason; }
+
+        /** §12.2 evaluatePolicy 用的静态工厂（无交互确认路径直接给裁决） */
+        public static Verdict allow(int step, String reason) { return new Verdict(Outcome.ALLOW, step, reason); }
+        public static Verdict deny(int step, String reason) { return new Verdict(Outcome.DENY, step, reason); }
     }
 
     /**
