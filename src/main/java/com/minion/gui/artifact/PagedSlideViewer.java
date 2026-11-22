@@ -172,9 +172,9 @@ public final class PagedSlideViewer extends BorderPane implements AutoCloseable 
         StackPane center = new StackPane(pageScroll, continuous);
         VBox.setVgrow(center, Priority.ALWAYS);
         setCenter(center);
-        setLeft(thumbnails);
         setTop(toolbar);
-        // 状态行融入底边（不占独立空间——放在 toolbar 右端）
+        // 不再放左侧缩略图栏（太乱）——单页居中+顶部翻页（对标主流 Agent 预览）
+        // 状态行融入工具栏右端
         toolbar.getChildren().add(spacer2());
         toolbar.getChildren().add(status);
         status.getStyleClass().add("artifact-meta");
