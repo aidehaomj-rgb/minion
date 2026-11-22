@@ -27,11 +27,11 @@ public class ContextRing extends Canvas {
     /** 可点击压缩阈值：超过 30% 才可点击 */
     public static final double COMPRESS_HINT_PCT = 0.3;
 
-    private static final double SIZE = 34;      // 画布宽（加大提高可见性）
-    private static final double HEIGHT = 44;    // 画布高
-    private static final double CY_RATIO = 0.5; // 圆心垂直居中
-    private static final double STROKE = 4;     // 环线宽（加粗）
-    private static final double R = SIZE / 2 - STROKE / 2 - 1;
+    private static final double SIZE = 24;      // 画布宽（保持原始尺寸）
+    private static final double HEIGHT = 38;    // 画布高（保持原始尺寸）
+    private static final double CY_RATIO = 0.41; // 圆心垂直位置（原始值）
+    private static final double STROKE = 3.5;   // 环线宽（稍加粗但不改外径）
+    private static final double R = SIZE / 2 - STROKE / 2 - 0.5;
 
     // 深色主题配色（亮色系在深底上醒目）
     private static final Color DARK_BG = Color.web("#3a3f4c", 0.6);
@@ -160,16 +160,16 @@ public class ContextRing extends Canvas {
         gc.setStroke(c);
         gc.strokeArc(cx - R, cy - R, 2 * R, 2 * R, -90, arcAngle(p), ArcType.OPEN);
 
-        // 中心百分比数字（≥10% 才显示，避免低占比时挤在一起）
+        // 中心百分比数字（≥10% 才显示；小号粗体+高对比色）
         int pctInt = (int) Math.round(p * 100);
         if (pctInt >= 10) {
             gc.setFill(light ? LIGHT_TEXT : DARK_TEXT);
-            gc.setFont(Font.font("System", FontWeight.BOLD, pctInt >= 100 ? 7.5 : 8.5));
+            gc.setFont(Font.font("System", FontWeight.BOLD, pctInt >= 100 ? 6.5 : 7.5));
             String text = String.valueOf(pctInt);
             javafx.scene.text.Text t = new javafx.scene.text.Text(text);
             t.setFont(gc.getFont());
             double tw = t.getLayoutBounds().getWidth();
-            gc.fillText(text, cx - tw / 2, cy + 3);
+            gc.fillText(text, cx - tw / 2, cy + 2.5);
         }
     }
 
