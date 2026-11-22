@@ -61,9 +61,12 @@ public final class HeadlessRunner {
                 config.get("model.provider", ""),
                 Integer.parseInt(config.get("model.maxOutputTokens", "8192")), null);
 
-        // 工具注册表（安全子集；--allowedTools 过滤）
+        // 工具注册表（安全子集；--allowedTools 过滤）；ReadStateStore 共享（seed_read_state 可同步）
+        final com.minion.core.security.ReadStateStore readState =
+                new com.minion.core.security.ReadStateStore();
         ToolRegistry registry = new ToolRegistry();
-        registry.register(new com.minion.core.tools.ReadTool(workspace));
+        registry.register(new com.minion.core.tools.ReadTool(workspace, null, null, null,
+                readState, config.readCcSemantics()));
         registry.register(new com.minion.core.tools.GlobTool(workspace));
         registry.register(new com.minion.core.tools.GrepTool(workspace));
         registry.register(new com.minion.core.tools.WriteTool(workspace));
@@ -145,6 +148,24 @@ public final class HeadlessRunner {
                 }
             });
             try {
+                // §12.2 二期控制请求装配（mcp 非 bare 装配；rewind/read_state/context/settings/
+                // plugins/stop_task 按可用子系统；不可用项返回明确 unavailable）
+                com.minion.core.mcp.McpManager sdkMcp = null;
+                com.minion.core.security.ProjectTrustStore sdkTrust = null;
+                if (!args.bare) {
+                    sdkTrust = com.minion.core.security.ProjectTrustStore.load(jarDir);
+                    sdkMcp = new com.minion.core.mcp.McpManager(
+                            com.minion.core.mcp.McpStore.load(jarDir));
+                    sdkMcp.setTrustGate(new com.minion.core.security.TrustGate(
+                            sdkTrust, config.trustStoreEnabled(),
+                            com.minion.core.security.TrustGate.DENY));   // headless 无 UI：未批准不连
+                }
+                com.minion.core.storage.RewindService sdkRewind =
+                        new com.minion.core.storage.RewindService(
+                                new com.minion.core.storage.MessageFileHistory(workDir), workDir);
+                java.util.Map<String, SdkRequestHandler> handlers = SdkControlHandlers.build(
+                        config, jarDir, workDir, sdkMcp, sdkTrust, loop, sdkRewind,
+                        readState, session);
                 return new SdkDuplex(protocol, new SdkDuplex.TurnEngine() {
                     @Override public String sessionId() { return sdkLoop.session().id; }
                     @Override public void runUserTurn(String prompt) throws Exception { sdkLoop.runUserTurn(prompt); }
@@ -161,7 +182,7 @@ public final class HeadlessRunner {
                         cfg.set("model.name", name.trim());   // 记录目标；当前 LLM 实例不热切（下一会话生效）
                         return null;
                     }
-                }, bridge).run(new java.io.BufferedReader(new java.io.InputStreamReader(
+                }, bridge, handlers).run(new java.io.BufferedReader(new java.io.InputStreamReader(
                         System.in, java.nio.charset.StandardCharsets.UTF_8)));
             } catch (java.io.IOException e) {
                 System.err.println("[sdk] stdin 读取失败: " + e.getMessage());

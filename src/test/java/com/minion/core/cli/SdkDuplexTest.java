@@ -28,7 +28,7 @@ import static org.junit.Assert.*;
 public class SdkDuplexTest {
 
     /** 可动态喂帧的 InputStream（测试主线程 offer，EOF 收束） */
-    private static final class ScriptedStdin extends InputStream {
+    static final class ScriptedStdin extends InputStream {
         final BlockingQueue<byte[]> chunks = new ArrayBlockingQueue<byte[]>(64);
         volatile boolean eof;
         byte[] current = new byte[0];
@@ -53,7 +53,7 @@ public class SdkDuplexTest {
     }
 
     /** 脚本引擎：记录调用；latch 模拟长工具批可被 interrupt 解锁 */
-    private static final class ScriptedEngine implements SdkDuplex.TurnEngine {
+    static final class ScriptedEngine implements SdkDuplex.TurnEngine {
         final List<String> prompts = new ArrayList<String>();
         final List<String> interrupts = new ArrayList<String>();
         volatile CountDownLatch blockOn;

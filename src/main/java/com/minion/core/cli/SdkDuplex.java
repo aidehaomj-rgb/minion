@@ -35,11 +35,25 @@ public final class SdkDuplex {
     private final StreamJsonProtocol protocol;
     private final TurnEngine engine;
     private final SdkHostBridge bridge;
+    /** §12.2 二期扩展请求（subtype → 处理器；可空=无扩展）；统一异步+30s 超时 */
+    private final java.util.Map<String, SdkRequestHandler> handlers;
+    private final ExecutorService controlExecutor;
 
     public SdkDuplex(StreamJsonProtocol protocol, TurnEngine engine, SdkHostBridge bridge) {
+        this(protocol, engine, bridge, null);
+    }
+
+    public SdkDuplex(StreamJsonProtocol protocol, TurnEngine engine, SdkHostBridge bridge,
+            java.util.Map<String, SdkRequestHandler> handlers) {
         this.protocol = protocol;
         this.engine = engine;
         this.bridge = bridge;
+        this.handlers = handlers;
+        this.controlExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "minion-sdk-control");
+            t.setDaemon(true);
+            return t;
+        });
     }
 
     /** 双向循环；返回进程退出码（0=正常 result 收束/EOF，2=协议拒执） */
@@ -119,6 +133,7 @@ public final class SdkDuplex {
             return 0;
         } finally {
             turns.shutdownNow();
+            controlExecutor.shutdownNow();
         }
     }
 
@@ -161,8 +176,32 @@ public final class SdkDuplex {
             protocol.controlResponseSuccess(requestId, new JsonObject());
         } else if ("initialize".equals(subtype)) {
             protocol.controlResponseError(requestId, "already_initialized", "会话已初始化");
+        } else if (handlers != null && handlers.containsKey(subtype)) {
+            dispatchExtended(requestId, subtype, frame);
         } else {
             protocol.controlResponseError(requestId, "unknown_request", "未知控制请求: " + subtype);
+        }
+    }
+
+    /** §12.2 二期扩展请求：异步执行 + 30s 有界超时（慢请求不阻塞读循环 interrupt 响应） */
+    private void dispatchExtended(final String requestId, final String subtype, JsonObject frame) {
+        final JsonObject body = frame.has("body") && frame.get("body").isJsonObject()
+                ? frame.getAsJsonObject("body") : new JsonObject();
+        final SdkRequestHandler handler = handlers.get(subtype);
+        try {
+            JsonObject result = controlExecutor.submit(() -> handler.handle(body))
+                    .get(30, TimeUnit.SECONDS);
+            protocol.controlResponseSuccess(requestId, result == null ? new JsonObject() : result);
+        } catch (java.util.concurrent.TimeoutException timeout) {
+            protocol.controlResponseError(requestId, "timeout", "请求处理超时（30s）: " + subtype);
+        } catch (Exception failed) {
+            Throwable cause = failed.getCause() != null ? failed.getCause() : failed;
+            if (cause instanceof SdkRequestHandler.SdkRequestError)
+                protocol.controlResponseError(requestId,
+                        ((SdkRequestHandler.SdkRequestError) cause).code, cause.getMessage());
+            else
+                protocol.controlResponseError(requestId, "internal_error",
+                        subtype + " 处理失败: " + cause.getMessage());
         }
     }
 
