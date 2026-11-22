@@ -201,6 +201,153 @@
     -wb-success-border: #b8e0c2;
 }
 
+/* 新增主题 1：极光青（深空青黑 + 极光青绿强调，硬核科技感） */
+.minion-workbench.theme-aurora {
+    -wb-rail: #071014;
+    -wb-canvas: #0b161c;
+    -wb-reader: #0f1d24;
+    -wb-surface: #14252e;
+    -wb-elevated: #1a303b;
+    -wb-hover: #1f3946;
+    -wb-border: #234250;
+    -wb-border-subtle: #18303b;
+    -wb-select: #163742;
+    -wb-ink: #edf7f9;
+    -wb-secondary: #bad4db;
+    -wb-muted: #7ea1ad;
+    -wb-accent: #36d6c3;
+    -wb-accent-strong: #87efe2;
+    -wb-on-accent: #051619;
+    -wb-link: #56e0d0;
+    -wb-focus: #32c7b6;
+    -wb-highlight: #1c4c57;
+    -wb-pending: #286470;
+    -wb-tool: #9cc2f5;
+    -wb-scroll: #274857;
+    -wb-scroll-hover: #38667a;
+    -wb-cta: #1fa89a;
+    -wb-cta-hover: #2ec2b2;
+    -wb-on-cta: #041517;
+    -wb-dot-running: #f2c94c;
+    -wb-dot-done: #38d98b;
+    -wb-code-bg: #071117;
+    -wb-code-header: #0e1c24;
+    -wb-code-border: #1e3a47;
+    -wb-code-fg: #d6eef2;
+    -wb-inline-code: #6ce8d9;
+    -wb-quote-bg: #102029;
+    -wb-collapsible-bg: #0f1e26;
+    -wb-collapsible-hover: #162b36;
+    -wb-badge-bg: #18323e;
+    -wb-danger: #f87171;
+    -wb-danger-bg: #24151a;
+    -wb-danger-border: #592935;
+    -wb-warn: #f0be54;
+    -wb-warn-bg: #232015;
+    -wb-warn-border: #564722;
+    -wb-success: #38d98b;
+    -wb-success-bg: #0f2620;
+    -wb-success-border: #1f5946;
+}
+
+/* 新增主题 2：暮光紫（Linear/Raycast 风格深靛紫灰 + 熏衣草紫强调） */
+.minion-workbench.theme-twilight {
+    -wb-rail: #0d0c16;
+    -wb-canvas: #131220;
+    -wb-reader: #171626;
+    -wb-surface: #1e1c30;
+    -wb-elevated: #26243d;
+    -wb-hover: #2d2a47;
+    -wb-border: #363254;
+    -wb-border-subtle: #282540;
+    -wb-select: #2b264d;
+    -wb-ink: #f2f1fa;
+    -wb-secondary: #c8c5de;
+    -wb-muted: #8f8bab;
+    -wb-accent: #9b87f5;
+    -wb-accent-strong: #c8bcff;
+    -wb-on-accent: #100c24;
+    -wb-link: #ae9cff;
+    -wb-focus: #8f79f0;
+    -wb-highlight: #3d346b;
+    -wb-pending: #50448a;
+    -wb-tool: #7cc4fa;
+    -wb-scroll: #3b375c;
+    -wb-scroll-hover: #534e80;
+    -wb-cta: #7c66e8;
+    -wb-cta-hover: #927ef5;
+    -wb-on-cta: #f7f6ff;
+    -wb-dot-running: #f2c94c;
+    -wb-dot-done: #4ade80;
+    -wb-code-bg: #0e0d18;
+    -wb-code-header: #161526;
+    -wb-code-border: #2e2a4a;
+    -wb-code-fg: #e2e0f5;
+    -wb-inline-code: #b8a8ff;
+    -wb-quote-bg: #19172b;
+    -wb-collapsible-bg: #181629;
+    -wb-collapsible-hover: #211f38;
+    -wb-badge-bg: #262342;
+    -wb-danger: #f87171;
+    -wb-danger-bg: #291620;
+    -wb-danger-border: #5e2a3c;
+    -wb-warn: #f0be54;
+    -wb-warn-bg: #262118;
+    -wb-warn-border: #594926;
+    -wb-success: #4ade80;
+    -wb-success-bg: #152721;
+    -wb-success-border: #265743;
+}
+
+/* 新增主题 3：暖纸浅色（Claude 风格米白纸张底 + 暖陶土强调，白天办公护眼） */
+.minion-workbench.theme-paper {
+    -wb-rail: #ebe6dc;
+    -wb-canvas: #f5f2eb;
+    -wb-reader: #faf8f3;
+    -wb-surface: #ffffff;
+    -wb-elevated: #f0ece3;
+    -wb-hover: #e5dfd3;
+    -wb-border: #d9d1c3;
+    -wb-border-subtle: #e6dfd2;
+    -wb-select: #f2e5dc;
+    -wb-ink: #26221e;
+    -wb-secondary: #5c544b;
+    -wb-muted: #857b70;
+    -wb-accent: #c4623c;
+    -wb-accent-strong: #9c4727;
+    -wb-on-accent: #ffffff;
+    -wb-link: #b55430;
+    -wb-focus: #cc6d47;
+    -wb-highlight: #f2d5c7;
+    -wb-pending: #dca38a;
+    -wb-tool: #7a558c;
+    -wb-scroll: #cfc7b8;
+    -wb-scroll-hover: #b5ab9a;
+    -wb-cta: #c4623c;
+    -wb-cta-hover: #a84e2c;
+    -wb-on-cta: #ffffff;
+    -wb-dot-running: #b77900;
+    -wb-dot-done: #237a3b;
+    -wb-code-bg: #efeae0;
+    -wb-code-header: #e6dfd2;
+    -wb-code-border: #d6cdbd;
+    -wb-code-fg: #2b2622;
+    -wb-inline-code: #a34928;
+    -wb-quote-bg: #f0ebe2;
+    -wb-collapsible-bg: #efeae1;
+    -wb-collapsible-hover: #e6dfd4;
+    -wb-badge-bg: #e6dfd3;
+    -wb-danger: #b82925;
+    -wb-danger-bg: #fbf0ef;
+    -wb-danger-border: #e8bdbb;
+    -wb-warn: #946200;
+    -wb-warn-bg: #fbf6e8;
+    -wb-warn-border: #e3cf9d;
+    -wb-success: #237a3b;
+    -wb-success-bg: #edf7f0;
+    -wb-success-border: #b3dbbe;
+}
+
 /* Shared window chrome and thin but draggable dividers */
 .minion-workbench .topbar {
     -fx-alignment: center-left; -fx-spacing: 7; -fx-padding: 6 9 6 13;
@@ -600,16 +747,27 @@
 
 /* Light mode needs darker semantic text than the dark surfaces use. */
 .minion-workbench.theme-light .log-input, .minion-workbench.theme-light .welcome-eyebrow,
-.minion-workbench.theme-light .transcript-hint { -fx-text-fill: -wb-accent-strong; }
-.minion-workbench.theme-light .log-tool { -fx-text-fill: #6f4b83; }
-.minion-workbench.theme-light .log-error { -fx-text-fill: #b42318; }
-.minion-workbench.theme-light .log-warn { -fx-text-fill: #8a5a00; }
-.minion-workbench.theme-light .status-dot-running { -fx-fill: #b77900; }
+.minion-workbench.theme-light .transcript-hint,
+.minion-workbench.theme-paper .log-input, .minion-workbench.theme-paper .welcome-eyebrow,
+.minion-workbench.theme-paper .transcript-hint { -fx-text-fill: -wb-accent-strong; }
+.minion-workbench.theme-light .log-tool,
+.minion-workbench.theme-paper .log-tool { -fx-text-fill: #6f4b83; }
+.minion-workbench.theme-light .log-error,
+.minion-workbench.theme-paper .log-error { -fx-text-fill: #b42318; }
+.minion-workbench.theme-light .log-warn,
+.minion-workbench.theme-paper .log-warn { -fx-text-fill: #8a5a00; }
+.minion-workbench.theme-light .status-dot-running,
+.minion-workbench.theme-paper .status-dot-running { -fx-fill: #b77900; }
 .minion-workbench.theme-light .status-dot-completed,
-.minion-workbench.theme-light .status-dot-paused { -fx-fill: #238636; }
+.minion-workbench.theme-light .status-dot-paused,
+.minion-workbench.theme-paper .status-dot-completed,
+.minion-workbench.theme-paper .status-dot-paused { -fx-fill: #238636; }
 .minion-workbench.theme-light .btn-send-empty,
-.minion-workbench.theme-light .btn-send-empty:hover { -fx-background-color: #b8b2a8; }
-.minion-workbench.theme-light .window-action.btn-close:hover { -fx-background-color: #b42318; }
+.minion-workbench.theme-light .btn-send-empty:hover,
+.minion-workbench.theme-paper .btn-send-empty,
+.minion-workbench.theme-paper .btn-send-empty:hover { -fx-background-color: #b8b2a8; }
+.minion-workbench.theme-light .window-action.btn-close:hover,
+.minion-workbench.theme-paper .window-action.btn-close:hover { -fx-background-color: #b42318; }
 
 .minion-workbench .workspace-top-action:focused, .minion-workbench .welcome-start:focused,
 .minion-workbench .window-action:focused, .minion-workbench .model-picker:focused,
@@ -675,72 +833,227 @@
 }
 .minion-workbench .conversation-tabs .tab:selected .tab-label { -fx-text-fill: -wb-accent-strong; }
 
+/* ===== PDF/PPT 预览面板（对标主流 Agent：居中白页+柔和投影+深色画布+简洁工具栏+缩略图卡片化） ===== */
+.minion-workbench .paged-slide-viewer {
+    -fx-background-color: #1a1d23;
+}
+.minion-workbench .paged-slide-toolbar,
+.minion-workbench .zoom-image-toolbar {
+    -fx-padding: 6 12 6 12;
+    -fx-background-color: #23262d;
+    -fx-border-color: derive(#23262d, -20%);
+    -fx-border-width: 0 0 1 0;
+    -fx-min-height: 38;
+}
+.minion-workbench .paged-slide-toolbar .button,
+.minion-workbench .paged-slide-toolbar .toggle-button,
+.minion-workbench .zoom-image-toolbar .button {
+    -fx-background-color: transparent;
+    -fx-text-fill: #9da3ae;
+    -fx-border-color: transparent;
+    -fx-border-radius: 5;
+    -fx-background-radius: 5;
+    -fx-padding: 3 10 3 10;
+    -fx-font-size: 13px;
+    -fx-cursor: hand;
+}
+.minion-workbench .paged-slide-toolbar .button:hover,
+.minion-workbench .paged-slide-toolbar .toggle-button:hover,
+.minion-workbench .zoom-image-toolbar .button:hover {
+    -fx-background-color: #3a3e48;
+    -fx-text-fill: #e8eaee;
+}
+.minion-workbench .paged-slide-toolbar .toggle-button:selected {
+    -fx-background-color: #4a6fa5;
+    -fx-text-fill: white;
+}
+.minion-workbench .paged-slide-toolbar .text-field {
+    -fx-background-color: #2c2f36;
+    -fx-text-fill: #e8eaee;
+    -fx-border-color: #3a3e48;
+    -fx-border-radius: 4;
+    -fx-padding: 2 6 2 6;
+    -fx-font-size: 13px;
+    -fx-pref-height: 26;
+}
+.minion-workbench .paged-slide-toolbar .artifact-meta {
+    -fx-text-fill: #9da3ae;
+    -fx-font-size: 12px;
+}
+/* 缩略图栏：暗底卡片式 */
+.minion-workbench .paged-slide-viewer .list-view {
+    -fx-background-color: #1e2128;
+    -fx-control-inner-background: #1e2128;
+    -fx-border-color: derive(#1e2128, -15%);
+    -fx-border-width: 0 1 0 0;
+}
+.minion-workbench .paged-slide-viewer .list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #9da3ae;
+    -fx-padding: 6 8 6 8;
+    -fx-alignment: center;
+    -fx-border-color: transparent;
+    -fx-border-width: 2;
+    -fx-border-radius: 4;
+}
+.minion-workbench .paged-slide-viewer .list-cell:hover {
+    -fx-background-color: #2a2d35;
+}
+.minion-workbench .paged-slide-viewer .list-cell:selected {
+    -fx-background-color: #2a2d35;
+    -fx-border-color: #4a6fa5;
+    -fx-text-fill: #e8eaee;
+}
+.minion-workbench .paged-slide-viewer .list-cell .image-view {
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.4), 6, 0.3, 0, 2);
+}
+/* 页面画布：深灰底+居中白页+柔和投影 */
+.minion-workbench .paged-slide-viewer .scroll-pane,
+.minion-workbench .paged-slide-viewer .scroll-pane > .viewport,
+.minion-workbench .zoomable-image-stage {
+    -fx-background-color: #1a1d23;
+}
+.minion-workbench .paged-slide-viewer .image-view {
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.5), 20, 0.18, 0, 4);
+}
+.minion-workbench .paged-slide-viewer .status {
+    -fx-text-fill: #6b7078;
+    -fx-font-size: 11px;
+    -fx-padding: 2 12 4 12;
+    -fx-background-color: #1a1d23;
+}
+/* PPTX 卡片 */
+.minion-workbench .pptx-card-list {
+    -fx-background-color: #1a1d23;
+    -fx-control-inner-background: #1a1d23;
+}
+.minion-workbench .pptx-card-list .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 8 14;
+}
+.minion-workbench .pptx-card {
+    -fx-background-color: linear-gradient(to bottom right, #262932, #1e2128);
+    -fx-border-color: derive(#262932, -20%);
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 12, 0.14, 0, 2);
+    -fx-padding: 14 18;
+}
+.minion-workbench .pptx-card-number {
+    -fx-text-fill: #4a6fa5;
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+}
+.minion-workbench .pptx-card-title {
+    -fx-text-fill: #e8eaee;
+    -fx-font-size: 20px;
+    -fx-font-weight: bold;
+}
+.minion-workbench .pptx-card-body {
+    -fx-text-fill: #9da3ae;
+    -fx-font-size: 13px;
+}
+.minion-workbench .workbook-sheet {
+    -fx-padding: 8;
+    -fx-background-color: -wb-canvas;
+}
+.minion-workbench .workbook-sheet .table-view {
+    -fx-background-color: -wb-surface;
+    -fx-control-inner-background: -wb-surface;
+    -fx-table-cell-border-color: -wb-border;
+}
+.minion-workbench .workbook-sheet .column-header-background {
+    -fx-background-color: -wb-reader;
+}
+.minion-workbench .workbook-sheet .column-header,
+.minion-workbench .workbook-sheet .table-cell {
+    -fx-text-fill: -wb-ink;
+    -fx-border-color: -wb-border;
+}
+
 /* ===== 现代 AI Agent 统一精修层（模块 1–4：四套主题全面接管 + 过程胶囊 + Markdown 卡片） ===== */
 
-/* 1. 对话流分层：用户提问卡片、AI 结论留白、折叠过程胶囊、告警条 */
+/* 1. 对话流统一左对齐轨道：所有卡片与无框回复共享完全一致的左右边距与标签列宽 */
 .minion-workbench .workbench-transcript { -fx-spacing: 10; -fx-padding: 20 24 22 24; }
-.minion-workbench .transcript-row { -fx-alignment: top-left; -fx-spacing: 10; -fx-padding: 2 6 2 2; }
+.minion-workbench .transcript-row {
+    -fx-alignment: top-left;
+    -fx-spacing: 12;
+    -fx-padding: 6 14 6 14;
+}
 .minion-workbench .transcript-user {
     -fx-background-color: -wb-surface;
-    -fx-background-radius: 11;
-    -fx-border-color: -wb-border-subtle;
-    -fx-border-radius: 11;
+    -fx-background-radius: 10;
+    -fx-border-color: -wb-border;
+    -fx-border-radius: 10;
     -fx-border-width: 1;
-    -fx-padding: 10 14 10 12;
+    -fx-padding: 11 14 11 14;
 }
-.minion-workbench .transcript-reply { -fx-padding: 8 8 10 2; }
-.minion-workbench .transcript-process { -fx-padding: 1 4 1 2; -fx-alignment: top-left; }
+.minion-workbench .transcript-reply {
+    -fx-padding: 8 14 10 14;
+}
+.minion-workbench .transcript-process {
+    -fx-padding: 5 14 5 14;
+    -fx-alignment: top-left;
+}
+/* 整行统一卡片：使【思考】/【工具】标签与【输入】一样位于卡片内部，左右边缘完全对齐 */
+.minion-workbench .transcript-process-card {
+    -fx-background-color: -wb-collapsible-bg;
+    -fx-background-radius: 10;
+    -fx-border-color: -wb-border-subtle;
+    -fx-border-radius: 10;
+    -fx-border-width: 1;
+    -fx-padding: 8 14 8 14;
+}
+.minion-workbench .transcript-process-card:hover {
+    -fx-border-color: -wb-border;
+}
+.minion-workbench .transcript-stats {
+    -fx-padding: 3 14 4 14;
+    -fx-opacity: 0.85;
+}
 .minion-workbench .transcript-error {
     -fx-background-color: -wb-danger-bg;
-    -fx-background-radius: 9;
+    -fx-background-radius: 10;
     -fx-border-color: -wb-danger-border;
-    -fx-border-radius: 9;
+    -fx-border-radius: 10;
     -fx-border-width: 1;
-    -fx-padding: 8 12 8 10;
+    -fx-padding: 10 14 10 14;
 }
 .minion-workbench .transcript-error .msg-textarea .content { -fx-background-color: -wb-danger-bg; }
 .minion-workbench .transcript-warn {
     -fx-background-color: -wb-warn-bg;
-    -fx-background-radius: 9;
+    -fx-background-radius: 10;
     -fx-border-color: -wb-warn-border;
-    -fx-border-radius: 9;
+    -fx-border-radius: 10;
     -fx-border-width: 1;
-    -fx-padding: 8 12 8 10;
+    -fx-padding: 10 14 10 14;
 }
 .minion-workbench .transcript-warn .msg-textarea .content { -fx-background-color: -wb-warn-bg; }
+
+/* 统一标签列宽（最小 68px 居中微胶囊，不设固定 pref-width，长标签如【引导·已读】自动伸展绝不截断） */
 .minion-workbench .log-tag {
-    -fx-padding: 2 6 2 6;
+    -fx-min-width: 68;
+    -fx-alignment: center;
+    -fx-text-overrun: clip;
+    -fx-padding: 2 8 2 8;
     -fx-background-color: -wb-badge-bg;
     -fx-background-radius: 5;
     -fx-font-size: 12px;
     -fx-font-weight: bold;
     -fx-opacity: 0.95;
 }
+.minion-workbench .log-sys { -fx-text-fill: -wb-muted; }
 .minion-workbench .transcript-user .log-tag { -fx-background-color: -wb-select; -fx-text-fill: -wb-accent-strong; }
-.minion-workbench .transcript-reply .log-tag { -fx-background-color: transparent; -fx-padding: 3 2 0 0; -fx-text-fill: -wb-accent; }
-.minion-workbench .transcript-process .log-tag { -fx-background-color: transparent; -fx-padding: 6 2 0 0; -fx-font-size: 12px; }
-.minion-workbench .transcript-error .log-tag { -fx-background-color: transparent; -fx-text-fill: -wb-danger; }
-.minion-workbench .transcript-warn .log-tag { -fx-background-color: transparent; -fx-text-fill: -wb-warn; }
+.minion-workbench .transcript-reply .log-tag { -fx-background-color: -wb-badge-bg; -fx-text-fill: -wb-accent; }
+.minion-workbench .transcript-process .log-tag { -fx-background-color: -wb-badge-bg; -fx-font-size: 12px; }
+.minion-workbench .transcript-stats .log-tag { -fx-background-color: transparent; -fx-text-fill: -wb-muted; }
+.minion-workbench .transcript-error .log-tag { -fx-background-color: -wb-danger-border; -fx-text-fill: -wb-danger; }
+.minion-workbench .transcript-warn .log-tag { -fx-background-color: -wb-warn-border; -fx-text-fill: -wb-warn; }
 
-/* 2. 折叠过程胶囊/卡片（思考、工具调用、工具结果） */
+/* 2. 折叠过程内容区（外框已统一上移至 .transcript-process-card，内部保持简洁无嵌套双框） */
 .minion-workbench .log-collapsible {
     -fx-background-color: transparent;
-    -fx-padding: 2 0 2 0;
-}
-.minion-workbench .log-collapsible-expandable {
-    -fx-background-color: -wb-collapsible-bg;
-    -fx-background-radius: 8;
-    -fx-border-color: -wb-border-subtle;
-    -fx-border-radius: 8;
-    -fx-border-width: 1;
-    -fx-padding: 6 10 6 10;
-}
-.minion-workbench .log-collapsible-expandable:hover {
-    -fx-border-color: -wb-border;
-}
-.minion-workbench .log-collapsible-expanded {
-    -fx-border-color: -wb-border;
-    -fx-padding: 7 10 9 10;
+    -fx-padding: 0;
 }
 .minion-workbench .log-collapse-toggle {
     -fx-text-fill: -wb-muted;
@@ -766,7 +1079,7 @@
     -fx-border-width: 1 0 0 0;
 }
 /* 保证折叠卡内 TextArea 保持不透明同色底，维持 FX8 LCD 子像素清晰渲染 */
-.minion-workbench .log-collapsible-expandable .msg-textarea .content {
+.minion-workbench .transcript-process-card .msg-textarea .content {
     -fx-background-color: -wb-collapsible-bg;
 }
 .minion-workbench .log-summary-text { -fx-text-fill: -wb-secondary; -fx-font-size: 14px; }
