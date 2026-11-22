@@ -27,7 +27,9 @@ public final class TaskOutputTool implements Tool {
     @Override public JsonObject schema() {
         JsonObject schema = SchemaGenerator.objectSchema("读取后台任务增量输出",
                 new String[]{"task_id", "block", "timeout"}, new String[]{"task_id"});
-        schema.getAsJsonObject("properties").addProperty("block", "boolean");
+        JsonObject block = new JsonObject();
+        block.addProperty("type", "boolean");
+        schema.getAsJsonObject("properties").add("block", block);
         return schema;
     }
 
