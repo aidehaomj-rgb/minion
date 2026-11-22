@@ -619,11 +619,18 @@ public class MainWindow {
      * §10.9 信任复核+5s 超时+首行渲染）。
      */
     private void refreshStatusBar() {
+        // §10.4 状态栏默认隐藏（statusbar.enabled=true 开启，或配置了自定义 statusLine 命令）
+        boolean enabled = Boolean.parseBoolean(MinionApp.config().get("statusbar.enabled", "false"));
+        String statusCommand = MinionApp.config().get("statusLine", "");
+        boolean hasCustom = statusCommand != null && statusCommand.contains("\"command\"");
+        if (!enabled && !hasCustom) {
+            inputView.updateStatusBar(null);
+            return;
+        }
         try {
             SessionHandle h = manager.currentSession();
             StringBuilder sb = new StringBuilder();
-            if (h != null && h.isLoaded()) {
-                // 基础段：权限模式 + 上下文
+            if (enabled && h != null && h.isLoaded()) {
                 String mode = MinionApp.config().permissionMode();
                 sb.append("[").append(mode).append("]");
                 com.minion.core.context.ContextManager cm = h.loop.contextManager();
@@ -637,7 +644,6 @@ public class MainWindow {
                         sb.append(" compact余").append((compactAt - used) * 100 / compactAt).append("%");
                     }
                 }
-                // 任务计数（TodoWrite + 后台）
                 int pendingTodos = 0;
                 synchronized (h.session.todos) {
                     for (com.minion.core.agent.TodoList.TodoItem t : h.session.todos.items)
@@ -647,8 +653,7 @@ public class MainWindow {
             }
             // 自定义 statusLine（异步：不阻塞 FX 线程——后台线程执行命令，结果 runLater 更新）
             final String base = sb.toString();
-            String statusCommand = MinionApp.config().get("statusLine", "");
-            if (statusCommand != null && statusCommand.contains("\"command\"")) {
+            if (hasCustom) {
                 com.google.gson.JsonObject spec = com.google.gson.JsonParser.parseString(statusCommand)
                         .getAsJsonObject();
                 String command = spec.has("command") ? spec.get("command").getAsString() : null;
@@ -682,7 +687,7 @@ public class MainWindow {
                     return;   // 异步路径，等 runLater 更新
                 }
             }
-            inputView.updateStatusBar(base.toString());
+            inputView.updateStatusBar(base.isEmpty() ? null : base.toString());
         } catch (Exception ignored) {   // 状态栏失败不影响主功能
         }
     }
