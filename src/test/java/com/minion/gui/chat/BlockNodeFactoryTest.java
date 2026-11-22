@@ -112,4 +112,33 @@ public class BlockNodeFactoryTest {
             assertNull(link.getContextMenu());
         });
     }
+
+    @Test public void codeBlockRendersModernCardWithLangHeaderAndCopyButton() throws Exception {
+        onFx(() -> {
+            Node node = BlockNodeFactory.create(MarkdownRenderer.parse("```java\nint x = 1;\n```").get(0));
+            assertTrue("代码块应渲染为卡片容器", node.getStyleClass().contains("md-code-card"));
+            assertTrue(node instanceof javafx.scene.layout.VBox);
+            javafx.scene.layout.VBox card = (javafx.scene.layout.VBox) node;
+            assertEquals(2, card.getChildren().size());
+            assertTrue(card.getChildren().get(0).getStyleClass().contains("md-code-header"));
+            assertTrue(card.getChildren().get(1).getStyleClass().contains("md-code-body"));
+            Label body = (Label) card.getChildren().get(1);
+            assertEquals("int x = 1;", body.getText());
+        });
+    }
+
+    @Test public void markdownBlocksUseThemeClassesWithoutHardcodedDarkFills() throws Exception {
+        onFx(() -> {
+            Node heading = BlockNodeFactory.create(MarkdownRenderer.parse("## 标题").get(0));
+            assertTrue(heading.getStyleClass().contains("md-heading"));
+            assertFalse("标题不应硬编码深色文字色", heading.getStyle().contains("#e6e8ee"));
+
+            Node quote = BlockNodeFactory.create(MarkdownRenderer.parse("> 引用内容").get(0));
+            assertTrue(quote.getStyleClass().contains("md-quote"));
+            assertFalse("引用块不应硬编码边框色", quote.getStyle().contains("#4f8cff"));
+
+            Node table = BlockNodeFactory.create(MarkdownRenderer.parse("| A | B |\n|---|---|\n| 1 | 2 |").get(0));
+            assertTrue(table.getStyleClass().contains("md-table"));
+        });
+    }
 }

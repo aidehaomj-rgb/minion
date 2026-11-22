@@ -222,6 +222,12 @@ public class MainWindow {
         // 运行状态指示器：独占输入框上方的一行，不覆盖流式输出。
         runningIndicator = new RunningIndicator();
         inputView.setStatusNode(runningIndicator);
+        // §10.4 两层状态栏：footer 初始化 + 2s 定时刷新（权限模式|上下文|压缩剩余 + 自定义 statusLine）
+        inputView.initStatusBar();
+        javafx.animation.Timeline statusTimer = new javafx.animation.Timeline(
+                new javafx.animation.KeyFrame(javafx.util.Duration.seconds(2), e -> refreshStatusBar()));
+        statusTimer.setCycleCount(javafx.animation.Timeline.INDEFINITE);
+        statusTimer.play();
         jumpLatestButton = new Button("↓ 最新对话");
         jumpLatestButton.getStyleClass().add("btn-jump-latest");
         jumpLatestButton.setTooltip(new Tooltip("直达对话底部并继续跟随新消息"));
@@ -607,6 +613,80 @@ public class MainWindow {
      * stage.close() 后补 Platform.exit()：即使有残留非模态窗口（如 JDK 版本警告），
      * 也强制 JavaFX 平台退出——否则 FX 线程不退，StatusDot 等 Timeline 动画持续刷新占 CPU。
      */
+    /**
+     * §10.4 两层状态栏刷新（2s Timeline）：权限模式 | 上下文占用 | 压缩剩余 |
+     * 任务计数 | 自定义 statusLine（settings statusLine:{type:command,command}，
+     * §10.9 信任复核+5s 超时+首行渲染）。
+     */
+    private void refreshStatusBar() {
+        try {
+            SessionHandle h = manager.currentSession();
+            StringBuilder sb = new StringBuilder();
+            if (h != null && h.isLoaded()) {
+                // 基础段：权限模式 + 上下文
+                String mode = MinionApp.config().permissionMode();
+                sb.append("[").append(mode).append("]");
+                com.minion.core.context.ContextManager cm = h.loop.contextManager();
+                if (cm != null) {
+                    int used = com.minion.core.context.TokenCounter.estimateMessages(h.session.messages);
+                    int max = cm.maxTokens();
+                    int pct = max > 0 ? used * 100 / max : 0;
+                    sb.append(" ctx ").append(pct).append("%");
+                    int compactAt = cm.autoCompressAtTokens();
+                    if (compactAt > 0 && used < compactAt) {
+                        sb.append(" compact余").append((compactAt - used) * 100 / compactAt).append("%");
+                    }
+                }
+                // 任务计数（TodoWrite + 后台）
+                int pendingTodos = 0;
+                synchronized (h.session.todos) {
+                    for (com.minion.core.agent.TodoList.TodoItem t : h.session.todos.items)
+                        if (!t.done) pendingTodos++;
+                }
+                if (pendingTodos > 0) sb.append(" 待办").append(pendingTodos);
+            }
+            // 自定义 statusLine（异步：不阻塞 FX 线程——后台线程执行命令，结果 runLater 更新）
+            final String base = sb.toString();
+            String statusCommand = MinionApp.config().get("statusLine", "");
+            if (statusCommand != null && statusCommand.contains("\"command\"")) {
+                com.google.gson.JsonObject spec = com.google.gson.JsonParser.parseString(statusCommand)
+                        .getAsJsonObject();
+                String command = spec.has("command") ? spec.get("command").getAsString() : null;
+                if (command != null && !command.trim().isEmpty()) {
+                    final String cmd = command.trim();
+                    final SessionHandle handle = h;
+                    manager.background(() -> {
+                        try {
+                            com.google.gson.JsonObject payload = com.minion.core.ui.statusline.StatusLineRunner
+                                    .payload(handle == null ? "" : handle.session.id,
+                                            MinionApp.config().get("model.name", ""),
+                                            handle == null ? "" : manager.currentWorkspaceDir(),
+                                            "", 0, MinionApp.config().get("output.style", "default"), "");
+                            String custom = com.minion.core.ui.statusline.StatusLineRunner.run(
+                                    cmd, payload,
+                                    new com.minion.core.security.TrustGate(
+                                            com.minion.core.security.ProjectTrustStore.load(
+                                                    com.minion.core.config.Config.jarDir()),
+                                            MinionApp.config().trustStoreEnabled(),
+                                            com.minion.core.security.TrustGate.DENY),
+                                    manager.currentWorkspaceDir());
+                            final String result = custom == null ? "" : custom;
+                            javafx.application.Platform.runLater(() ->
+                                    inputView.updateStatusBar(
+                                            (base + " " + result).trim()));
+                        } catch (Exception ignored) {
+                            javafx.application.Platform.runLater(() ->
+                                    inputView.updateStatusBar(base));
+                        }
+                    });
+                    return;   // 异步路径，等 runLater 更新
+                }
+            }
+            inputView.updateStatusBar(base.toString());
+        } catch (Exception ignored) {   // 状态栏失败不影响主功能
+        }
+    }
+
     private void confirmClose() {
         if (!manager.hasRunning()) {
             manager.shutdown();

@@ -2,31 +2,52 @@
    keep the hierarchy close to Codex: separators first, color only for state. */
 .minion-workbench {
     -wb-rail: #141518;
-    -wb-canvas: #1e1f22;
-    -wb-reader: #212225;
-    -wb-surface: #282a2e;
-    -wb-hover: #313438;
-    -wb-border: #34373b;
-    -wb-select: #2c2f33;
-    -wb-ink: #f2f2f0;
-    -wb-secondary: #c8c9c7;
-    -wb-muted: #95989c;
-    -wb-accent: #8ea9c4;
-    -wb-accent-strong: #c5d9eb;
-    -wb-on-accent: #111820;
-    -wb-link: #9eb9d5;
-    -wb-focus: #7798b7;
-    -wb-highlight: #385064;
-    -wb-pending: #506a80;
-    -wb-tool: #b9a6c8;
-    -wb-scroll: #414448;
-    -wb-scroll-hover: #565a60;
+    -wb-canvas: #1c1e22;
+    -wb-reader: #202226;
+    -wb-surface: #26292e;
+    -wb-elevated: #2c3037;
+    -wb-hover: #32363e;
+    -wb-border: #343840;
+    -wb-border-subtle: #2b2e35;
+    -wb-select: #2b313a;
+    -wb-ink: #f2f3f5;
+    -wb-secondary: #c8cbd1;
+    -wb-muted: #9398a1;
+    -wb-accent: #7aa8d6;
+    -wb-accent-strong: #b9d7f5;
+    -wb-on-accent: #0f1620;
+    -wb-link: #8fbbe6;
+    -wb-focus: #6e9ed1;
+    -wb-highlight: #354e66;
+    -wb-pending: #4c6982;
+    -wb-tool: #b8a3d1;
+    -wb-scroll: #3e424a;
+    -wb-scroll-hover: #565c66;
     /* 首屏 CTA 与强操作：比 accent 更饱和一档，保持唯一强调源 */
-    -wb-cta: #4f86c2;
-    -wb-cta-hover: #679ad4;
+    -wb-cta: #4c86c6;
+    -wb-cta-hover: #649bd8;
     -wb-on-cta: #f6fafd;
     -wb-dot-running: #f2c94c;
     -wb-dot-done: #3fb950;
+    /* 语义与富文本令牌（全部不透明，保护 FX8 LCD 子像素渲染） */
+    -wb-code-bg: #15171b;
+    -wb-code-header: #1e2127;
+    -wb-code-border: #30343d;
+    -wb-code-fg: #dce1e8;
+    -wb-inline-code: #8ec3f8;
+    -wb-quote-bg: #22252b;
+    -wb-collapsible-bg: #22252b;
+    -wb-collapsible-hover: #292d34;
+    -wb-badge-bg: #2e323a;
+    -wb-danger: #f06a64;
+    -wb-danger-bg: #2b1c1e;
+    -wb-danger-border: #5a3034;
+    -wb-warn: #e5b752;
+    -wb-warn-bg: #2a2419;
+    -wb-warn-border: #574628;
+    -wb-success: #46c263;
+    -wb-success-bg: #1a2a20;
+    -wb-success-border: #2c5239;
     -fx-background-color: -wb-canvas;
     -fx-font-size: 16px;
     /* 全局关闭 Modena 焦点环：自绘控件用自己的 focus 边框表达焦点 */
@@ -37,87 +58,147 @@
 /* Theme variants. Graphite is the compatibility default; all four retain the same
    information hierarchy and only change surfaces, text and action emphasis. */
 .minion-workbench.theme-obsidian {
-    -wb-rail: #0a0e14;
-    -wb-canvas: #121822;
-    -wb-reader: #171f2b;
-    -wb-surface: #1e2836;
-    -wb-hover: #283548;
-    -wb-border: #2e3c52;
-    -wb-select: #223145;
-    -wb-ink: #f2f5f9;
-    -wb-secondary: #c6cfdc;
-    -wb-muted: #93a1b5;
-    -wb-accent: #6fb1ff;
-    -wb-accent-strong: #a8d1ff;
-    -wb-on-accent: #081018;
-    -wb-link: #86b9ff;
-    -wb-focus: #5f9fe8;
-    -wb-highlight: #2b4560;
-    -wb-pending: #3f5c78;
-    -wb-tool: #b7a4d6;
-    -wb-scroll: #3a4a61;
-    -wb-scroll-hover: #4d607c;
-    -wb-cta: #3f8ae0;
-    -wb-cta-hover: #5ba0f0;
+    -wb-rail: #090d14;
+    -wb-canvas: #0f1520;
+    -wb-reader: #131b28;
+    -wb-surface: #192232;
+    -wb-elevated: #202c40;
+    -wb-hover: #253349;
+    -wb-border: #2a3a52;
+    -wb-border-subtle: #1e2a3d;
+    -wb-select: #1e304a;
+    -wb-ink: #f1f5fb;
+    -wb-secondary: #c4d0e0;
+    -wb-muted: #8c9cb3;
+    -wb-accent: #5da9ff;
+    -wb-accent-strong: #9ccaff;
+    -wb-on-accent: #07101c;
+    -wb-link: #7cb8ff;
+    -wb-focus: #549df2;
+    -wb-highlight: #274464;
+    -wb-pending: #36597d;
+    -wb-tool: #b69fe0;
+    -wb-scroll: #33445c;
+    -wb-scroll-hover: #4b6180;
+    -wb-cta: #3b88e6;
+    -wb-cta-hover: #579ef5;
     -wb-on-cta: #f5faff;
     -wb-dot-running: #f2c94c;
     -wb-dot-done: #3fb950;
+    -wb-code-bg: #0a0f18;
+    -wb-code-header: #121a28;
+    -wb-code-border: #243349;
+    -wb-code-fg: #d9e4f2;
+    -wb-inline-code: #7cc0ff;
+    -wb-quote-bg: #141d2c;
+    -wb-collapsible-bg: #141c29;
+    -wb-collapsible-hover: #1b2637;
+    -wb-badge-bg: #202e44;
+    -wb-danger: #f86c66;
+    -wb-danger-bg: #26161c;
+    -wb-danger-border: #5c2a34;
+    -wb-warn: #ebb94f;
+    -wb-warn-bg: #242016;
+    -wb-warn-border: #594722;
+    -wb-success: #42c968;
+    -wb-success-bg: #12241d;
+    -wb-success-border: #24523c;
 }
 
 .minion-workbench.theme-mist {
-    -wb-rail: #181d23;
-    -wb-canvas: #242a32;
-    -wb-reader: #282f38;
-    -wb-surface: #2f3741;
-    -wb-hover: #38424c;
-    -wb-border: #424b55;
-    -wb-select: #2e3944;
-    -wb-ink: #eef1f4;
-    -wb-secondary: #c5ccd3;
-    -wb-muted: #9aa5af;
-    -wb-accent: #91adc5;
-    -wb-accent-strong: #c3d8e8;
-    -wb-on-accent: #111b24;
-    -wb-link: #a1bed7;
-    -wb-focus: #7f9db5;
-    -wb-highlight: #344c5e;
-    -wb-pending: #4b6477;
-    -wb-tool: #bba7c9;
-    -wb-scroll: #4e5964;
-    -wb-scroll-hover: #65717c;
-    -wb-cta: #4f88c8;
-    -wb-cta-hover: #699dd8;
+    -wb-rail: #171c23;
+    -wb-canvas: #222831;
+    -wb-reader: #262e38;
+    -wb-surface: #2d3642;
+    -wb-elevated: #343f4d;
+    -wb-hover: #3a4554;
+    -wb-border: #424e5d;
+    -wb-border-subtle: #35404d;
+    -wb-select: #2d3c4d;
+    -wb-ink: #eef2f6;
+    -wb-secondary: #c4cdd7;
+    -wb-muted: #95a2b0;
+    -wb-accent: #82afd6;
+    -wb-accent-strong: #bedbf5;
+    -wb-on-accent: #101b26;
+    -wb-link: #94bde0;
+    -wb-focus: #739fc7;
+    -wb-highlight: #324d64;
+    -wb-pending: #48667d;
+    -wb-tool: #baa4d1;
+    -wb-scroll: #4c5866;
+    -wb-scroll-hover: #637182;
+    -wb-cta: #4b87c9;
+    -wb-cta-hover: #659ddb;
     -wb-on-cta: #f7fafd;
     -wb-dot-running: #f2c94c;
     -wb-dot-done: #3fb950;
+    -wb-code-bg: #1a2028;
+    -wb-code-header: #242c36;
+    -wb-code-border: #3a4654;
+    -wb-code-fg: #dce4ee;
+    -wb-inline-code: #95c5ee;
+    -wb-quote-bg: #27303b;
+    -wb-collapsible-bg: #272f3a;
+    -wb-collapsible-hover: #303a47;
+    -wb-badge-bg: #364250;
+    -wb-danger: #f3746e;
+    -wb-danger-bg: #312126;
+    -wb-danger-border: #633840;
+    -wb-warn: #e8bc5c;
+    -wb-warn-bg: #2f2a1f;
+    -wb-warn-border: #5e4f2d;
+    -wb-success: #4cc46b;
+    -wb-success-bg: #1e3028;
+    -wb-success-border: #345c47;
 }
 
 .minion-workbench.theme-light {
-    -wb-rail: #ececea;
-    -wb-canvas: #f7f7f5;
-    -wb-reader: #fbfbfa;
+    -wb-rail: #eeefe9;
+    -wb-canvas: #f8f9fa;
+    -wb-reader: #fcfcfd;
     -wb-surface: #ffffff;
-    -wb-hover: #e5e5e2;
-    -wb-border: #d9d9d4;
-    -wb-select: #e9e9e7;
-    -wb-ink: #222426;
-    -wb-secondary: #5f6266;
-    -wb-muted: #808387;
-    -wb-accent: #3d7ab8;
-    -wb-accent-strong: #235a8c;
+    -wb-elevated: #f3f5f8;
+    -wb-hover: #e7ebf0;
+    -wb-border: #d8dde4;
+    -wb-border-subtle: #e5e9ef;
+    -wb-select: #e4eef9;
+    -wb-ink: #1d2229;
+    -wb-secondary: #515a66;
+    -wb-muted: #76808e;
+    -wb-accent: #2b6ec2;
+    -wb-accent-strong: #1c5194;
     -wb-on-accent: #ffffff;
-    -wb-link: #2f6db3;
-    -wb-focus: #4a86c2;
-    -wb-highlight: #cfe0f2;
-    -wb-pending: #8fb3d4;
-    -wb-tool: #71577f;
-    -wb-scroll: #d0d0cc;
-    -wb-scroll-hover: #b9b9b4;
-    -wb-cta: #2f6db3;
-    -wb-cta-hover: #235a8c;
+    -wb-link: #2463b5;
+    -wb-focus: #3b7dd1;
+    -wb-highlight: #cce0f7;
+    -wb-pending: #8bb4e0;
+    -wb-tool: #6c4d8a;
+    -wb-scroll: #ccd2da;
+    -wb-scroll-hover: #aeb7c4;
+    -wb-cta: #2568be;
+    -wb-cta-hover: #1d56a1;
     -wb-on-cta: #ffffff;
     -wb-dot-running: #b77900;
-    -wb-dot-done: #238636;
+    -wb-dot-done: #1f883d;
+    -wb-code-bg: #f3f5f8;
+    -wb-code-header: #e8ecf2;
+    -wb-code-border: #d5dce5;
+    -wb-code-fg: #24292f;
+    -wb-inline-code: #1f5da8;
+    -wb-quote-bg: #f1f5fa;
+    -wb-collapsible-bg: #f2f4f8;
+    -wb-collapsible-hover: #e8ecf3;
+    -wb-badge-bg: #e4e9f0;
+    -wb-danger: #c62828;
+    -wb-danger-bg: #fdf2f2;
+    -wb-danger-border: #f0c2c2;
+    -wb-warn: #9a6700;
+    -wb-warn-bg: #fdf8eb;
+    -wb-warn-border: #ebd7a7;
+    -wb-success: #1f883d;
+    -wb-success-bg: #eff9f1;
+    -wb-success-border: #b8e0c2;
 }
 
 /* Shared window chrome and thin but draggable dividers */
@@ -586,3 +667,363 @@
     -fx-background-color: linear-gradient(to right, -wb-select, -wb-surface);
 }
 .minion-workbench .conversation-tabs .tab:selected .tab-label { -fx-text-fill: -wb-accent-strong; }
+
+/* ===== 现代 AI Agent 统一精修层（模块 1–4：四套主题全面接管 + 过程胶囊 + Markdown 卡片） ===== */
+
+/* 1. 对话流分层：用户提问卡片、AI 结论留白、折叠过程胶囊、告警条 */
+.minion-workbench .workbench-transcript { -fx-spacing: 10; -fx-padding: 20 24 22 24; }
+.minion-workbench .transcript-row { -fx-alignment: top-left; -fx-spacing: 10; -fx-padding: 2 6 2 2; }
+.minion-workbench .transcript-user {
+    -fx-background-color: -wb-surface;
+    -fx-background-radius: 11;
+    -fx-border-color: -wb-border-subtle;
+    -fx-border-radius: 11;
+    -fx-border-width: 1;
+    -fx-padding: 10 14 10 12;
+}
+.minion-workbench .transcript-reply { -fx-padding: 8 8 10 2; }
+.minion-workbench .transcript-process { -fx-padding: 1 4 1 2; -fx-alignment: top-left; }
+.minion-workbench .transcript-error {
+    -fx-background-color: -wb-danger-bg;
+    -fx-background-radius: 9;
+    -fx-border-color: -wb-danger-border;
+    -fx-border-radius: 9;
+    -fx-border-width: 1;
+    -fx-padding: 8 12 8 10;
+}
+.minion-workbench .transcript-error .msg-textarea .content { -fx-background-color: -wb-danger-bg; }
+.minion-workbench .transcript-warn {
+    -fx-background-color: -wb-warn-bg;
+    -fx-background-radius: 9;
+    -fx-border-color: -wb-warn-border;
+    -fx-border-radius: 9;
+    -fx-border-width: 1;
+    -fx-padding: 8 12 8 10;
+}
+.minion-workbench .transcript-warn .msg-textarea .content { -fx-background-color: -wb-warn-bg; }
+.minion-workbench .log-tag {
+    -fx-padding: 2 6 2 6;
+    -fx-background-color: -wb-badge-bg;
+    -fx-background-radius: 5;
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+    -fx-opacity: 0.95;
+}
+.minion-workbench .transcript-user .log-tag { -fx-background-color: -wb-select; -fx-text-fill: -wb-accent-strong; }
+.minion-workbench .transcript-reply .log-tag { -fx-background-color: transparent; -fx-padding: 3 2 0 0; -fx-text-fill: -wb-accent; }
+.minion-workbench .transcript-process .log-tag { -fx-background-color: transparent; -fx-padding: 6 2 0 0; -fx-font-size: 12px; }
+.minion-workbench .transcript-error .log-tag { -fx-background-color: transparent; -fx-text-fill: -wb-danger; }
+.minion-workbench .transcript-warn .log-tag { -fx-background-color: transparent; -fx-text-fill: -wb-warn; }
+
+/* 2. 折叠过程胶囊/卡片（思考、工具调用、工具结果） */
+.minion-workbench .log-collapsible {
+    -fx-background-color: transparent;
+    -fx-padding: 2 0 2 0;
+}
+.minion-workbench .log-collapsible-expandable {
+    -fx-background-color: -wb-collapsible-bg;
+    -fx-background-radius: 8;
+    -fx-border-color: -wb-border-subtle;
+    -fx-border-radius: 8;
+    -fx-border-width: 1;
+    -fx-padding: 6 10 6 10;
+}
+.minion-workbench .log-collapsible-expandable:hover {
+    -fx-border-color: -wb-border;
+}
+.minion-workbench .log-collapsible-expanded {
+    -fx-border-color: -wb-border;
+    -fx-padding: 7 10 9 10;
+}
+.minion-workbench .log-collapse-toggle {
+    -fx-text-fill: -wb-muted;
+    -fx-cursor: hand;
+    -fx-padding: 1 0 1 0;
+}
+.minion-workbench .log-collapse-toggle:hover .log-summary-text { -fx-text-fill: -wb-ink; }
+.minion-workbench .log-collapse-toggle:hover .icon-chevron { -fx-fill: -wb-accent; }
+.minion-workbench .log-collapse-badge {
+    -fx-background-color: -wb-badge-bg;
+    -fx-background-radius: 10;
+    -fx-padding: 2 8 2 8;
+    -fx-font-size: 11px;
+    -fx-text-fill: -wb-muted;
+}
+.minion-workbench .log-collapse-toggle:hover .log-collapse-badge {
+    -fx-background-color: -wb-hover;
+    -fx-text-fill: -wb-ink;
+}
+.minion-workbench .log-collapsible-body {
+    -fx-padding: 8 2 2 2;
+    -fx-border-color: -wb-border-subtle transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+}
+/* 保证折叠卡内 TextArea 保持不透明同色底，维持 FX8 LCD 子像素清晰渲染 */
+.minion-workbench .log-collapsible-expandable .msg-textarea .content {
+    -fx-background-color: -wb-collapsible-bg;
+}
+.minion-workbench .log-summary-text { -fx-text-fill: -wb-secondary; -fx-font-size: 14px; }
+
+/* 3. Markdown 富文本（完全由 -wb-* 令牌驱动，修复明亮浅色模式可读性） */
+.minion-workbench .md-heading { -fx-text-fill: -wb-ink; -fx-font-weight: bold; -fx-padding: 8 0 3 0; }
+.minion-workbench .md-h1 { -fx-border-color: transparent transparent -wb-border-subtle transparent; -fx-border-width: 0 0 1 0; -fx-padding: 8 0 6 0; }
+.minion-workbench .md-heading-text { -fx-fill: -wb-ink; }
+.minion-workbench .md-text { -fx-fill: -wb-ink; }
+.minion-workbench .md-inline-code { -fx-fill: -wb-inline-code; }
+.minion-workbench .md-link { -fx-text-fill: -wb-link; -fx-border-color: transparent; }
+.minion-workbench .md-link:hover { -fx-text-fill: -wb-accent-strong; -fx-underline: true; }
+.minion-workbench .md-bullet { -fx-text-fill: -wb-accent; -fx-font-weight: bold; }
+.minion-workbench .md-quote {
+    -fx-background-color: -wb-quote-bg;
+    -fx-background-radius: 0 7 7 0;
+    -fx-border-color: transparent transparent transparent -wb-accent;
+    -fx-border-width: 0 0 0 3;
+    -fx-padding: 8 12 8 12;
+}
+.minion-workbench .md-quote-label { -fx-text-fill: -wb-secondary; }
+.minion-workbench .md-quote-text { -fx-fill: -wb-secondary; }
+.minion-workbench .md-code-card {
+    -fx-background-color: -wb-code-bg;
+    -fx-background-radius: 9;
+    -fx-border-color: -wb-code-border;
+    -fx-border-radius: 9;
+    -fx-border-width: 1;
+}
+.minion-workbench .md-code-header {
+    -fx-background-color: -wb-code-header;
+    -fx-background-radius: 8 8 0 0;
+    -fx-border-color: transparent transparent -wb-code-border transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 5 10 5 12;
+}
+.minion-workbench .md-code-lang {
+    -fx-text-fill: -wb-muted;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-font-family: "Consolas", monospace;
+}
+.minion-workbench .md-code-copy {
+    -fx-background-color: transparent;
+    -fx-text-fill: -wb-secondary;
+    -fx-font-size: 12px;
+    -fx-padding: 2 8 2 8;
+    -fx-background-radius: 5;
+    -fx-border-color: transparent;
+    -fx-cursor: hand;
+}
+.minion-workbench .md-code-copy .icon-copy { -fx-fill: -wb-muted; }
+.minion-workbench .md-code-copy:hover { -fx-background-color: -wb-hover; -fx-text-fill: -wb-ink; }
+.minion-workbench .md-code-copy:hover .icon-copy { -fx-fill: -wb-accent; }
+.minion-workbench .md-code-copy.copied { -fx-text-fill: -wb-success; }
+.minion-workbench .md-code-copy.copied .icon-copy { -fx-fill: -wb-success; }
+.minion-workbench .md-code-body {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-padding: 10 14 12 14;
+    -fx-font-family: "Consolas", monospace;
+    -fx-font-size: 14px;
+    -fx-text-fill: -wb-code-fg;
+}
+.minion-workbench .md-table {
+    -fx-background-color: -wb-border;
+    -fx-background-radius: 8;
+    -fx-border-color: -wb-border;
+    -fx-border-radius: 8;
+    -fx-padding: 1;
+    -fx-hgap: 1;
+    -fx-vgap: 1;
+}
+.minion-workbench .md-table-cell { -fx-padding: 7 11 7 11; }
+.minion-workbench .md-table-head { -fx-background-color: -wb-elevated; }
+.minion-workbench .md-table-even { -fx-background-color: -wb-surface; }
+.minion-workbench .md-table-odd { -fx-background-color: -wb-reader; }
+.minion-workbench .md-table-head-text { -fx-fill: -wb-ink; }
+.minion-workbench .md-table-text { -fx-fill: -wb-secondary; }
+.minion-workbench .md-fallback { -fx-text-fill: -wb-ink; }
+
+/* 4. 补全弹层、输入块、确认卡片、右键菜单与 Tooltip 全面接管 */
+.minion-workbench .suggest-list {
+    -fx-background-color: -wb-elevated;
+    -fx-background-radius: 10;
+    -fx-border-color: -wb-border;
+    -fx-border-radius: 10;
+    -fx-padding: 4 0 4 0;
+}
+.minion-workbench .suggest-list .list-cell {
+    -fx-background-color: transparent;
+    -fx-background-insets: 1 5 1 5;
+    -fx-background-radius: 6;
+    -fx-padding: 6 10 6 10;
+}
+.minion-workbench .suggest-list .list-cell:filled:hover { -fx-background-color: -wb-hover; }
+.minion-workbench .suggest-list .list-cell:filled:selected { -fx-background-color: -wb-select; }
+.minion-workbench .suggest-label { -fx-text-fill: -wb-ink; -fx-font-size: 14px; }
+.minion-workbench .suggest-desc { -fx-text-fill: -wb-muted; -fx-font-size: 13px; }
+
+.minion-workbench .input-chip {
+    -fx-background-radius: 7;
+    -fx-border-radius: 7;
+    -fx-padding: 3 6 3 9;
+}
+.minion-workbench .chip-label { -fx-text-fill: -wb-ink; -fx-font-size: 13px; }
+.minion-workbench .input-chip-command, .minion-workbench .input-chip-skill {
+    -fx-background-color: -wb-select; -fx-border-color: -wb-accent;
+}
+.minion-workbench .input-chip-file {
+    -fx-background-color: -wb-success-bg; -fx-border-color: -wb-success-border;
+}
+.minion-workbench .input-chip-paste {
+    -fx-background-color: -wb-elevated; -fx-border-color: -wb-border;
+}
+.minion-workbench .input-chip-image {
+    -fx-background-color: -wb-select; -fx-border-color: -wb-tool;
+}
+
+.minion-workbench .sheet-card {
+    -fx-background-color: -wb-elevated;
+    -fx-background-radius: 12;
+    -fx-border-color: -wb-border;
+    -fx-border-radius: 12;
+}
+.minion-workbench .sheet-accent { -fx-background-color: -wb-warn; }
+.minion-workbench .sheet-warn { -fx-text-fill: -wb-warn; }
+.minion-workbench .sheet-title { -fx-text-fill: -wb-ink; }
+.minion-workbench .sheet-message {
+    -fx-background-color: -wb-code-bg;
+    -fx-border-color: -wb-border-subtle;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-text-fill: -wb-ink;
+}
+.minion-workbench .sheet-hint { -fx-text-fill: -wb-muted; }
+.minion-workbench .btn-approve {
+    -fx-background-color: linear-gradient(to bottom, -wb-success, -wb-dot-done);
+    -fx-text-fill: #ffffff;
+    -fx-background-radius: 7;
+}
+.minion-workbench .btn-ghost {
+    -fx-background-color: transparent;
+    -fx-text-fill: -wb-secondary;
+    -fx-border-color: -wb-border;
+    -fx-border-radius: 7;
+    -fx-background-radius: 7;
+}
+.minion-workbench .btn-ghost:hover {
+    -fx-background-color: -wb-hover;
+    -fx-text-fill: -wb-ink;
+    -fx-border-color: -wb-accent;
+}
+
+.minion-workbench .context-menu {
+    -fx-background-color: -wb-elevated;
+    -fx-background-radius: 8;
+    -fx-border-color: -wb-border;
+    -fx-border-radius: 8;
+    -fx-padding: 4;
+}
+.minion-workbench .context-menu .menu-item { -fx-background-radius: 5; -fx-padding: 5 12 5 10; }
+.minion-workbench .context-menu .menu-item:focused { -fx-background-color: -wb-select; }
+.minion-workbench .context-menu .menu-item .label { -fx-text-fill: -wb-ink; -fx-font-size: 13px; }
+.minion-workbench .tooltip {
+    -fx-background-color: -wb-elevated;
+    -fx-text-fill: -wb-ink;
+    -fx-border-color: -wb-border;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-font-size: 12px;
+    -fx-padding: 5 9 5 9;
+}
+
+/* 5. 历史导航胶囊、超细滚动条、右侧成果卡片与文件图标 */
+.minion-workbench .history-navigation .button,
+.minion-workbench .btn-jump-latest {
+    -fx-background-color: -wb-surface;
+    -fx-text-fill: -wb-secondary;
+    -fx-border-color: -wb-border-subtle;
+    -fx-border-radius: 14;
+    -fx-background-radius: 14;
+    -fx-padding: 4 11 4 11;
+}
+.minion-workbench .history-navigation .button:hover,
+.minion-workbench .btn-jump-latest:hover {
+    -fx-background-color: -wb-hover;
+    -fx-text-fill: -wb-ink;
+    -fx-border-color: -wb-accent;
+}
+.minion-workbench .scroll-bar:vertical { -fx-pref-width: 8px; }
+.minion-workbench .scroll-bar:horizontal { -fx-pref-height: 8px; }
+.minion-workbench .scroll-bar .thumb { -fx-background-radius: 4; }
+
+.minion-workbench .project-sidebar .text-field {
+    -fx-background-radius: 8;
+    -fx-border-color: -wb-border-subtle;
+    -fx-border-radius: 8;
+    -fx-padding: 7 10 7 10;
+}
+.minion-workbench .project-sidebar .text-field:focused {
+    -fx-border-color: -wb-focus;
+}
+
+.minion-workbench .artifact-card {
+    -fx-background-color: -wb-surface;
+    -fx-background-radius: 10;
+    -fx-border-color: -wb-border-subtle;
+    -fx-border-radius: 10;
+    -fx-padding: 9;
+}
+.minion-workbench .artifact-workspace .artifact-card-button:hover .artifact-card {
+    -fx-background-color: -wb-elevated;
+    -fx-border-color: -wb-accent;
+}
+.minion-workbench .workspace-files .list-cell {
+    -fx-background-radius: 6;
+    -fx-background-insets: 1 2 1 2;
+    -fx-padding: 7 10 7 8;
+}
+.minion-workbench .workspace-files .icon-folder { -fx-fill: -wb-accent; }
+.minion-workbench .workspace-files .icon-file { -fx-fill: -wb-muted; }
+.minion-workbench .workspace-files .list-cell.workspace-file-dir { -fx-font-weight: bold; }
+
+/* 6. 次级窗口统一圆角与输入框质感 */
+.minion-workbench.dialog-pane {
+    -fx-background-color: -wb-canvas;
+    -fx-border-color: -wb-border;
+}
+.minion-workbench.dialog-pane .header-panel { -fx-background-color: -wb-rail; }
+.minion-workbench.dialog-pane .label,
+.minion-workbench.dialog-pane .content.label,
+.minion-workbench.dialog-pane .check-box,
+.minion-workbench.dialog-pane .radio-button { -fx-text-fill: -wb-ink; }
+.minion-workbench.dialog-pane .text-field,
+.minion-workbench.dialog-pane .text-area,
+.minion-workbench.dialog-pane .combo-box-base,
+.minion-workbench.settings-workbench .text-field,
+.minion-workbench.settings-workbench .text-area,
+.minion-workbench.settings-workbench .combo-box-base,
+.minion-workbench.runtime-workbench .text-field,
+.minion-workbench.runtime-workbench .text-area,
+.minion-workbench.runtime-workbench .combo-box-base,
+.minion-workbench.automation-center .text-field,
+.minion-workbench.automation-center .text-area,
+.minion-workbench.automation-center .combo-box-base {
+    -fx-background-radius: 6;
+    -fx-border-radius: 6;
+}
+.minion-workbench.dialog-pane .text-field:focused,
+.minion-workbench.dialog-pane .text-area:focused,
+.minion-workbench.settings-workbench .text-field:focused,
+.minion-workbench.settings-workbench .text-area:focused,
+.minion-workbench.runtime-workbench .text-field:focused,
+.minion-workbench.runtime-workbench .text-area:focused,
+.minion-workbench.automation-center .text-field:focused,
+.minion-workbench.automation-center .text-area:focused {
+    -fx-border-color: -wb-focus;
+}
+.minion-workbench.dialog-pane .button:default {
+    -fx-background-color: linear-gradient(to bottom, -wb-cta-hover, -wb-cta);
+    -fx-text-fill: -wb-on-cta;
+    -fx-border-color: transparent;
+}
+.minion-workbench.dialog-pane .button:default:hover {
+    -fx-background-color: linear-gradient(to bottom, -wb-cta, -wb-cta-hover);
+}

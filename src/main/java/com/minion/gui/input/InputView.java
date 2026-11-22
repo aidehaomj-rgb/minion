@@ -199,6 +199,11 @@ public class InputView extends VBox {
         input.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
             boolean ctrl = e.isControlDown(), shift = e.isShiftDown(), alt = e.isAltDown(), meta = e.isMetaDown();
             boolean enterSends = config.enterSends();
+            // §10.1 Vim 模式（/vim 开关）：NORMAL 下拦截可打印键与方向键走状态机；
+            // INSERT 放行原生输入（中文输入法不受干扰）；Esc 回 NORMAL。发送键仍优先。
+            if (vimActive()) {
+                if (handleVimKey(e, ctrl, shift, alt, meta, enterSends)) return;
+            }
             // 发送键：默认模式优先于弹层（同现状：弹层开着 Ctrl+Enter 也发送）；
             // Enter 发送模式弹层打开时不发送，Enter/Ctrl+Enter 均走弹层确认
             if (isSendKey(e.getCode(), ctrl, shift, alt, meta, enterSends) && !(enterSends && popup.isShowing())) {
@@ -314,6 +319,28 @@ public class InputView extends VBox {
     public void setModelSelector(Node selector) {
         if (selector == null) return;
         bottomRow.getChildren().add(bottomRow.getChildren().size() - 1, selector);
+    }
+
+    /** §10.4 两层状态栏：底部 footer Label（权限模式 | 上下文占用% | 压缩剩余% + 自定义 statusLine） */
+    private final Label statusLineLabel = new Label();
+
+    public Label statusLineLabel() { return statusLineLabel; }
+
+    /** 初始化状态栏（MainWindow 装配时调用一次） */
+    public void initStatusBar() {
+        statusLineLabel.getStyleClass().add("status-line");
+        statusLineLabel.setVisible(false);   // 有内容时显示
+        bottomRow.getChildren().add(0, statusLineLabel);
+    }
+
+    /** 更新状态栏文本（定时刷新；null/空=隐藏） */
+    public void updateStatusBar(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            statusLineLabel.setVisible(false);
+            return;
+        }
+        statusLineLabel.setText(text);
+        statusLineLabel.setVisible(true);
     }
 
     /** 确认插入的最终文本：@ 文件补全补回 @ 前缀（FileSuggester 的 insertText 为纯路径）。
@@ -1182,6 +1209,72 @@ public class InputView extends VBox {
         if (n.endsWith(".bmp")) return "image/bmp";
         if (n.endsWith(".webp")) return "image/webp";
         return "image/png";
+    }
+
+    // ==================== §10.1 Vim 模式接线（/vim 开关 → 状态机驱动 TextArea） ====================
+
+    /** Vim 激活（/vim 已开且状态机就绪） */
+    private boolean vimActive() {
+        return manager != null && manager.vimEnabled() && manager.vim() != null;
+    }
+
+    /** Vim 键处理：返回 true=已消费（e 已 consume）；INSERT 放行原生输入（false 继续常规管线） */
+    private boolean handleVimKey(KeyEvent e, boolean ctrl, boolean shift, boolean alt, boolean meta,
+            boolean enterSends) {
+        com.minion.core.ui.vim.VimMachine vim = manager.vim();
+        // 发送键在 Vim 下仍最高优先（Ctrl+Enter 或 Enter 照发送）
+        if (isSendKey(e.getCode(), ctrl, shift, alt, meta, enterSends)) return false;
+        if (vim.mode() == com.minion.core.ui.vim.VimMachine.Mode.INSERT) {
+            // INSERT 模式：Esc 回 NORMAL；其余放行原生输入（中文输入法不受干扰）
+            if (e.getCode() == KeyCode.ESCAPE) {
+                e.consume();
+                vim.feed("esc");
+                syncVimToInput(vim);
+                return true;
+            }
+            return false;   // 原生输入
+        }
+        // NORMAL 模式：Esc 无操作；可打印字符与方向键走状态机
+        if (e.getCode() == KeyCode.ESCAPE) { e.consume(); return true; }
+        String key = vimKeyOf(e, ctrl, shift, alt, meta);
+        if (key == null) return false;   // 不可映射键放行（F 功能键等）
+        e.consume();
+        // 同步当前文本与光标进状态机（用户可能经剪贴板/鼠标编辑过）
+        String currentText = input.getText();
+        int caretPos = input.getCaretPosition();
+        if (!java.util.Objects.equals(currentText, vim.text())) vim.setText(currentText);
+        // feed
+        boolean handled = vim.feed(key);
+        if (handled) syncVimToInput(vim);
+        return true;
+    }
+
+    /** FX KeyEvent → Vim 键名（单字符可打印；方向键映射 hjkl；null=不可映射放行） */
+    private static String vimKeyOf(KeyEvent e, boolean ctrl, boolean shift, boolean alt, boolean meta) {
+        if (ctrl || alt || meta) return null;   // 修饰键组合不进 Vim（留给快捷键系统）
+        KeyCode c = e.getCode();
+        if (c == KeyCode.LEFT) return "h";
+        if (c == KeyCode.RIGHT) return "l";
+        if (c == KeyCode.HOME) return "0";
+        if (c == KeyCode.END) return "$";
+        String ch = e.getText();
+        if (ch != null && ch.length() == 1) {
+            char k = ch.charAt(0);
+            if (k >= 32 && k < 127) return shift ? ch : ch.toLowerCase();   // 可打印 ASCII
+        }
+        return null;
+    }
+
+    /** VimMachine 状态同步回 TextArea（文本+光标+模式提示） */
+    private void syncVimToInput(com.minion.core.ui.vim.VimMachine vim) {
+        String text = vim.text();
+        if (!java.util.Objects.equals(text, input.getText())) input.setText(text);
+        int cursor = Math.min(vim.cursor(), text.length());
+        if (input.getCaretPosition() != cursor) input.positionCaret(cursor);
+        // 模式提示（追加 pendingCount 信息到 Tooltip——不动布局）
+        String mode = vim.mode() == com.minion.core.ui.vim.VimMachine.Mode.INSERT ? "-- INSERT --" : "";
+        String pending = vim.state().pendingCount;
+        input.setPromptText(mode + (pending.isEmpty() ? "" : " count:" + pending));
     }
 
     /** 聊天区提示（无会话时静默忽略；发送前必先有会话或上传仅装饰） */

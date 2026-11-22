@@ -36,9 +36,11 @@ public final class ArtifactDocumentNodes {
         if (node instanceof TextFlow) {
             ((TextFlow)node).setLineSpacing(4);
             node.getStyleClass().add("artifact-prose");
+        } else if (block.type == MarkdownRenderer.Block.Type.CODE) {
+            node.getStyleClass().add("artifact-code-card");
         } else if (node instanceof Label) {
             ((Label)node).setWrapText(true);
-            node.getStyleClass().add(block.type==MarkdownRenderer.Block.Type.CODE?"artifact-code":"artifact-heading");
+            node.getStyleClass().add("artifact-heading");
         }
         return node;
     }

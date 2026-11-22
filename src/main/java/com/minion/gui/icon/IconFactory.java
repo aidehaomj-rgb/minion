@@ -67,6 +67,12 @@ public final class IconFactory {
     public static final String SEND_PATH = "M12 4 L20 13 L15 13 L15 21 L9 21 L9 13 L4 13 Z";
     /** 停止方块（自绘 path，InputView 迁移） */
     public static final String STOP_PATH = "M7 7 L17 7 L17 17 L7 17 Z";
+    /** content_copy（复制：代码块一键复制） */
+    public static final String COPY_PATH = "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z";
+    /** folder（目录：文件浏览） */
+    public static final String FOLDER_PATH = "M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
+    /** description（文件文档：文件浏览） */
+    public static final String FILE_DOC_PATH = "M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z";
 
     // ---- 工厂方法（样式类在 theme.css 定义颜色） ----
 
@@ -99,6 +105,9 @@ public final class IconFactory {
     public static SVGPath send() { return create(SEND_PATH, "icon-send"); }
     public static SVGPath stop() { return create(STOP_PATH, "icon-stop"); }
     public static SVGPath attachFile() { return create(ATTACH_FILE_PATH, "icon-upload"); }
+    public static SVGPath copy() { return create(COPY_PATH, "icon-copy"); }
+    public static SVGPath folder() { return create(FOLDER_PATH, "icon-folder"); }
+    public static SVGPath fileDoc() { return create(FILE_DOC_PATH, "icon-file"); }
 
     /** 按 24×24 viewport 缩放到目标像素（scale = px/24） */
     public static void size(SVGPath icon, double px) {

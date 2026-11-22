@@ -85,22 +85,34 @@ public class BashAdversarialTest {
         assertEquals("npm run", analyzer.suggestPrefix("npm run test && npm run lint"));
     }
 
-    /** PowerShell 分析器：fail-closed 恒非只读 */
+    /** PowerShell 分析器：白名单只读放行 + 危险拦截（切片 41 加厚后更新） */
     @Test public void powershellAnalyzerFailsClosed() {
         PowerShellCommandAnalyzer ps = new PowerShellCommandAnalyzer();
-        assertFalse(ps.analyze("Get-ChildItem").readOnly);
-        assertFalse(ps.analyze("Get-Content file").readOnly);
-        assertTrue(ps.analyze("Get-ChildItem").reasons.size() > 0);
-        assertTrue(ps.analyze("Invoke-Expression 'rm x'").reasons.get(0).contains("Invoke-Expression"));
-        assertTrue(ps.analyze("Remove-Item x").reasons.size() > 0);
+        // 白名单命令 → 只读（低危直通，不再弹窗）
+        assertTrue("Get-ChildItem 在白名单应只读", ps.analyze("Get-ChildItem").readOnly);
+        assertTrue("Get-Content file 在白名单应只读", ps.analyze("Get-Content file").readOnly);
+        // 危险命令 → dangerous
+        assertTrue(ps.analyze("Invoke-Expression 'rm x'").dangerous);
+        assertTrue(ps.analyze("Remove-Item x").dangerous);
+        // 未知命令 → fail-closed（非只读非危险，默认 ask）
+        PowerShellCommandAnalyzer.Analysis unknown = ps.analyze("UnknownCustomCmd");
+        assertFalse(unknown.readOnly);
+        assertFalse(unknown.dangerous);
+        assertTrue(unknown.reasons.get(0).contains("fail-closed"));
     }
 
-    /** CMD 分析器：fail-closed 恒非只读 */
+    /** CMD 分析器：白名单只读放行 + 危险拦截（切片 41 加厚后更新） */
     @Test public void cmdAnalyzerFailsClosed() {
         CmdCommandAnalyzer cmd = new CmdCommandAnalyzer();
-        assertFalse(cmd.analyze("dir").readOnly);
-        assertTrue(cmd.analyze("del x").reasons.get(0).contains("删除"));
-        assertTrue(cmd.analyze("reg add HKLM\\X").reasons.size() > 0);
+        // 白名单命令 → 只读
+        assertTrue("dir 在白名单应只读", cmd.analyze("dir").readOnly);
+        // 危险命令 → dangerous
+        assertTrue(cmd.analyze("del x").dangerous);
+        assertTrue(cmd.analyze("reg add HKLM\\X").dangerous);
+        // 未知命令 → fail-closed
+        CmdCommandAnalyzer.Analysis unknown = cmd.analyze("UnknownCmd123");
+        assertFalse(unknown.readOnly);
+        assertFalse(unknown.dangerous);
     }
 
     // ==================== 加载 ====================

@@ -494,6 +494,9 @@ public class ChatView extends VBox {
         row.getStyleClass().add("transcript-row");
         if (seg.tag.getStyleClass().contains("log-input")) row.getStyleClass().add("transcript-user");
         else if (seg.kind == StreamKind.REPLY) row.getStyleClass().add("transcript-reply");
+        else if (seg.collapsible != null) row.getStyleClass().add("transcript-process");
+        else if (seg.tag.getStyleClass().contains("log-error")) row.getStyleClass().add("transcript-error");
+        else if (seg.tag.getStyleClass().contains("log-warn")) row.getStyleClass().add("transcript-warn");
         return row;
     }
 

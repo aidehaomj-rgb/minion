@@ -1,9 +1,12 @@
 package com.minion.gui.chat;
 
 import com.minion.gui.icon.IconFactory;
+import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
 
@@ -43,12 +46,15 @@ public class CollapsibleText extends VBox {
 
         chevron = new SVGPath();
         chevron.getStyleClass().add("icon-chevron");
-        IconFactory.size(chevron, 12);
+        IconFactory.size(chevron, 13);
         state = new Label();
-        state.getStyleClass().add("log-collapse-toggle");
-        toggle = new HBox(4);
+        state.getStyleClass().addAll("log-collapse-toggle", "log-collapse-badge");
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        toggle = new HBox(6);
+        toggle.setAlignment(Pos.CENTER_LEFT);
         toggle.getStyleClass().add("log-collapse-toggle");
-        toggle.getChildren().addAll(chevron, summaryNode, state);
+        toggle.getChildren().addAll(chevron, summaryNode, spacer, state);
         toggle.setOnMouseClicked(e -> {
             if (text != null && !text.trim().isEmpty()) setExpanded(!expanded);
         });
@@ -57,6 +63,7 @@ public class CollapsibleText extends VBox {
         // 恢复长会话时会在 FX 线程产生大量无用布局。仅展开时装入正文。
         textPane = existing==null?new MessageTextPane(expanded ? this.text : ""):existing;
         if(existing!=null)textPane.setText(expanded?this.text:"",false);
+        textPane.getStyleClass().add("log-collapsible-body");
         content = textPane.contentArea();
         content.getStyleClass().add("log-body");
 
@@ -103,9 +110,12 @@ public class CollapsibleText extends VBox {
         state.setManaged(hasText);
         textPane.setVisible(hasText && expanded);
         textPane.setManaged(hasText && expanded);
+        getStyleClass().removeAll("log-collapsible-expandable", "log-collapsible-expanded");
         if (hasText) {
+            getStyleClass().add("log-collapsible-expandable");
+            if (expanded) getStyleClass().add("log-collapsible-expanded");
             chevron.setContent(expanded ? IconFactory.CHEVRON_DOWN_PATH : IconFactory.CHEVRON_RIGHT_PATH);
-            state.setText(expanded ? "收起" : "展开（" + text.length() + " 字符）");
+            state.setText(expanded ? "收起" : "展开 · " + text.length() + " 字");
         }
     }
 

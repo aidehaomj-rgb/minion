@@ -38,6 +38,9 @@ public class IconFactoryTest {
         assertIcon(IconFactory.send(), "icon-send");
         assertIcon(IconFactory.stop(), "icon-stop");
         assertIcon(IconFactory.attachFile(), "icon-upload");
+        assertIcon(IconFactory.copy(), "icon-copy");
+        assertIcon(IconFactory.folder(), "icon-folder");
+        assertIcon(IconFactory.fileDoc(), "icon-file");
     }
 
     @Test

@@ -1,10 +1,12 @@
 package com.minion.gui.artifact;
 
+import com.minion.gui.icon.IconFactory;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.*;
+import javafx.scene.shape.SVGPath;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
@@ -37,8 +39,17 @@ public final class WorkspaceFilesPane extends VBox implements AutoCloseable {
         rows.setCellFactory(list->new ListCell<Row>(){
             @Override protected void updateItem(Row row,boolean empty){
                 super.updateItem(row,empty);
-                if(empty||row==null){setText(null);setTooltip(null);setContextMenu(null);return;}
-                setText((row.directory?"▸  ":"    ")+row.path.getFileName());setTooltip(new Tooltip(row.path.toString()));
+                getStyleClass().removeAll("workspace-file-dir","workspace-file-item");
+                if(empty||row==null){setText(null);setGraphic(null);setTooltip(null);setContextMenu(null);return;}
+                SVGPath icon=row.directory?IconFactory.folder():IconFactory.fileDoc();
+                IconFactory.size(icon,15);
+                StackPane iconBox=new StackPane(icon);
+                iconBox.setMinWidth(18);iconBox.setPrefWidth(18);
+                setGraphic(iconBox);
+                setGraphicTextGap(8);
+                setText(row.path.getFileName().toString());
+                getStyleClass().add(row.directory?"workspace-file-dir":"workspace-file-item");
+                setTooltip(new Tooltip(row.path.toString()));
                 setContextMenu(row.directory?null:menu.apply(row.path.toUri().toString()));
             }
         });

@@ -156,6 +156,9 @@
 .icon-build { -fx-fill: #8a8f98; }   /* 工具调用（扳手） */
 .icon-timer { -fx-fill: #8a8f98; }   /* 统计行 */
 .icon-chevron { -fx-fill: #8a8f98; } /* 折叠箭头 */
+.icon-copy { -fx-fill: #98a0ab; }    /* 代码块复制 */
+.icon-folder { -fx-fill: #7cb3f0; }  /* 目录图标 */
+.icon-file { -fx-fill: #98a0ab; }    /* 文件图标 */
 .log-collapse-toggle:hover .icon-chevron { -fx-fill: #f0f2f6; }
 
 /* 正文摘要行文本（图标+文字组合） */
@@ -711,3 +714,81 @@
 .workspace-files .list-cell { -fx-background-color: #171e28; -fx-text-fill: #d3e0ee; -fx-font-size: 13px; -fx-padding: 7 8; }
 .workspace-files .list-cell:filled:hover, .workspace-files .list-cell:filled:selected { -fx-background-color: #304760; }
 .workspace-files .label { -fx-text-fill: #abc0d8; }
+
+
+/* ===== Markdown 富文本基础兜底（未挂 workbench 时默认深色；四主题由 workbench.css 覆盖） ===== */
+.md-heading { -fx-font-weight: bold; -fx-text-fill: #e8edf5; -fx-padding: 6 0 2 0; }
+.md-heading-text { -fx-fill: #e8edf5; }
+.md-text { -fx-fill: #e6ebf2; }
+.md-inline-code { -fx-fill: #79c0ff; }
+.md-link { -fx-text-fill: #79c0ff; -fx-border-color: transparent; }
+.md-bullet { -fx-text-fill: #8a94a6; -fx-font-weight: bold; }
+.md-quote {
+    -fx-background-color: #161b24;
+    -fx-background-radius: 0 6 6 0;
+    -fx-border-color: transparent transparent transparent #4f8cff;
+    -fx-border-width: 0 0 0 3;
+    -fx-padding: 6 12 6 12;
+}
+.md-quote-label { -fx-text-fill: #b8c2d1; }
+.md-quote-text { -fx-fill: #b8c2d1; }
+.md-code-card {
+    -fx-background-color: #0d1117;
+    -fx-background-radius: 8;
+    -fx-border-color: #262e3d;
+    -fx-border-radius: 8;
+    -fx-border-width: 1;
+}
+.md-code-header {
+    -fx-background-color: #161b24;
+    -fx-background-radius: 7 7 0 0;
+    -fx-border-color: transparent transparent #262e3d transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 5 10 5 12;
+}
+.md-code-lang { -fx-text-fill: #8d9bb0; -fx-font-size: 11px; -fx-font-weight: bold; -fx-font-family: "Consolas", monospace; }
+.md-code-copy {
+    -fx-background-color: transparent;
+    -fx-text-fill: #9aa7ba;
+    -fx-font-size: 12px;
+    -fx-padding: 2 8 2 8;
+    -fx-background-radius: 5;
+    -fx-border-color: transparent;
+    -fx-cursor: hand;
+    -fx-graphic-text-gap: 5;
+}
+.md-code-copy:hover { -fx-background-color: #242c3b; -fx-text-fill: #f0f4fa; }
+.md-code-copy:hover .icon-copy { -fx-fill: #f0f4fa; }
+.md-code-copy.copied { -fx-text-fill: #3fb950; }
+.md-code-copy.copied .icon-copy { -fx-fill: #3fb950; }
+.md-code-body {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-padding: 10 14 12 14;
+    -fx-font-family: "Consolas", monospace;
+    -fx-font-size: 14px;
+    -fx-text-fill: #d4dce8;
+}
+.md-table {
+    -fx-background-color: #262e3d;
+    -fx-background-radius: 7;
+    -fx-border-color: #262e3d;
+    -fx-border-radius: 7;
+    -fx-padding: 1;
+    -fx-hgap: 1;
+    -fx-vgap: 1;
+}
+.md-table-cell { -fx-padding: 7 10 7 10; }
+.md-table-head { -fx-background-color: #1c2432; }
+.md-table-even { -fx-background-color: #131822; }
+.md-table-odd { -fx-background-color: #10141d; }
+.md-table-head-text { -fx-fill: #edf2f8; }
+.md-table-text { -fx-fill: #cdd6e2; }
+.md-fallback { -fx-text-fill: #e6ebf2; }
+.log-collapse-badge {
+    -fx-background-color: #202632;
+    -fx-background-radius: 10;
+    -fx-padding: 1 8 1 8;
+    -fx-font-size: 11px;
+    -fx-text-fill: #8d9bb0;
+}
