@@ -152,6 +152,13 @@ public class CommandDispatcher {
             themeSetter.accept(picked.id);
             return "主题 " + picked.label + " 已保存（重启或重开窗口后完全应用）";
         }
+        if ("/ide".equals(cmd)) {
+            // §12.3 IDE 桥：ide.bridge.enabled=false（POC 第 10 项证据待取得，见
+            // docs/ide-bridge-exception.md 路径 B 备档；路径 A 实施后此提示替换为桥接状态）
+            return "IDE 桥未启用（ide.bridge.enabled=false）。"
+                    + "Win7 POC 第 10 项（候选 IDE + 插件 API 实测）证据取得后启用——"
+                    + "详见 docs/ide-bridge-exception.md";
+        }
         if ("/tasks".equals(cmd) || "/bashes".equals(cmd) || "/任务面板".equals(cmd)) {
             // §10.6/§10.7 共用可视化模型（只读快照；变更走 TaskV2/TodoWrite/TaskStop 工具）
             if (h == null || h.loop == null) return "无活动会话";

@@ -6,8 +6,8 @@
 
 ## 使用方法
 
-1. 将 `minion/` 发布目录与 `scripts/win7-poc.sh` 拷到 Win7 实机（Git Bash 可用）。
-2. Git Bash 内运行：`bash win7-poc.sh <minion目录>`（自动跑可在脚本内验证的项并汇总）。
+1. 将 `minion/` 发布目录与 `docs/win7-poc/win7-poc.sh` 拷到 Win7 实机（Git Bash 可用）。
+2. Git Bash 内运行：`bash docs/win7-poc/win7-poc.sh <minion目录>`（自动跑可在脚本内验证的项并汇总）。
 3. 手工项（标注 ✋）逐项操作并截图/记录到本文件「证据」栏。
 4. 全部完成后把本文件提交回开发机仓库，作为切片 38（IDE 桥接）与 §14.4 总验收的前置证据。
 
