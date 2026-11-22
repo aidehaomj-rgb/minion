@@ -3,6 +3,9 @@ package com.minion.gui;
 import com.minion.core.agent.GeneratedArtifact;
 import com.minion.gui.artifact.DocumentPreviewLoader;
 import com.minion.gui.artifact.LocalFileLinks;
+import com.minion.gui.artifact.PagedSlideViewer;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
 import javafx.application.Platform;
 import javafx.embed.swing.JFXPanel;
 import javafx.scene.control.Hyperlink;
@@ -107,6 +110,23 @@ public class ArtifactPreviewPaneTest {
             fx(()->{try{Hyperlink path=field(pane[0],"pathLink");assertEquals(file.toString(),path.getText());assertTrue(path.getContextMenu().getItems().stream().anyMatch(i->"打开文件位置".equals(i.getText())));VBox body=field(pane[0],"body");assertTrue(body.getChildren().stream().anyMatch(n->n instanceof Label&&"报告标题".equals(((Label)n).getText())));}catch(Exception e){throw new RuntimeException(e);}});
         }finally{fx(()->{if(pane[0]!=null)pane[0].close();if(links[0]!=null)links[0].close();});}
     }
+    @Test public void multiPagePdfOpensPagedViewerInsteadOfSinglePageImage()throws Exception{
+        Path root=temp.newFolder().toPath(),file=root.resolve("pages.pdf");
+        try(PDDocument document=new PDDocument()){
+            document.addPage(new PDPage());document.addPage(new PDPage());document.addPage(new PDPage());
+            document.save(file.toFile());
+        }
+        ArtifactPreviewPane[] pane={null};LocalFileLinks[] links={null};
+        try{
+            fx(()->{links[0]=new LocalFileLinks(()->root,()->null,p->{},m->{});pane[0]=new ArtifactPreviewPane(()->{},links[0]);pane[0].open(file.toString());});
+            await(()->hasPagedViewer(pane[0]));
+            fx(()->{try{
+                javafx.scene.layout.StackPane host=field(pane[0],"pagedHost");
+                assertEquals(1,host.getChildren().size());
+                assertTrue(host.getChildren().get(0) instanceof PagedSlideViewer);
+            }catch(Exception e){throw new RuntimeException(e);}});
+        }finally{fx(()->{if(pane[0]!=null)pane[0].close();if(links[0]!=null)links[0].close();});}
+    }
     @Test public void oldSlowReadCannotLeakIntoNewSelectionAndClearCancelsIt()throws Exception {
         Path root=temp.newFolder().toPath(),a=root.resolve("a.md"),b=root.resolve("b.md");Files.write(a,"# STALE".getBytes("UTF-8"));Files.write(b,"# CURRENT".getBytes("UTF-8"));
         CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);ArtifactPreviewPane[] pane={null};LocalFileLinks[] links={null};
@@ -194,5 +214,11 @@ public class ArtifactPreviewPaneTest {
     }
     private static boolean ready(ArtifactPreviewPane pane)throws Exception{
         boolean[] ready={false};fx(()->{try{ready[0]=field(pane,"loaded")!=null;}catch(Exception e){throw new RuntimeException(e);}});return ready[0];
+    }
+    private static boolean hasPagedViewer(ArtifactPreviewPane pane)throws Exception{
+        boolean[] ready={false};fx(()->{try{
+            javafx.scene.layout.StackPane host=field(pane,"pagedHost");
+            ready[0]=host.getChildren().size()==1&&host.getChildren().get(0) instanceof PagedSlideViewer;
+        }catch(Exception e){throw new RuntimeException(e);}});return ready[0];
     }
 }

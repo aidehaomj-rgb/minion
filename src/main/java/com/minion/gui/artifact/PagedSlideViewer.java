@@ -53,17 +53,18 @@ public final class PagedSlideViewer extends BorderPane implements AutoCloseable 
     private final StackPane imageStage = new StackPane();
     private final ToggleButton continuousMode = new ToggleButton("连续");
     private final Button zoomOut = new Button("−");
-    private final Button fit = new Button("适应宽度");
+    private final Button fit = new Button("100%");
     private final Button zoomIn = new Button("+");
     private int current = 1;
     private double zoom = 1.0;
+    private int lastViewportWidth = 0;
     private long requestGeneration;
     private volatile boolean closed;
 
     public PagedSlideViewer(PagedPdfPreview pdf) {
         this.pdf = pdf;
         worker = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
-                new ArrayBlockingQueue<Runnable>(2),
+                new ArrayBlockingQueue<Runnable>(8),
                 r -> {
                     Thread thread = new Thread(r, "minion-paged-preview");
                     thread.setDaemon(true);
@@ -79,15 +80,19 @@ public final class PagedSlideViewer extends BorderPane implements AutoCloseable 
         prev.setOnAction(e -> goTo(current - 1));
         next.setOnAction(e -> goTo(current + 1));
         pageField.setPrefColumnCount(3);
-        pageField.setMaxWidth(56);
+        pageField.setMaxWidth(48);
         pageField.setPromptText("1");
         pageField.setOnAction(e -> parsePage());
         pageCount.setText("/ " + pages);
         pageCount.getStyleClass().add("artifact-meta");
+        zoomOut.setTooltip(new javafx.scene.control.Tooltip("缩小"));
+        zoomIn.setTooltip(new javafx.scene.control.Tooltip("放大"));
+        fit.setTooltip(new javafx.scene.control.Tooltip("适应窗口宽度 (100%)"));
         zoomOut.setOnAction(e -> setZoom(zoom - 0.15));
         zoomIn.setOnAction(e -> setZoom(zoom + 0.15));
         fit.setOnAction(e -> {
             zoom = 1.0;
+            fit.setText("100%");
             renderCurrent();
         });
         continuousMode.setOnAction(e -> {
@@ -106,12 +111,23 @@ public final class PagedSlideViewer extends BorderPane implements AutoCloseable 
         pageImage.setSmooth(true);
         imageStage.getChildren().add(pageImage);
         imageStage.setAlignment(Pos.CENTER);
-        imageStage.setPadding(new Insets(20, 16, 20, 16));
+        imageStage.setPadding(new Insets(16, 14, 20, 14));
         imageStage.getStyleClass().add("image-stage");
         pageScroll.setContent(imageStage);
         pageScroll.setFitToWidth(true);
         pageScroll.setPannable(true);
         pageScroll.getStyleClass().add("artifact-reader");
+        pageScroll.viewportBoundsProperty().addListener((o, oldB, newB) -> {
+            if (closed || newB == null) return;
+            int w = (int) Math.floor(newB.getWidth());
+            if (w <= 0) return;
+            double fitW = Math.max(220, w - 32) * zoom;
+            if (pageImage.getImage() != null) pageImage.setFitWidth(fitW);
+            if (Math.abs(w - lastViewportWidth) >= 60) {
+                lastViewportWidth = w;
+                if (!continuousMode.isSelected()) renderCurrent();
+            }
+        });
 
         thumbnails.setCellFactory(list -> new ListCell<Integer>() {
             private final ImageView view = new ImageView();
@@ -173,12 +189,6 @@ public final class PagedSlideViewer extends BorderPane implements AutoCloseable 
         VBox.setVgrow(center, Priority.ALWAYS);
         setCenter(center);
         setTop(toolbar);
-        // 不再放左侧缩略图栏（太乱）——单页居中+顶部翻页（对标主流 Agent 预览）
-        // 状态行融入工具栏右端
-        toolbar.getChildren().add(spacer2());
-        toolbar.getChildren().add(status);
-        status.getStyleClass().add("artifact-meta");
-        status.setWrapText(false);
         addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, event -> {
             if (event.getCode() == KeyCode.LEFT || event.getCode() == KeyCode.PAGE_UP) {
                 goTo(current - 1); event.consume();
@@ -208,22 +218,27 @@ public final class PagedSlideViewer extends BorderPane implements AutoCloseable 
     private void renderCurrent() {
         if (continuousMode.isSelected()) return;
         final long request = ++requestGeneration;
-        int width = (int) Math.max(420, Math.min(2200,
-                pageScroll.getViewportBounds().getWidth() * zoom));
-        loadPage(current, width, image -> {
+        double vp = pageScroll.getViewportBounds().getWidth();
+        double displayW = Math.max(240, (vp > 60 ? vp - 32 : 520) * zoom);
+        int renderW = (int) Math.max(640, Math.min(2200, displayW * 1.4));
+        fit.setText(Math.round(zoom * 100) + "%");
+        loadPage(current, renderW, image -> {
             if (closed || request != requestGeneration) return;
             pageImage.setImage(image);
-            pageImage.setFitWidth(width);
+            double curVp = pageScroll.getViewportBounds().getWidth();
+            double finalDisplayW = Math.max(240, (curVp > 60 ? curVp - 32 : displayW) * zoom);
+            pageImage.setFitWidth(finalDisplayW);
             status.setText("第 " + current + " / " + pages + " 页 · "
                     + Math.round(zoom * 100) + "%");
+            // 当前页渲染完成后再后台预取相邻页，避免挤占队列导致当前页被丢弃
+            prefetch(current + 1, renderW);
+            prefetch(current - 1, renderW);
         });
-        loadPage(current - 1, 260, image -> prefetch(current - 1));
-        loadPage(current + 1, 260, image -> prefetch(current + 1));
     }
 
-    private void prefetch(int page) {
+    private void prefetch(int page, int width) {
         if (page >= 1 && page <= pages) {
-            loadPage(page, 900, image -> { });
+            loadPage(page, Math.min(1100, width), image -> { });
         }
     }
 

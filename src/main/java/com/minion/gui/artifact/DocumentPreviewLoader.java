@@ -65,13 +65,13 @@ public final class DocumentPreviewLoader {
     public static final int MAX_XML_BYTES = 4 * 1024 * 1024;
     public static final int MAX_IMAGES = 8;
     public static final int MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+    public static final int MAX_DIRECT_IMAGE_BYTES = 10 * 1024 * 1024;
     public static final int MAX_TOTAL_IMAGE_BYTES = 8 * 1024 * 1024;
     public static final int MAX_IMAGE_DIMENSION = 8192;
     public static final long MAX_IMAGE_PIXELS = 16_000_000L;
     public static final int MAX_TABLE_ROWS = 100;
     public static final int MAX_TABLE_COLUMNS = 20;
     public static final int MAX_SLIDES = 100;
-    private static final int MAX_OFFICE_PREVIEW_PAGES = 6;
     private static final int MAX_CELL_CHARS = 4000;
     private static final String W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static final String WS = "http://purl.oclc.org/ooxml/wordprocessingml/main";
@@ -100,23 +100,33 @@ public final class DocumentPreviewLoader {
         String name = path.getFileName().toString();
         int dot = name.lastIndexOf('.');
         String format = dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
-        if ("doc".equals(format)) {
-            return new Result("", "旧版 .doc 无法直接预览，请使用 Word/WPS 打开，或另存为 .docx 后预览。 "
-                    + PREVIEW_NOTICE, false, format, Collections.<EmbeddedImage>emptyList());
-        }
-        if ("ppt".equals(format)) {
-            return new Result("", "旧版 .ppt 无法直接预览，请使用 PowerPoint/WPS 打开，或另存为 .pptx 后预览。",
-                    false, format, Collections.<EmbeddedImage>emptyList());
+        if ("doc".equals(format)||"ppt".equals(format)||"xls".equals(format)) {
+            OfficePreviewConverter.Conversion converted=OfficePreviewConverter.convert(path);
+            if(converted!=null)return new Result("", "已用 "+converted.engine
+                    +" 转换为全页 PDF 预览；原文件未修改。", false, format,
+                    Collections.<EmbeddedImage>emptyList(),converted.pdf,
+                    Collections.<XlsxPreview.Sheet>emptyList(),
+                    Collections.<SlidePreview>emptyList());
+            return new Result("", "旧版 ."+format+" 无法直接预览，需要本机 Word/WPS/LibreOffice "
+                    + "才能转换；当前未检测到可用转换器。 "+PREVIEW_NOTICE, false, format,
+                    Collections.<EmbeddedImage>emptyList());
         }
         if ("html".equals(format)||"htm".equals(format)) return html(path,format);
         if (TEXT_FORMATS.contains(format)) return text(path, format);
         if (Arrays.asList("png","jpg","jpeg","gif","bmp").contains(format)) {
-            if(attributes.size()>MAX_IMAGE_BYTES) throw new IOException("图片超过 2 MiB 预览限制；请打开原图。");
-            byte[] data;try(InputStream in=Files.newInputStream(path)){data=prefix(in,MAX_IMAGE_BYTES+1);}
-            if(data.length>MAX_IMAGE_BYTES||!safeImage(data))throw new IOException("图片损坏、为动图或尺寸超过预览限制。");
+            if(attributes.size()>MAX_DIRECT_IMAGE_BYTES) throw new IOException("图片超过 10 MiB 预览限制；请打开原图。");
+            byte[] data;try(InputStream in=Files.newInputStream(path)){data=prefix(in,MAX_DIRECT_IMAGE_BYTES+1);}
+            if(data.length>MAX_DIRECT_IMAGE_BYTES||!safeImage(data))throw new IOException("图片损坏、为动图或尺寸超过预览限制。");
             return new Result("","本地图片预览",false,format,Collections.singletonList(new EmbeddedImage(name,data)));
         }
         if ("pdf".equals(format)) return pdf(path,attributes.size());
+        if ("xlsx".equals(format)) {
+            if(attributes.size()>MAX_DOCX_BYTES)throw new IOException("XLSX 超过 32 MiB 预览限制，请打开原件。");
+            List<XlsxPreview.Sheet> sheets=XlsxPreview.load(path);
+            return new Result("", "只读预览 "+sheets.size()+" 个工作表；最多显示 200 行、30 列。",
+                    false, format, Collections.<EmbeddedImage>emptyList(), null, sheets,
+                    Collections.<SlidePreview>emptyList());
+        }
         if ("ofd".equals(format)||"gd".equals(format)) {
             try {
                 String value="ofd".equals(format)?com.minion.core.tools.data.OfdSupport.preview(path)
@@ -142,7 +152,7 @@ public final class DocumentPreviewLoader {
         }
         try (ZipFile zip = new ZipFile(path.toFile())) {
             validateZip(zip);
-            return "docx".equals(format)?new Docx(zip).read():new Pptx(zip,path).read();
+            return "docx".equals(format)?new Docx(zip,path).read():new Pptx(zip,path).read();
         } catch (ZipException e) {
             throw new IOException(format.toUpperCase(Locale.ROOT)+" 已损坏、加密或不是有效的 ZIP 文档，请用关联应用打开。", e);
         } catch (IllegalArgumentException e) {
@@ -160,15 +170,11 @@ public final class DocumentPreviewLoader {
             double w=box.getWidth(),h=box.getHeight();
             if(!Double.isFinite(w)||!Double.isFinite(h)||w<=0||h<=0||Math.max(w,h)/Math.min(w,h)>80)
                 throw new IOException("PDF 页面尺寸不适合内置预览，请打开原文件。");
-            float scale=(float)Math.min(1.7,Math.min(1300.0/Math.max(w,h),Math.sqrt(1_000_000.0/(w*h))));
-            java.awt.image.BufferedImage pixels=new org.apache.pdfbox.rendering.PDFRenderer(doc)
-                    .renderImage(0,scale,org.apache.pdfbox.rendering.ImageType.RGB);
-            try(ByteArrayOutputStream png=new ByteArrayOutputStream()){
-                ImageIO.write(pixels,"png",png);byte[] bytes=png.toByteArray();
-                if(bytes.length>MAX_IMAGE_BYTES)throw new IOException("PDF 首页过于复杂，请打开原文件。");
-                return new Result("",message+" · 内置预览仅显示首页",false,"pdf",
-                        Collections.singletonList(new EmbeddedImage("第 1 / "+doc.getNumberOfPages()+" 页",bytes)));
-            } finally {pixels.flush();}
+            return new Result("","",message+" · 分页阅读器按需渲染；文本模式首次打开时提取",
+                    false,"pdf",
+                    Collections.<EmbeddedImage>emptyList(),path.toAbsolutePath(),path.toAbsolutePath(),
+                    Collections.<XlsxPreview.Sheet>emptyList(),
+                    Collections.<SlidePreview>emptyList());
         }
     }
 
@@ -365,109 +371,6 @@ public final class DocumentPreviewLoader {
         String r(String local) { String value = attr(R, local); return value.isEmpty() ? attr(RS, local) : value; }
     }
 
-    /** Optional high-fidelity Office preview via LibreOffice; text extraction remains the fallback. */
-    private static List<EmbeddedImage> officePreviewImages(Path source,State state){
-        if(Boolean.getBoolean("minion.preview.office.disabled"))return Collections.emptyList();
-        String office=findOfficeCommand();
-        if(office==null)return Collections.emptyList();
-        cleanupOfficePreviewCacheOnce();
-        try{
-            long size=Files.size(source),modified=Files.getLastModifiedTime(source).toMillis();
-            String key=Long.toHexString(size)+"-"+Long.toHexString(modified)+"-"+Integer.toHexString(source.toString().hashCode());
-            Path dir=Paths.get(System.getProperty("java.io.tmpdir"),"minion-office-preview",key);
-            Files.createDirectories(dir);
-            String name=source.getFileName().toString();
-            int dot=name.lastIndexOf('.');
-            String base=dot<0?name:name.substring(0,dot);
-            Path pdf=dir.resolve(base+".pdf");
-            if(!Files.isRegularFile(pdf)||Files.size(pdf)==0){
-                Files.deleteIfExists(pdf);
-                Process process=new ProcessBuilder(office,"--headless","--convert-to","pdf","--outdir",dir.toString(),source.toString())
-                        .redirectErrorStream(true).start();
-                Thread drain=new Thread(()->{try(InputStream in=process.getInputStream()){byte[] b=new byte[4096];while(in.read(b)>=0){}}catch(IOException ignored){}}, "minion-office-preview-drain");
-                drain.setDaemon(true);drain.start();
-                try{
-                    if(!process.waitFor(30,java.util.concurrent.TimeUnit.SECONDS)){process.destroyForcibly();return Collections.emptyList();}
-                }finally{
-                    // 启动后任何异常路径（中断/等待抛错）都确保进程销毁，防 LibreOffice 残留
-                    if(process.isAlive())process.destroyForcibly();
-                }
-                if(!Files.isRegularFile(pdf)||Files.size(pdf)==0)return Collections.emptyList();
-            }
-            List<EmbeddedImage> images=renderPdfPages(pdf,MAX_OFFICE_PREVIEW_PAGES);
-            if(!images.isEmpty())state.notes.add("已用 LibreOffice 生成前 "+images.size()+" 页页面图像；动画、交互和母版细节请打开原件。");
-            return images;
-        }catch(Exception unavailable){
-            com.minion.core.diagnostics.DiagnosticLog.info("preview","LibreOffice 预览失败，回退文字预览: "+unavailable);
-            return Collections.emptyList();
-        }
-    }
-
-    /** 每进程一次：清理 7 天前的 LibreOffice 预览缓存目录，防临时目录长期只增不减 */
-    private static volatile boolean officePreviewCacheSwept;
-    private static void cleanupOfficePreviewCacheOnce(){
-        if(officePreviewCacheSwept)return;
-        officePreviewCacheSwept=true;
-        try{
-            Path root=Paths.get(System.getProperty("java.io.tmpdir"),"minion-office-preview");
-            if(!Files.isDirectory(root))return;
-            long cutoff=System.currentTimeMillis()-7L*24*60*60*1000;
-            try(java.nio.file.DirectoryStream<Path> dirs=Files.newDirectoryStream(root)){
-                for(Path dir:dirs){
-                    try{
-                        if(Files.getLastModifiedTime(dir).toMillis()<cutoff)deleteRecursively(dir);
-                    }catch(Exception ignored){}
-                }
-            }
-        }catch(Exception ignored){}
-    }
-    private static void deleteRecursively(Path p)throws IOException{
-        if(Files.isDirectory(p)){
-            try(java.nio.file.DirectoryStream<Path> children=Files.newDirectoryStream(p)){
-                for(Path c:children)deleteRecursively(c);
-            }
-        }
-        Files.deleteIfExists(p);
-    }
-
-    private static String findOfficeCommand(){
-        String path=System.getenv("PATH");
-        if(path!=null)for(String part:path.split(java.io.File.pathSeparator)){
-            for(String name:new String[]{"soffice.exe","soffice"}){
-                Path candidate=Paths.get(part.trim()).resolve(name);
-                if(Files.isRegularFile(candidate))return candidate.toString();
-            }
-        }
-        for(String raw:Arrays.asList("C:/Program Files/LibreOffice/program/soffice.exe",
-                "C:/Program Files (x86)/LibreOffice/program/soffice.exe")){
-            Path candidate=Paths.get(raw);if(Files.isRegularFile(candidate))return candidate.toString();
-        }
-        return null;
-    }
-
-    private static List<EmbeddedImage> renderPdfPages(Path pdf,int maxPages)throws IOException{
-        if(Files.size(pdf)>32L*1024*1024)return Collections.emptyList();
-        List<EmbeddedImage> images=new ArrayList<EmbeddedImage>();
-        try(org.apache.pdfbox.pdmodel.PDDocument document=org.apache.pdfbox.pdmodel.PDDocument.load(
-                pdf.toFile(),org.apache.pdfbox.io.MemoryUsageSetting.setupTempFileOnly())){
-            int count=Math.min(maxPages,document.getNumberOfPages());
-            for(int i=0;i<count;i++){
-                org.apache.pdfbox.pdmodel.common.PDRectangle box=document.getPage(i).getCropBox();
-                double w=box.getWidth(),h=box.getHeight();
-                if(!Double.isFinite(w)||!Double.isFinite(h)||w<=0||h<=0)continue;
-                float scale=(float)Math.min(1.25,Math.min(1200.0/Math.max(w,h),Math.sqrt(900_000.0/(w*h))));
-                java.awt.image.BufferedImage pixels=new org.apache.pdfbox.rendering.PDFRenderer(document)
-                        .renderImage(i,scale,org.apache.pdfbox.rendering.ImageType.RGB);
-                try(ByteArrayOutputStream png=new ByteArrayOutputStream()){
-                    ImageIO.write(pixels,"png",png);
-                    byte[] bytes=png.toByteArray();
-                    if(bytes.length<=MAX_IMAGE_BYTES)images.add(new EmbeddedImage("第 "+(i+1)+" / "+document.getNumberOfPages()+" 页",bytes));
-                }finally{pixels.flush();}
-            }
-        }
-        return images;
-    }
-
     /** Text-only PPTX preview with the same fail-closed OOXML limits as DOCX. */
     private static final class Pptx {
         final ZipFile zip;final Path source;final State state=new State();
@@ -477,17 +380,63 @@ public final class DocumentPreviewLoader {
             List<String> slides=slideParts();
             if(slides.isEmpty())throw new IOException("PPTX 中没有可读取的幻灯片。");
             Limited out=new Limited(state,MAX_MARKDOWN_CHARS);
+            List<SlidePreview> cards=new ArrayList<SlidePreview>();
             int shown=0;
             for(String part:slides){
                 if(out.full()||shown>=MAX_SLIDES)break;
                 X slide=xml(zip,part,false);if(slide==null){state.notes.add("缺少幻灯片："+part);continue;}
                 shown++;slide(slide,shown,out);
+                cards.add(slidePreview(slide,shown,part));
             }
             if(slides.size()>MAX_SLIDES)state.cut("幻灯片超过 100 页，后续页未提取。");
-            List<EmbeddedImage> pages=officePreviewImages(source,state);
             state.notes.add("PPTX 文字按幻灯片顺序提取；完整动画、交互和母版细节请打开原件。");
-            return new Result(out.toString(),state.notice(),state.truncated,"pptx",
-                    pages);
+            return new Result(out.toString(),out.toString(),state.notice(),state.truncated,
+                    "pptx",Collections.<EmbeddedImage>emptyList(),source.toAbsolutePath(),
+                    null,Collections.<XlsxPreview.Sheet>emptyList(),cards);
+        }
+
+        private SlidePreview slidePreview(X root,int number,String part)throws IOException{
+            List<X> paragraphs=new ArrayList<X>();paragraphs(root,paragraphs);
+            List<String> lines=new ArrayList<String>();
+            for(X paragraph:paragraphs){
+                Limited text=new Limited(state,4000);inline(paragraph,text);
+                String value=text.toString().replace('\r',' ').replaceAll("[\\t ]+"," ").trim();
+                if(!value.isEmpty())lines.add(value);
+                if(lines.size()>=10)break;
+            }
+            String title=lines.isEmpty()?"幻灯片 "+number:lines.remove(0);
+            return new SlidePreview(number,title,lines,slideImages(part));
+        }
+
+        private List<EmbeddedImage> slideImages(String slidePart)throws IOException{
+            String base=slidePart.substring(slidePart.lastIndexOf('/')+1);
+            String relPart=slidePart.substring(0,slidePart.lastIndexOf('/')+1)
+                    +"_rels/"+base+".rels";
+            X rels=xml(zip,relPart,false);
+            if(rels==null)return Collections.emptyList();
+            List<EmbeddedImage> result=new ArrayList<EmbeddedImage>();
+            for(X rel:rels.children){
+                if(!"Relationship".equals(rel.name))continue;
+                String type=rel.attr("","Type"),target=rel.attr("","Target");
+                if(!type.endsWith("/image")||target.isEmpty())continue;
+                String media=normalizeSlideMedia(target);
+                if(media==null)continue;
+                ZipEntry entry=zip.getEntry(media);
+                if(entry==null||entry.getSize()<0||entry.getSize()>MAX_IMAGE_BYTES)continue;
+                byte[] bytes=entryBytes(zip,entry,MAX_IMAGE_BYTES);
+                if(safeImage(bytes))result.add(new EmbeddedImage(media,bytes));
+                if(result.size()>=4)break;
+            }
+            return result;
+        }
+
+        private String normalizeSlideMedia(String target){
+            if(target.indexOf('\\')>=0||target.indexOf(':')>=0||target.indexOf('\0')>=0)return null;
+            try{
+                String path=new URI(null,null,"/ppt/slides/"+target,null).normalize().getPath();
+                if(path==null||!path.startsWith("/ppt/media/")||path.contains(".."))return null;
+                return path.substring(1);
+            }catch(URISyntaxException invalid){return null;}
         }
 
         private List<String> slideParts()throws IOException{
@@ -565,14 +514,14 @@ public final class DocumentPreviewLoader {
     }
 
     private static final class Docx {
-        final ZipFile zip; final State state = new State();
+        final ZipFile zip; final Path source; final State state = new State();
         final Map<String, X> styles = new HashMap<String, X>();
         final Map<String, boolean[]> numbering = new HashMap<String, boolean[]>();
         final Map<String, Relationship> relationships = new HashMap<String, Relationship>();
         final Map<String, EmbeddedImage> images = new LinkedHashMap<String, EmbeddedImage>();
         final Set<String> attemptedImages = new HashSet<String>();
         int imageBytes;
-        Docx(ZipFile zip) { this.zip = zip; }
+        Docx(ZipFile zip,Path source) { this.zip = zip; this.source=source; }
 
         Result read() throws IOException {
             X document = xml(zip, "word/document.xml", true);
@@ -583,7 +532,11 @@ public final class DocumentPreviewLoader {
             Limited out = new Limited(state, MAX_MARKDOWN_CHARS);
             blocks(document.child("body"), out);
             state.notes.add("仅提取正文、简单格式和安全附图；不执行宏、域、嵌入对象或外部关系，页眉页脚/批注/修订等不保证还原。");
-            return new Result(out.toString(), state.notice(), state.truncated, "docx", new ArrayList<EmbeddedImage>(images.values()));
+            return new Result(out.toString(), out.toString(), state.notice(), state.truncated,
+                    "docx", new ArrayList<EmbeddedImage>(images.values()),
+                    source==null?null:source.toAbsolutePath(), null,
+                    Collections.<XlsxPreview.Sheet>emptyList(),
+                    Collections.<SlidePreview>emptyList());
         }
 
         void readStyles() throws IOException {
@@ -868,12 +821,46 @@ public final class DocumentPreviewLoader {
         public final String format;
         /** Unmodifiable list; images are displayed separately, with no file/network URL in markdown. */
         public final List<EmbeddedImage> images;
+        public final Path sourcePath;
+        /** Optional converted/original PDF for the common paginated reader. */
+        public final Path previewPdf;
+        public final List<XlsxPreview.Sheet> sheets;
+        public final List<SlidePreview> slides;
         public Result(String markdown, String notice, boolean truncated, String format, List<EmbeddedImage> images) {
-            this(markdown,markdown,notice,truncated,format,images);
+            this(markdown,markdown,notice,truncated,format,images,null,null,
+                    Collections.<XlsxPreview.Sheet>emptyList(),
+                    Collections.<SlidePreview>emptyList());
         }
         Result(String markdown,String sourceText,String notice,boolean truncated,String format,List<EmbeddedImage> images) {
+            this(markdown,sourceText,notice,truncated,format,images,null,null,
+                    Collections.<XlsxPreview.Sheet>emptyList(),
+                    Collections.<SlidePreview>emptyList());
+        }
+        Result(String markdown,String sourceText,String notice,boolean truncated,String format,
+               List<EmbeddedImage> images,Path sourcePath,Path previewPdf,
+               List<XlsxPreview.Sheet> sheets,List<SlidePreview> slides) {
             this.markdown = markdown; this.sourceText=sourceText;this.notice = notice; this.truncated = truncated; this.format = format;
             this.images = Collections.unmodifiableList(new ArrayList<EmbeddedImage>(images));
+            this.sourcePath=sourcePath;this.previewPdf=previewPdf;
+            this.sheets=Collections.unmodifiableList(new ArrayList<XlsxPreview.Sheet>(sheets));
+            this.slides=Collections.unmodifiableList(new ArrayList<SlidePreview>(slides));
+        }
+        Result(String markdown,String notice,boolean truncated,String format,
+               List<EmbeddedImage> images,Path previewPdf,
+               List<XlsxPreview.Sheet> sheets,List<SlidePreview> slides) {
+            this(markdown,markdown,notice,truncated,format,images,previewPdf,previewPdf,sheets,slides);
+        }
+    }
+
+    public static final class SlidePreview {
+        public final int number;
+        public final String title;
+        public final List<String> lines;
+        public final List<EmbeddedImage> images;
+        SlidePreview(int number,String title,List<String> lines,List<EmbeddedImage> images){
+            this.number=number;this.title=title==null?"":title;
+            this.lines=Collections.unmodifiableList(new ArrayList<String>(lines));
+            this.images=Collections.unmodifiableList(new ArrayList<EmbeddedImage>(images));
         }
     }
 

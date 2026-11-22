@@ -786,6 +786,22 @@ public class SettingsDialog {
             ocrPath = new TextField(config.ocrPath());
             ocrLanguage = new TextField(config.ocrLanguage());
             officePath = new TextField(config.officePath());
+            HBox officeBox = new HBox(6);
+            HBox.setHgrow(officePath, Priority.ALWAYS);
+            Button browseOffice = new Button("浏览…");
+            browseOffice.getStyleClass().add("btn-ghost");
+            browseOffice.setOnAction(e -> {
+                javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
+                fc.setTitle("选择 LibreOffice 程序");
+                fc.getExtensionFilters().add(new javafx.stage.FileChooser.ExtensionFilter(
+                        "LibreOffice", "soffice.exe", "soffice"));
+                java.io.File current = new java.io.File(officePath.getText().trim());
+                if (current.isFile() && current.getParentFile() != null)
+                    fc.setInitialDirectory(current.getParentFile());
+                java.io.File file = fc.showOpenDialog(owner);
+                if (file != null) officePath.setText(file.getAbsolutePath());
+            });
+            officeBox.getChildren().addAll(officePath, browseOffice);
             gdConverterPath = new TextField(config.get("gd.converter.path",""));
             gdConverterPath.setPromptText("留空：不执行自动转换");
             gdConverterArgs = new TextField(config.get("gd.converter.args","[\"{input}\",\"{output}\"]"));
@@ -797,8 +813,8 @@ public class SettingsDialog {
             VBox documentBox = new VBox(12,
                     row("Tesseract程序路径:", ocrPath),
                     row("OCR语言（chi_sim+eng）:", ocrLanguage),
-                    row("LibreOffice程序路径:", officePath),
-                    new Label("本地运行，不自动安装；OCR需语言包，预览需LibreOffice。"),
+                    row("LibreOffice程序路径:", officeBox),
+                    new Label("优先使用本机 Microsoft Office/WPS；未命中时可指定 LibreOffice。本地运行，不自动安装；OCR需语言包。"),
                     row("GD 转换 EXE:", gdConverterPath),
                     row("GD 转换参数:", gdConverterArgs),
                     row("GD 输出格式:", gdConverterFormat),gdNote);

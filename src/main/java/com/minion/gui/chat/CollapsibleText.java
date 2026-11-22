@@ -5,8 +5,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
 
@@ -49,12 +47,10 @@ public class CollapsibleText extends VBox {
         IconFactory.size(chevron, 13);
         state = new Label();
         state.getStyleClass().addAll("log-collapse-toggle", "log-collapse-badge");
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        toggle = new HBox(6);
+        toggle = new HBox(8);
         toggle.setAlignment(Pos.CENTER_LEFT);
         toggle.getStyleClass().add("log-collapse-toggle");
-        toggle.getChildren().addAll(chevron, summaryNode, spacer, state);
+        toggle.getChildren().addAll(chevron, summaryNode, state);
         toggle.setOnMouseClicked(e -> {
             if (text != null && !text.trim().isEmpty()) setExpanded(!expanded);
         });
@@ -75,6 +71,9 @@ public class CollapsibleText extends VBox {
     public MessageTextArea contentArea() { return content; }
 
     public boolean isExpanded() { return expanded; }
+
+    /** 是否包含可展开的正文内容（用于整行卡片样式判断） */
+    public boolean hasExpandableText() { return text != null && !text.trim().isEmpty(); }
 
     public void setExpanded(boolean v) {
         if (expanded != v) {

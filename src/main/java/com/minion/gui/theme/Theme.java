@@ -15,7 +15,10 @@ public final class Theme {
         OBSIDIAN("obsidian", "深夜黑"),
         GRAPHITE("graphite", "石墨灰"),
         MIST("mist", "雾蓝灰"),
-        LIGHT("light", "明亮浅色");
+        AURORA("aurora", "极光青"),
+        TWILIGHT("twilight", "暮光紫"),
+        LIGHT("light", "明亮浅色"),
+        PAPER("paper", "暖纸浅色");
 
         public final String id;
         public final String label;
@@ -61,7 +64,9 @@ public final class Theme {
     private static void applyNode(Node node, Variant variant) {
         if (node == null) return;
         if (node.getStyleClass().contains("minion-workbench")) {
-            node.getStyleClass().removeAll("theme-obsidian", "theme-graphite", "theme-mist", "theme-light");
+            for (Variant v : Variant.values()) {
+                node.getStyleClass().remove("theme-" + v.id);
+            }
             node.getStyleClass().add("theme-" + variant.id);
             if (node instanceof Parent && node.getScene() != null) ((Parent) node).applyCss();
         }

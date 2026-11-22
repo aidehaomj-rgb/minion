@@ -492,11 +492,19 @@ public class ChatView extends VBox {
     private static HBox messageRow(Seg seg) {
         HBox row = new HBox(seg.tag, seg.node());
         row.getStyleClass().add("transcript-row");
-        if (seg.tag.getStyleClass().contains("log-input")) row.getStyleClass().add("transcript-user");
-        else if (seg.kind == StreamKind.REPLY) row.getStyleClass().add("transcript-reply");
-        else if (seg.collapsible != null) row.getStyleClass().add("transcript-process");
-        else if (seg.tag.getStyleClass().contains("log-error")) row.getStyleClass().add("transcript-error");
-        else if (seg.tag.getStyleClass().contains("log-warn")) row.getStyleClass().add("transcript-warn");
+        if (seg.tag.getStyleClass().contains("log-input")) {
+            row.getStyleClass().add("transcript-user");
+        } else if (seg.kind == StreamKind.REPLY) {
+            row.getStyleClass().add("transcript-reply");
+        } else if (seg.collapsible != null) {
+            row.getStyleClass().add("transcript-process");
+            if (seg.collapsible.hasExpandableText()) row.getStyleClass().add("transcript-process-card");
+            else if (seg.tag.getStyleClass().contains("log-sys")) row.getStyleClass().add("transcript-stats");
+        } else if (seg.tag.getStyleClass().contains("log-error")) {
+            row.getStyleClass().add("transcript-error");
+        } else if (seg.tag.getStyleClass().contains("log-warn")) {
+            row.getStyleClass().add("transcript-warn");
+        }
         return row;
     }
 
@@ -603,6 +611,9 @@ public class ChatView extends VBox {
         seg.collapsible=new CollapsibleText(summary,text,false,seg.textPane);
         HBox.setHgrow(seg.collapsible,Priority.ALWAYS);
         row.getChildren().add(index,seg.collapsible);
+        row.getStyleClass().remove("transcript-reply");
+        if(!row.getStyleClass().contains("transcript-process"))row.getStyleClass().add("transcript-process");
+        if(!row.getStyleClass().contains("transcript-process-card"))row.getStyleClass().add("transcript-process-card");
         seg.streamFinalized=true;
     }
 
@@ -703,7 +714,9 @@ public class ChatView extends VBox {
         }
         // 思考段流式先展开，单次响应结束即收起，仍可手动查看全文。
         if (kind == StreamKind.THINK) {
-            appendCollapsible(tagText, tagColorClass, new Label(""), text, kind);
+            Label thinkSummary = new Label("思考过程");
+            thinkSummary.getStyleClass().add("log-summary-text");
+            appendCollapsible(tagText, tagColorClass, thinkSummary, text, kind);
         } else {
             append(tagText, tagColorClass, text, kind);
         }

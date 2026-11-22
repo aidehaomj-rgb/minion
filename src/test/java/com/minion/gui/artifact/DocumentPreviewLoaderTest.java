@@ -164,7 +164,13 @@ public class DocumentPreviewLoaderTest {
 
     @Test public void legacyDocNeverDecodesBinaryAndUnknownFormatIsNotGuessedAsText() throws Exception {
         byte[] ole = {(byte) 0xd0, (byte) 0xcf, 0x11, (byte) 0xe0, (byte) 0xa1, (byte) 0xb1, 0x1a, (byte) 0xe1, 0, 1};
-        DocumentPreviewLoader.Result result = DocumentPreviewLoader.load(file(".DOC", ole));
+        System.setProperty("minion.preview.office.disabled", "true");
+        DocumentPreviewLoader.Result result;
+        try {
+            result = DocumentPreviewLoader.load(file(".DOC", ole));
+        } finally {
+            System.clearProperty("minion.preview.office.disabled");
+        }
         assertEquals("doc", result.format);
         assertEquals("", result.markdown);
         assertTrue(result.notice.contains("无法直接预览"));

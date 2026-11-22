@@ -1347,3 +1347,52 @@
 .minion-workbench.dialog-pane .button:default:hover {
     -fx-background-color: linear-gradient(to bottom, -wb-cta, -wb-cta-hover);
 }
+
+
+/* ===== 离线 PPTX 幻灯片卡片（全 7 套主题自适应，纵向响应式不挤压文字） ===== */
+.minion-workbench .pptx-card-viewer { -fx-background-color: -wb-reader; }
+.minion-workbench .pptx-card-stage { -fx-background-color: -wb-reader; }
+.minion-workbench .pptx-mode-badge {
+    -fx-background-color: -wb-badge-bg;
+    -fx-background-radius: 10;
+    -fx-padding: 2 8 2 8;
+    -fx-font-size: 11px;
+    -fx-text-fill: -wb-muted;
+}
+.minion-workbench .pptx-slide-card {
+    -fx-background-color: -wb-surface;
+    -fx-background-radius: 10;
+    -fx-border-color: -wb-border;
+    -fx-border-radius: 10;
+    -fx-border-width: 1;
+    -fx-padding: 20 22 20 22;
+}
+.minion-workbench .pptx-slide-num {
+    -fx-background-color: -wb-select;
+    -fx-background-radius: 5;
+    -fx-padding: 2 8 2 8;
+    -fx-text-fill: -wb-accent-strong;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+}
+.minion-workbench .pptx-slide-title {
+    -fx-text-fill: -wb-ink;
+    -fx-font-size: 19px;
+    -fx-font-weight: bold;
+}
+.minion-workbench .pptx-slide-dot {
+    -fx-text-fill: -wb-accent;
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+}
+.minion-workbench .pptx-slide-bullet {
+    -fx-text-fill: -wb-secondary;
+    -fx-font-size: 14px;
+}
+.minion-workbench .pptx-slide-image-frame {
+    -fx-background-color: -wb-code-bg;
+    -fx-background-radius: 8;
+    -fx-border-color: -wb-border-subtle;
+    -fx-border-radius: 8;
+    -fx-padding: 8;
+}

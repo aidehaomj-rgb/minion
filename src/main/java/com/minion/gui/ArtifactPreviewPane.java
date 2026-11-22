@@ -441,17 +441,25 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         pending=reader.submit(()->{
             try {
                 DocumentPreviewLoader.Result result=loader.load(path);List<MarkdownRenderer.Block> parsed=richFormat(result.format)?MarkdownRenderer.parse(result.markdown):Collections.emptyList();
+                OfficePreviewConverter.Conversion cachedConversion = (result.previewPdf==null&&result.sourcePath!=null
+                        &&officeSource(result.format)) ? OfficePreviewConverter.findCached(path) : null;
                 long size=Files.size(path),modified=Files.getLastModifiedTime(path).toMillis();
                 Platform.runLater(()->{
                     if(request!=generation||!path.equals(current))return;
-                    loaded=result;blocks=parsed;loadedSize=size;loadedModified=modified;updateMeta();
+                    loaded=result;blocks=parsed;loadedSize=size;loadedModified=modified;
+                    if(cachedConversion!=null){
+                        convertedPdf=cachedConversion.pdf;
+                        conversionEngine=cachedConversion.engine;
+                        conversionAttempted=true;
+                    }
+                    updateMeta();
                     notice.setText(shortNotice(result));
                     render();
                     ViewState state=viewStates.get(path);
                     if(state!=null)Platform.runLater(()->{if(request==generation&&path.equals(current)){
                         scroll.setVvalue(state.scroll);textView.setScrollTop(state.textScroll);
                     }});
-                    if(result.previewPdf==null&&result.sourcePath!=null
+                    if(result.previewPdf==null&&convertedPdf==null&&result.sourcePath!=null
                             &&officeSource(result.format))scheduleOfficeConversion(request,path);
                 });
             }catch(Exception e){Platform.runLater(()->{if(request==generation&&path.equals(current))showError("无法预览："+(e.getMessage()==null?e.toString():e.getMessage())+"。仍可打开原文件或定位文件位置。");});}
@@ -464,12 +472,21 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
     private void scheduleOfficeConversion(long request,Path path){
         if(conversionAttempted)return;
         conversionAttempted=true;
+        if(loaded!=null&&("pptx".equals(loaded.format)||"ppt".equals(loaded.format))){
+            notice.setText("正在后台渲染高保真幻灯片，完成后自动切换…");
+        }
         conversion.submit(()->{
             OfficePreviewConverter.Conversion result=OfficePreviewConverter.convert(path);
             Platform.runLater(()->{
-                if(request!=generation||!path.equals(current)||result==null)return;
+                if(request!=generation||!path.equals(current))return;
+                if(result==null){
+                    if(loaded!=null&&"pptx".equals(loaded.format))
+                        notice.setText("当前为离线卡片预览（安装 LibreOffice / PowerPoint / WPS 后自动显示原版排版）");
+                    return;
+                }
                 convertedPdf=result.pdf;conversionEngine=result.engine;
                 original.setDisable(false);
+                if(loaded!=null&&("pptx".equals(loaded.format)||"ppt".equals(loaded.format))) notice.setText("");
                 if(rendered.isSelected())render();
             });
         });
