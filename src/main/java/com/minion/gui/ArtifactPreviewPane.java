@@ -4,7 +4,14 @@ import com.minion.core.agent.GeneratedArtifact;
 import com.minion.gui.artifact.ArtifactSelection;
 import com.minion.gui.artifact.DocumentPreviewLoader;
 import com.minion.gui.artifact.ArtifactDocumentNodes;
+import com.minion.gui.artifact.ArtifactThumbnailService;
 import com.minion.gui.artifact.LocalFileLinks;
+import com.minion.gui.artifact.OfficePreviewConverter;
+import com.minion.gui.artifact.PagedPdfPreview;
+import com.minion.gui.artifact.PagedSlideViewer;
+import com.minion.gui.artifact.PptxCardViewer;
+import com.minion.gui.artifact.WorkbookPreviewView;
+import com.minion.gui.artifact.ZoomableImageView;
 import com.minion.gui.chat.MarkdownRenderer;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -35,7 +42,7 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
     private final Label notice=new Label();
     private final MenuButton files=new MenuButton("成果");
     private final CheckMenuItem follow=new CheckMenuItem("跟随本会话的新成果");
-    private final ToggleButton rendered=new ToggleButton("阅读"),source=new ToggleButton("文本");
+    private final ToggleButton rendered=new ToggleButton("阅读"),original=new ToggleButton("原版"),source=new ToggleButton("文本");
     private final MenuButton outline=new MenuButton("目录");
     private final MenuButton more=new MenuButton("⋯");
     private final MenuItem find=new MenuItem("查找文本…");
@@ -48,7 +55,9 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
     private final Label searchStatus=new Label();
     private final HBox findBar=new HBox(6);
     private final WebView htmlView=new WebView();
-    private final StackPane viewport = new StackPane(scroll,textView,htmlView);
+    private final StackPane pagedHost=new StackPane();
+    private final StackPane workbookHost=new StackPane();
+    private final StackPane viewport = new StackPane(scroll,textView,htmlView,pagedHost,workbookHost);
     private VBox documentView;
     private final VBox overviewView;
     private final FlowPane overviewGrid=new FlowPane(10,10);
@@ -64,13 +73,26 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
     private final ThreadPoolExecutor reader=new ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,new ArrayBlockingQueue<Runnable>(1),r->{
         Thread t=new Thread(r,"minion-document-preview");t.setDaemon(true);return t;
     },new ThreadPoolExecutor.DiscardOldestPolicy());
+    private final ThreadPoolExecutor conversion=new ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,new ArrayBlockingQueue<Runnable>(1),r->{
+        Thread t=new Thread(r,"minion-office-conversion");t.setDaemon(true);return t;
+    },new ThreadPoolExecutor.DiscardOldestPolicy());
     private Future<?> pending;
     private long generation;
+    private long pagedGeneration;
     private boolean updating;
     private boolean restoring;
     private boolean active;
+    private boolean closed;
     private Path current;
     private DocumentPreviewLoader.Result loaded;
+    private Path convertedPdf;
+    private String conversionEngine;
+    private boolean conversionAttempted;
+    private String extractedText="";
+    private boolean textExtractionAttempted;
+    private boolean textExtractionLoading;
+    private Node pagedNode;
+    private Node workbookNode;
     private List<MarkdownRenderer.Block> blocks=Collections.emptyList();
     private Consumer<Path> selectionListener=p->{};
     private Consumer<Boolean> focusAction=b->{};
@@ -95,18 +117,18 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         files.setId("artifact-list");files.setTooltip(new Tooltip("按类型查找本会话的成果"));
         files.showingProperty().addListener((o,a,b)->{if(b)updateArtifactMenu();});updateArtifactMenu();
         follow.setSelected(true);
-        ToggleGroup modes=new ToggleGroup();rendered.setToggleGroup(modes);source.setToggleGroup(modes);rendered.setSelected(true);
+        ToggleGroup modes=new ToggleGroup();rendered.setToggleGroup(modes);original.setToggleGroup(modes);source.setToggleGroup(modes);rendered.setSelected(true);
         modes.selectedToggleProperty().addListener((o,a,b)->{if(b==null){if(a!=null)a.setSelected(true);return;}if(!restoring)render();});
         Button open=new Button("打开文件");open.setId("artifact-open");open.setOnAction(e->{if(current!=null)links.open(current.toUri().toString());});
         MenuItem refresh=new MenuItem("刷新预览");refresh.setOnAction(e->{rememberView();reload();});
         MenuItem location=new MenuItem("打开文件位置");location.setId("artifact-reveal");location.setOnAction(e->{if(current!=null)links.reveal(current.toUri().toString());});
-        MenuItem copy=new MenuItem("复制预览文本");copy.setOnAction(e->{if(loaded!=null){ClipboardContent c=new ClipboardContent();c.putString(loaded.sourceText);Clipboard.getSystemClipboard().setContent(c);}});
+        MenuItem copy=new MenuItem("复制预览文本");copy.setOnAction(e->{if(loaded!=null){ClipboardContent c=new ClipboardContent();c.putString(previewText());Clipboard.getSystemClipboard().setContent(c);}});
         MenuItem copyPath=new MenuItem("复制完整路径");copyPath.setOnAction(e->{if(current!=null){ClipboardContent c=new ClipboardContent();c.putString(current.toString());Clipboard.getSystemClipboard().setContent(c);}});
         MenuItem save=new MenuItem("另存为…");save.setOnAction(e->{if(current!=null)links.saveAs(current);});
         more.setAccessibleText("更多文件操作");more.setTooltip(new Tooltip("刷新、打开文件位置、复制或另存为"));
         more.getItems().addAll(find,refresh,location,copy,copyPath,save,new SeparatorMenuItem(),historyMenu,follow);
         more.showingProperty().addListener((o,a,b)->{if(b){updateHistoryMenu();refresh.setDisable(current==null);location.setDisable(current==null);copyPath.setDisable(current==null);
-            copy.setDisable(loaded==null||loaded.sourceText.isEmpty());save.setDisable(current==null);}});
+            copy.setDisable(loaded==null||previewText().isEmpty());save.setDisable(current==null);}});
         focus.getStyleClass().add("artifact-icon-button");focus.setAccessibleText("放大或还原右侧工作区");focus.setTooltip(new Tooltip("放大工作区 / 还原分栏"));
         focus.setOnAction(e->focusAction.accept(focus.isSelected()));
         Button close=new Button("×");close.getStyleClass().add("artifact-icon-button");close.setAccessibleText("关闭右侧工作区");
@@ -120,7 +142,7 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         tabs.getSelectionModel().selectedItemProperty().addListener((o,a,b)->{
                 if(!updating&&b!=null){follow.setSelected(false);activate((Path)b.getUserData());}
         });
-        FlowPane actions=new FlowPane(6,5,rendered,source,outline,open,more);actions.getStyleClass().add("artifact-actions");
+        FlowPane actions=new FlowPane(6,5,rendered,original,source,outline,open,more);actions.getStyleClass().add("artifact-actions");
         actions.visibleProperty().bind(fileTitle.textProperty().isNotEmpty());
         actions.managedProperty().bind(actions.visibleProperty());
         outline.visibleProperty().bind(outline.disableProperty().not());
@@ -195,7 +217,8 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         }
         int thumbnails=0;
         for(Map.Entry<Path,GeneratedArtifact> row:artifacts.entrySet()){
-            boolean thumbnail=isImage(row.getKey())&&safePreviewSize(row.getKey())&&thumbnails++<24;
+            boolean coverArtifact=isImage(row.getKey())||isPdfOrPresentation(row.getKey());
+            boolean thumbnail=coverArtifact&&safePreviewSize(row.getKey())&&thumbnails++<24;
             overviewGrid.getChildren().add(overviewCard(row.getKey(),row.getValue(),thumbnail));
         }
     }
@@ -205,9 +228,19 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         StackPane visual=new StackPane();visual.getStyleClass().add("artifact-card-visual");
         visual.setPrefSize(154,76);visual.setMinHeight(76);visual.setMaxHeight(76);
         if(thumbnail) {
-            ImageView image=new ImageView(new Image(path.toUri().toString(),154,76,true,true,true));
+            ImageView image=new ImageView();
             image.setFitWidth(154);image.setFitHeight(76);image.setPreserveRatio(true);image.setSmooth(true);
             visual.getChildren().add(image);
+            if(isImage(path)) {
+                image.setImage(new Image(path.toUri().toString(),154,76,true,true,true));
+            } else {
+                Label pending=new Label(typeLabel(path));pending.getStyleClass().add("artifact-card-type");
+                visual.getChildren().add(pending);
+                ArtifactThumbnailService.load(path,fxImage->{
+                    image.setImage(fxImage);
+                    visual.getChildren().remove(pending);
+                });
+            }
         }else{
             Label type=new Label(typeLabel(path));type.getStyleClass().add("artifact-card-type");
             visual.getChildren().add(type);
@@ -273,15 +306,23 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         String name=path.getFileName().toString().toLowerCase(Locale.ROOT);
         return name.matches(".*\\.(png|jpg|jpeg|gif|bmp)$");
     }
+    private static boolean isPdfOrPresentation(Path path){
+        String name=path.getFileName().toString().toLowerCase(Locale.ROOT);
+        return name.endsWith(".pdf")||name.endsWith(".pptx")||name.endsWith(".ppt")
+                ||name.endsWith(".ppsx")||name.endsWith(".pps");
+    }
     private static boolean safePreviewSize(Path path){
-        try{return Files.isRegularFile(path)&&Files.size(path)<=DocumentPreviewLoader.MAX_IMAGE_BYTES;}
+        long limit=isImage(path)?DocumentPreviewLoader.MAX_DIRECT_IMAGE_BYTES
+                :DocumentPreviewLoader.MAX_DOCX_BYTES;
+        try{return Files.isRegularFile(path)&&Files.size(path)<=limit;}
         catch(Exception ignored){return false;}
     }
     private static String shortNotice(DocumentPreviewLoader.Result result){
         if(result.truncated)return "预览已截取";
         if(result.markdown.isEmpty()&&result.images.isEmpty())return result.notice;
         if(htmlFormat(result.format))return "离线静态预览";
-        if("pdf".equals(result.format))return "仅预览首页";
+        if("pdf".equals(result.format))return "全页分页预览";
+        if("pptx".equals(result.format)&&result.previewPdf!=null)return "全页幻灯片预览";
         return "";
     }
     private CustomMenuItem fileMenuRow(Path path,String name,Runnable select) {
@@ -378,11 +419,13 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         showOverview(true);
     }
     private void resetDocument(){
-        loaded=null;blocks=Collections.emptyList();fileTitle.setText("");pathLink.setText("");
+        loaded=null;blocks=Collections.emptyList();convertedPdf=null;conversionEngine=null;conversionAttempted=false;
+        extractedText="";textExtractionAttempted=false;textExtractionLoading=false;
+        clearPagedNode();fileTitle.setText("");pathLink.setText("");
         pathLink.setTooltip(null);pathLink.setContextMenu(null);textView.clear();outline.getItems().clear();
         notice.setText("");status.setText("");showSource(false);setFindVisible(false);search.clear();
         body.getChildren().setAll(hint("从上方「成果」选择文件进行预览。"));
-        outline.setDisable(true);setModeAvailability(false);scroll.setVvalue(0);
+        outline.setDisable(true);setModeAvailability(false);hideViewportModes();scroll.setVisible(true);scroll.setManaged(true);scroll.setVvalue(0);
     }
     private void reload() {
         final Path path=current;final long request=++generation;if(pending!=null)pending.cancel(true);
@@ -408,11 +451,54 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
                     if(state!=null)Platform.runLater(()->{if(request==generation&&path.equals(current)){
                         scroll.setVvalue(state.scroll);textView.setScrollTop(state.textScroll);
                     }});
+                    if(result.previewPdf==null&&result.sourcePath!=null
+                            &&officeSource(result.format))scheduleOfficeConversion(request,path);
                 });
             }catch(Exception e){Platform.runLater(()->{if(request==generation&&path.equals(current))showError("无法预览："+(e.getMessage()==null?e.toString():e.getMessage())+"。仍可打开原文件或定位文件位置。");});}
         });
     }
     private long loadedSize,loadedModified;
+    private static boolean officeSource(String format){
+        return "docx".equals(format)||"pptx".equals(format)||"doc".equals(format)||"ppt".equals(format);
+    }
+    private void scheduleOfficeConversion(long request,Path path){
+        if(conversionAttempted)return;
+        conversionAttempted=true;
+        conversion.submit(()->{
+            OfficePreviewConverter.Conversion result=OfficePreviewConverter.convert(path);
+            Platform.runLater(()->{
+                if(request!=generation||!path.equals(current)||result==null)return;
+                convertedPdf=result.pdf;conversionEngine=result.engine;
+                original.setDisable(false);
+                if(rendered.isSelected())render();
+            });
+        });
+    }
+    private String previewText(){
+        if(loaded==null)return "";
+        return loaded.sourceText==null||loaded.sourceText.isEmpty()
+                ?(extractedText==null?"":extractedText):loaded.sourceText;
+    }
+    private void schedulePdfText(){
+        Path pdf=loaded==null?null:(loaded.previewPdf!=null?loaded.previewPdf:convertedPdf);
+        if(pdf==null||textExtractionAttempted||textExtractionLoading)return;
+        textExtractionAttempted=true;textExtractionLoading=true;
+        final long request=generation;final Path path=current;final Path previewPdf=pdf;
+        conversion.submit(()->{
+            String text="";
+            try(PagedPdfPreview preview=new PagedPdfPreview(previewPdf)){
+                text=preview.fullText(DocumentPreviewLoader.MAX_MARKDOWN_CHARS);
+            }catch(Exception ignored){
+            }
+            final String value=text;
+            Platform.runLater(()->{
+                if(request!=generation||!path.equals(current))return;
+                extractedText=value;textExtractionLoading=false;
+                setModeAvailability(true);
+                if(source.isSelected())render();
+            });
+        });
+    }
     private void updateMeta(){
         GeneratedArtifact artifact=artifacts.get(current);
         status.setText((artifact==null?"文件":"成果")+"  ·  "+
@@ -420,9 +506,67 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
                 +new java.text.SimpleDateFormat("MM-dd HH:mm").format(new Date(loadedModified)));
     }
     private void showSource(boolean on) {
+        hideViewportModes();
         textView.setManaged(on);textView.setVisible(on);
         scroll.setManaged(!on);scroll.setVisible(!on);
-        htmlView.setManaged(false);htmlView.setVisible(false);
+    }
+    private void hideViewportModes(){
+        for(Node node:Arrays.asList(scroll,textView,htmlView,pagedHost,workbookHost)){
+            node.setManaged(false);node.setVisible(false);
+        }
+    }
+    private void showPaged(Node node){
+        hideViewportModes();
+        pagedHost.getChildren().setAll(node);
+        pagedHost.setManaged(true);pagedHost.setVisible(true);
+    }
+    private void showWorkbook(Node node){
+        hideViewportModes();
+        workbookHost.getChildren().setAll(node);
+        workbookHost.setManaged(true);workbookHost.setVisible(true);
+    }
+    private void clearPagedNode(){
+        pagedGeneration++;
+        if(pagedNode instanceof AutoCloseable)try{((AutoCloseable)pagedNode).close();}catch(Exception ignored){}
+        pagedNode=null;pagedHost.getChildren().clear();
+        workbookNode=null;workbookHost.getChildren().clear();
+    }
+    private void openPagedAsync(Path pdf){
+        final long request=++pagedGeneration;
+        final Path path=current;
+        Label loading=hint("正在打开分页预览…");
+        loading.getStyleClass().add("artifact-preview-loading");
+        showPaged(loading);
+        reader.submit(()->{
+            PagedPdfPreview backend=null;
+            try{
+                backend=new PagedPdfPreview(pdf);
+                final PagedPdfPreview ready=backend;
+                Platform.runLater(()->{
+                    if(closed||request!=pagedGeneration||!Objects.equals(path,current)){
+                        ready.close();
+                        return;
+                    }
+                    try{
+                        PagedSlideViewer viewer=new PagedSlideViewer(ready);
+                        pagedNode=viewer;showPaged(viewer);
+                    }catch(RuntimeException unavailable){
+                        ready.close();
+                        notice.setText("分页预览不可用："+unavailable.getMessage()+"，已回退文字预览。");
+                        body.getChildren().setAll(hint("分页预览不可用，请切换“文本”或打开原件。"));
+                        scroll.setManaged(true);scroll.setVisible(true);
+                    }
+                });
+            }catch(Exception unavailable){
+                if(backend!=null)backend.close();
+                Platform.runLater(()->{
+                    if(closed||request!=pagedGeneration||!Objects.equals(path,current))return;
+                    notice.setText("分页预览不可用："+unavailable.getMessage()+"，已回退文字预览。");
+                    body.getChildren().setAll(hint("分页预览不可用，请切换“文本”或打开原件。"));
+                    scroll.setManaged(true);scroll.setVisible(true);
+                });
+            }
+        });
     }
     private void setFindVisible(boolean visible){findBar.setManaged(visible);findBar.setVisible(visible);if(!visible)searchStatus.setText("");}
     private void findNext(){
@@ -438,29 +582,85 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         return -1;
     }
     private void setModeAvailability(boolean available){
-        source.setDisable(!available||loaded==null||loaded.sourceText.isEmpty());
+        String text=previewText();
+        Path effectivePdf=loaded==null?null:(loaded.previewPdf!=null?loaded.previewPdf:convertedPdf);
+        boolean canExtract=effectivePdf!=null&&!textExtractionAttempted;
+        source.setDisable(!available||loaded==null||text.isEmpty()&&!canExtract);
         find.setDisable(source.isDisabled());
         rendered.setDisable(!available);
+        boolean layoutMode=loaded!=null&&"docx".equals(loaded.format);
+        original.setVisible(layoutMode);
+        original.setManaged(layoutMode);
+        original.setDisable(!available||!layoutMode||convertedPdf==null);
+        if(loaded!=null){
+            if("pdf".equals(loaded.format)||"pptx".equals(loaded.format))rendered.setText("幻灯片");
+            else if("xlsx".equals(loaded.format))rendered.setText("表格");
+            else if(isImage(current))rendered.setText("图片");
+            else rendered.setText("阅读");
+            source.setText(("pptx".equals(loaded.format)||"docx".equals(loaded.format))?"大纲":"文本");
+        }
     }
     private void render() {
         if(loaded==null)return;
-        body.getChildren().clear();outline.getItems().clear();outline.setDisable(true);
-        setModeAvailability(!loaded.markdown.isEmpty()||!loaded.images.isEmpty()||!loaded.sourceText.isEmpty());
-        if(!richFormat(loaded.format)&&!htmlFormat(loaded.format)&&loaded.images.isEmpty())rendered.setDisable(true);
-        showSource(false);
+        clearPagedNode();body.getChildren().clear();outline.getItems().clear();outline.setDisable(true);
+        setModeAvailability(!loaded.markdown.isEmpty()||!loaded.images.isEmpty()
+                ||!loaded.sourceText.isEmpty()||!loaded.sheets.isEmpty()
+                ||!loaded.slides.isEmpty()||loaded.previewPdf!=null||convertedPdf!=null);
+        hideViewportModes();
         if(htmlFormat(loaded.format)&&!source.isSelected()){
             renderHtml();return;
         }
-        if(loaded.markdown.isEmpty()&&loaded.images.isEmpty()){body.getChildren().add(hint(loaded.notice));return;}
-        if(!loaded.sourceText.isEmpty()&&(source.isSelected()||!richFormat(loaded.format)&&loaded.images.isEmpty())) {
+        if(!loaded.sheets.isEmpty()&&!source.isSelected()){
+            WorkbookPreviewView view=new WorkbookPreviewView(loaded.sheets);
+            workbookNode=view;showWorkbook(view);return;
+        }
+        if(isImage(current)&&!source.isSelected()){
+            try{
+                Path path=Paths.get(current.toUri());
+                if(Files.size(path)<=DocumentPreviewLoader.MAX_DIRECT_IMAGE_BYTES){
+                    Image image=new Image(path.toUri().toString(),2400,2400,true,true,true);
+                    if(!image.isError()){Node view=new ZoomableImageView(image);pagedNode=view;showPaged(view);return;}
+                }
+            }catch(Exception unavailable){body.getChildren().add(hint("图片无法缩放预览，请打开原件。"));}
+        }
+        Path effectivePdf=loaded.previewPdf!=null?loaded.previewPdf:convertedPdf;
+        if(source.isSelected()&&effectivePdf!=null&&previewText().isEmpty()){
+            if(!textExtractionAttempted)schedulePdfText();
+            textView.setText("");
+            showSource(true);
+            if(textExtractionAttempted&&!textExtractionLoading){
+                notice.setText("该文档未提取到可复制文字，可能是扫描件或没有文字层；分页视图仍可正常阅读。");
+                status.setText("无可提取文字");
+            }else{
+                status.setText("正在后台提取文档全文…");
+            }
+            return;
+        }
+        if(!previewText().isEmpty()&&(source.isSelected()||!richFormat(loaded.format)&&loaded.images.isEmpty())) {
             if(!source.isSelected()){restoring=true;try{source.setSelected(true);}finally{restoring=false;}}
-            if(!loaded.sourceText.equals(textView.getText())){textView.setText(loaded.sourceText);textView.positionCaret(0);}
+            if(!previewText().equals(textView.getText())){textView.setText(previewText());textView.positionCaret(0);}
             showSource(true);
         } else {
             setFindVisible(false);
+            Path pdf=loaded.previewPdf!=null?loaded.previewPdf:convertedPdf;
+            boolean showPdf=pdf!=null&&(loaded.previewPdf!=null||original.isSelected()
+                    ||"pptx".equals(loaded.format));
+            if(showPdf){
+                openPagedAsync(pdf);
+                return;
+            }
+            // PPTX 优先走幻灯片卡片（无转换器也能看到内容），不走 original 死路
+            if("pptx".equals(loaded.format)&&!loaded.slides.isEmpty()){
+                PptxCardViewer viewer=new PptxCardViewer(loaded.slides);
+                pagedNode=viewer;showPaged(viewer);return;
+            }
+            if(original.isSelected()){
+                body.getChildren().add(hint("原版排版需要本机 Word/WPS/LibreOffice；当前未检测到可用转换器。"));
+                scroll.setManaged(true);scroll.setVisible(true);return;
+            }
+            scroll.setManaged(true);scroll.setVisible(true);
             int count=0;
-            boolean visualPptx="pptx".equals(loaded.format)&&!loaded.images.isEmpty();
-            if(!visualPptx)for(MarkdownRenderer.Block block:blocks) {
+            for(MarkdownRenderer.Block block:blocks) {
                 if(count++>=300){body.getChildren().add(hint("显示前300个内容块，完整内容可切换“文本”或打开原文件。"));break;}
                 Node node=ArtifactDocumentNodes.create(boundedTable(block),textWidth,this::openDocumentLink,href->linkMenus.apply(documentLink(href)));body.getChildren().add(node);
                 if(block.type==MarkdownRenderer.Block.Type.TABLE&&(block.rows.size()>80||block.rows.stream().anyMatch(row->row.cells.size()>15)))
@@ -475,7 +675,7 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
                 try {
                     Image image=new Image(new ByteArrayInputStream(embedded.bytes),1000,1000,true,true);if(image.isError())continue;
                     ImageView view=new ImageView(image);view.setPreserveRatio(true);
-                    double cap=loaded.images.size()==1?620:310;
+                    double cap=loaded.images.size()==1?Math.max(520,textWidth.get()):310;
                     view.fitWidthProperty().bind(Bindings.min(textWidth,cap));
                     VBox item=new VBox(4,view);
                     if(!"本地图片预览".equals(embedded.name))item.getChildren().add(0,hint(embedded.name));
@@ -542,5 +742,11 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         final boolean source;final double scroll,textScroll;
         ViewState(boolean source,double scroll,double textScroll){this.source=source;this.scroll=scroll;this.textScroll=textScroll;}
     }
-    @Override public void close(){suspend();reader.shutdownNow();}
+    @Override public void close(){
+        closed=true;
+        suspend();
+        clearPagedNode();
+        reader.shutdownNow();
+        conversion.shutdownNow();
+    }
 }
