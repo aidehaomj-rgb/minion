@@ -45,4 +45,10 @@ public class FakeResourcesHandle implements McpHandle {
     }
 
     @Override public void close() { }
+
+    @Override public McpProgressAndCancel.Capabilities capabilities() {
+        return McpProgressAndCancel.Capabilities.none();
+    }
+
+    @Override public void sendCancelled(String requestId, String reason) { }
 }

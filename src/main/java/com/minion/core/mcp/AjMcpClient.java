@@ -49,6 +49,7 @@ public class AjMcpClient implements McpHandle {
         if (connected) return;
         try {
             client.initialize();
+            // §3.7 P1 能力协商：initialize result 由库内部消费——握手后惰性探测（capabilities() 首调时）
             // 服务端可主动 ping 客户端：回空 result（库默认无 handler 会回 -32601，部分服务端视为异常）
             client.onServerRequest(McpConstant.Methods.PING,
                     params -> JsonNodeFactory.instance.objectNode());
@@ -229,6 +230,52 @@ public class AjMcpClient implements McpHandle {
         try {
             client.close();
         } catch (RuntimeException ignored) { }
+    }
+
+    // ==================== §3.7 P1：能力协商（惰性探测）+ notifications/cancelled ====================
+
+    private volatile McpProgressAndCancel.Capabilities caps;
+    private volatile boolean capsProbed;
+
+    @Override
+    public McpProgressAndCancel.Capabilities capabilities() {
+        if (!connected) return McpProgressAndCancel.Capabilities.none();
+        if (!capsProbed) {
+            capsProbed = true;
+            caps = probeCapabilities();
+        }
+        return caps == null ? McpProgressAndCancel.Capabilities.none() : caps;
+    }
+
+    /** 惰性探测：分别尝试 tools/prompts/resources 清单，成功即标记能力（elicitation 由 server 主动发起时感知） */
+    private McpProgressAndCancel.Capabilities probeCapabilities() {
+        boolean tools = false, prompts = false, resources = false;
+        try {
+            listTools();
+            tools = true;
+        } catch (Exception ignored) { }
+        try {
+            listPrompts();
+            prompts = true;
+        } catch (Exception ignored) { }
+        try {
+            listResources();
+            resources = true;
+        } catch (Exception ignored) { }
+        return new McpProgressAndCancel.Capabilities(tools, prompts, resources, false, false);
+    }
+
+    @Override
+    public void sendCancelled(String requestId, String reason) {
+        if (!connected) return;
+        try {
+            com.ajaxjs.mcp.protocol.McpRequest req = rawRequest(
+                    "notifications/cancelled",
+                    McpProgressAndCancel.cancelledNotification(requestId, reason)
+                            .getAsJsonObject("params"));
+            transport.sendRequestWithoutResponse(req);
+        } catch (Exception ignored) {   // 断开/不支持时静默（取消尽力而为）
+        }
     }
 
     private static String rootMessage(Throwable t) {

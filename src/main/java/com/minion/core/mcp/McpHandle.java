@@ -35,4 +35,10 @@ public interface McpHandle {
 
     /** 关闭连接、释放进程/流 */
     void close();
+
+    /** §3.7 P1：能力快照（connect 后读取 serverCapabilities；未连接返回 none） */
+    McpProgressAndCancel.Capabilities capabilities();
+
+    /** §3.7 P1：发送 notifications/cancelled（中断在途调用；连接断开静默忽略） */
+    void sendCancelled(String requestId, String reason);
 }
