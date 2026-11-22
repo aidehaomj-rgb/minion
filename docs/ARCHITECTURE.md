@@ -8,7 +8,7 @@
 ```
 com.minion
 ├── Boot                    自举启动器（shade 打包入口）：PRISM/控制台/JDK8 探测与重启，--relaunched 防循环
-├── Main                    入口：装配配置/技能/可插拔工具/MCP/GUI，启动 JavaFX 主窗口（GUI 为唯一界面，CLI 已移除）
+├── Main                    入口：装配配置/技能/可插拔工具/MCP/GUI，启动 JavaFX 主窗口（GUI 默认；CLI/SDK 经 Boot 分流为附加入口）
 ├── gui/                    JavaFX 界面：主窗口、侧栏、聊天渲染、输入、弹窗、确认、图标、会话管理、plugin/（工具页与配置弹窗）
 └── core/
     ├── agent/              AgentLoop（主循环）、SubAgentLoop（子 agent）、Session、TodoList、SystemPromptBuilder、TitleGenerator、RetryPolicy（指数退避+抖动长重试策略，尊重 Retry-After）、RetryProgress（重试进度值对象）
@@ -202,3 +202,33 @@ com.minion
 | CdpClient 连接超时 | 10000ms | Main.java |
 
 > 改动以上常量须在设计阶段说明理由，不随手改。
+
+## 附：v2.4 复刻新增包（切片 26-40）
+
+```
+core/
+├── security/              §10.9 持续信任：TrustedExecutable（指纹值对象）、ProjectTrustStore（trust.json 持久+损坏 fail-closed）、TrustGate（子进程启动前复核）
+│   └── permission/        PermissionEngine/RuleStore/PermissionContext（13 步裁决）+ RuleWriter（§10.3 作用域落盘）
+├── plugins/               §7.2 离线插件：PluginManifest/PluginMarketplace（本地市场）/PluginInstaller（版本缓存+回退）/PluginLoader（装载+信任门控）
+├── notify/                §10.8 通知：Notifier（Notification hook 先行→tray/sound/disabled）
+├── cli/                   §11.1/§12.2：MinionCli/HeadlessRunner/StreamJsonProtocol + SdkFrameIo/SdkDuplex/SdkHostBridge（双向 NDJSON）/SdkControlHandlers（二期十请求）
+├── ui/
+│   ├── outputstyles/      §10.5 输出样式（built-in<user<project）
+│   ├── statusline/        §10.4 自定义 statusLine（§10.9 信任+首行+超时）
+│   ├── keybindings/       §10.1 快捷键注册表（keybindings.json 覆盖）
+│   └── vim/               §10.1 Vim 状态机（默认关）
+├── agent/
+│   ├── PromptTemplates    附录 D.4-D.11 原创模板
+│   ├── DynamicContextBuilder D.3 首条用户侧动态环境块（缓存+指纹失效）
+│   ├── TaskBoardModel     §10.6/10.7 任务面板共用可视化模型
+│   └── ReplicaPromptTemplate  附录 D.2/D.5 replica 四段
+└── tools/
+    ├── mcp/McpResourceTools  §3.7 二期 ListMcpResources/ReadMcpResource
+    ├── skills/SkillExpansion+SkillPathActivation  §7.1 变量展开/paths 条件激活
+    ├── confirm/PermissionExplainer  §10.3 判定解释
+    ├── BriefTool          §D.9 进展摘要
+    └── GrepTool 增强       §3.1 glob/type/output_mode/context/head_limit/offset
+```
+
+安全例外（7 项默认开）与迁移：[SECURITY-EXCEPTIONS.md](SECURITY-EXCEPTIONS.md)；
+Win7 实机 POC：[win7-poc/README.md](win7-poc/README.md)；IDE 桥豁免备档：[ide-bridge-exception.md](ide-bridge-exception.md)。

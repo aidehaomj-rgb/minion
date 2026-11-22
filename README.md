@@ -1,5 +1,7 @@
 # minion
 
+2026-11-22 v2.4 CC 复刻全量开发（切片 1-40，本机开发完成）：按 `minion开发说明-v2.4.md` 完成 40 个切片——§10.9 ProjectTrustStore 持续信任（第 7 个默认开安全例外）、§13.1 settings.json 六层链+env 显式映射、§2.6 统一结束状态机（Stop Hook 入级联+预算后移）、§7.1 Skills 全 frontmatter/paths 条件激活/内联 shell 三道检查/fork 隔离、§7.2 Plugins 本地市场+版本缓存+信任门控、§3.1 Grep 参数补全、§10.3-10.10 UI 五片（权限富对话框/任务面板/通知+Rewind/状态栏+OutputStyle/键位+Vim+转录）、§12.2 SDK 双向协议（stdin/stdout NDJSON+can_use_tool 完整链路+二期十控制请求）、§4.7 Hook 二期 8 事件、§3.7 MCP 二期（resources/prompts+命名空间命令）、附录 D.3-D.12 提示词全量+回放矩阵、§12.3 IDE 桥路径 B 备档（[豁免记录](docs/ide-bridge-exception.md)）。全量回归 2727 项 0 失败（352 类）；字节码 850+46 依赖 jar 全部 major≤52。**待实机验收**：[Win7 POC 12 项](docs/win7-poc/README.md)（用户执行）+ UI smoke 截图 + IDE 桥签字。安全例外与迁移说明：[SECURITY-EXCEPTIONS.md](docs/SECURITY-EXCEPTIONS.md)。
+
 2026-11-16 第二批主流对齐优化与四主题质感增强（V68 小更新）：[设计文档](docs/superpowers/specs/2026-11-16-第二批主流对齐优化-design.md)。Grep/Glob 尊重 .gitignore、恒跳 .git 与二进制；ripgrep 13.0.0（Win7 兼容）作为受 SHA-256 校验的 JAR 资源随程序分发，首次使用自解压到 `.session/tools`，不可用时无感回退 Java 遍历；ripgrep 搜索默认 120 秒整体截止，用户停止会强杀进程，不再因超大目录/网络盘无限等待。token 校准向上立即/向下平滑并按模型指纹持久化，图片按真实尺寸粗估；高危命令白名单支持前缀规则（如 `del /q`）窄化确认粒度，旧条目不收紧；完成裁决抽出 StopAdjudicator（纯机械搬移，特征化 A/B 验证）。全量回归 2339 项通过（0 失败、38 环境跳过）。
 
 2026-11-16 第一批主流对齐优化（开发完成，未打包）：[设计文档](docs/superpowers/specs/2026-11-16-第一批主流对齐优化-design.md)。系统提示词领域规则迁为内置技能按需加载；瞬时错误重试改指数退避+抖动并尊重 Retry-After，非 2xx 响应体全文落诊断日志；Edit 匹配失败附最近匹配行号提示。全量回归通过。
@@ -46,7 +48,7 @@ win7&jdk8 本地 Agent，使用 Java 8 开发，面向 Qwen 等 OpenAI Chat Comp
 
     java -jar minion-0.1.0.jar   # 双击 jar 或命令行运行；jar 自举，无需 bat
 
-图形界面为唯一界面（CLI 已移除）。需要 JDK 8 且自带 JavaFX：Oracle JDK 8 或 Zulu/AdoptOpenJDK 8 含 OpenJFX 的发行版；Win7 用户注意 Win7 只支持到 8u251 之前的 Oracle 版本。
+图形界面为默认界面（CLI `-p/--print` 与 SDK 双向 `--input-format stream-json` 已恢复为附加入口，见 §11.1/§12.2）。需要 JDK 8 且自带 JavaFX：Oracle JDK 8 或 Zulu/AdoptOpenJDK 8 含 OpenJFX 的发行版；Win7 用户注意 Win7 只支持到 8u251 之前的 Oracle 版本。
 
 jar 自举行为（启动器内置，双击 / 命令行同样生效）：
 

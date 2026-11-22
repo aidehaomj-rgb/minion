@@ -18,7 +18,7 @@ import com.minion.gui.session.SessionManager;
 import java.nio.file.Paths;
 import java.util.List;
 
-/** 入口：装配配置/技能/浏览器/GUI，启动 JavaFX 主窗口（GUI 为唯一界面，CLI 已移除） */
+/** 入口：装配配置/技能/浏览器/GUI，启动 JavaFX 主窗口（GUI 默认；CLI/SDK 经 Boot 分流为附加入口） */
 public class Main {
 
     public static void main(String[] args) throws Exception {
