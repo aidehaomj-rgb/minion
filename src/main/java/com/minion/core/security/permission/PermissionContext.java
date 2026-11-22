@@ -8,17 +8,22 @@ import java.util.Objects;
 /**
  * 权限引擎的调用上下文（开发说明 v2.4 §4.1）。
  *
- * <p>不可变快照：模式、工具自检结果（§2.1 四态，未接线时恒 PASSTHROUGH）、
+ * <p>
+ * 不可变快照：模式、工具自检结果（§2.1 四态，未接线时恒 PASSTHROUGH）、
  * 敏感路径命中（§4.2）、文件类工具的目标路径与工作区根（用于 acceptEdits 自动放行；
  * workspaceRoot 为 null 时 fail-closed，不自动放行任何写入）。
  */
 public final class PermissionContext {
 
     /** 权限模式；BYPASS 仅在第 9 步放行，DONT_ASK 把任何 ask 收紧为 deny */
-    public enum Mode { DEFAULT, ACCEPT_EDITS, PLAN, BYPASS, DONT_ASK }
+    public enum Mode {
+        DEFAULT, ACCEPT_EDITS, PLAN, BYPASS, DONT_ASK
+    }
 
     /** 工具自检四态；PASSTHROUGH 表示工具无额外决定，不等于 allow */
-    public enum ToolCheck { ALLOW, DENY, ASK, PASSTHROUGH }
+    public enum ToolCheck {
+        ALLOW, DENY, ASK, PASSTHROUGH
+    }
 
     public final Mode mode;
     public final ToolCheck toolCheck;
@@ -30,7 +35,7 @@ public final class PermissionContext {
     public final Path workspaceRoot;
 
     public PermissionContext(Mode mode, ToolCheck toolCheck, boolean requiresUserInteraction,
-                             boolean safetyCheckHit, Path targetPath, Path realTargetPath, Path workspaceRoot) {
+            boolean safetyCheckHit, Path targetPath, Path realTargetPath, Path workspaceRoot) {
         this.mode = mode;
         this.toolCheck = toolCheck;
         this.requiresUserInteraction = requiresUserInteraction;
@@ -45,7 +50,10 @@ public final class PermissionContext {
         return new PermissionContext(mode, ToolCheck.PASSTHROUGH, false, false, null, null, null);
     }
 
-    /** 旧配置值到新模式空间的映射（read-only→PLAN、workspace-write→ACCEPT_EDITS、full→BYPASS；未知回落 DEFAULT） */
+    /**
+     * 旧配置值到新模式空间的映射（read-only→PLAN、workspace-write→ACCEPT_EDITS、full→BYPASS；未知回落
+     * DEFAULT）
+     */
     public static Mode mapLegacyMode(String raw) {
         Mode parsed = parseMode(raw);
         return parsed != null ? parsed : Mode.DEFAULT;
@@ -53,19 +61,26 @@ public final class PermissionContext {
 
     /** 严格解析模式名（含 CC 名称与旧配置值）；未知返回 null（供 SDK set_permission_mode 校验） */
     public static Mode parseMode(String raw) {
-        if (raw == null) return null;
+        if (raw == null)
+            return null;
         String v = raw.trim().toLowerCase(java.util.Locale.ROOT);
-        if (v.equals("read-only") || v.equals("plan")) return Mode.PLAN;
-        if (v.equals("workspace-write") || v.equals("acceptedits") || v.equals("accept-edits")) return Mode.ACCEPT_EDITS;
-        if (v.equals("full") || v.equals("bypasspermissions") || v.equals("bypass")) return Mode.BYPASS;
-        if (v.equals("dontask") || v.equals("dont-ask")) return Mode.DONT_ASK;
-        if (v.equals("default")) return Mode.DEFAULT;
+        if (v.equals("read-only") || v.equals("plan"))
+            return Mode.PLAN;
+        if (v.equals("workspace-write") || v.equals("acceptedits") || v.equals("accept-edits"))
+            return Mode.ACCEPT_EDITS;
+        if (v.equals("full") || v.equals("bypasspermissions") || v.equals("bypass"))
+            return Mode.BYPASS;
+        if (v.equals("dontask") || v.equals("dont-ask"))
+            return Mode.DONT_ASK;
+        if (v.equals("default"))
+            return Mode.DEFAULT;
         return null;
     }
 
     /** acceptEdits 的自动放行条件：文件类目标在工作区内（整文件级 startsWith，realpath 优先） */
     boolean insideWorkspace() {
-        if (workspaceRoot == null || targetPath == null) return false;
+        if (workspaceRoot == null || targetPath == null)
+            return false;
         Path root = workspaceRoot.toAbsolutePath().normalize();
         Path probe = realTargetPath != null ? realTargetPath.toAbsolutePath().normalize()
                 : targetPath.toAbsolutePath().normalize();
@@ -76,10 +91,14 @@ public final class PermissionContext {
     public String describe() {
         List<String> parts = new ArrayList<String>();
         parts.add("mode=" + mode);
-        if (toolCheck != ToolCheck.PASSTHROUGH) parts.add("toolCheck=" + toolCheck);
-        if (requiresUserInteraction) parts.add("requiresUserInteraction");
-        if (safetyCheckHit) parts.add("safetyCheck");
-        if (targetPath != null) parts.add("target=" + targetPath);
+        if (toolCheck != ToolCheck.PASSTHROUGH)
+            parts.add("toolCheck=" + toolCheck);
+        if (requiresUserInteraction)
+            parts.add("requiresUserInteraction");
+        if (safetyCheckHit)
+            parts.add("safetyCheck");
+        if (targetPath != null)
+            parts.add("target=" + targetPath);
         return Objects.toString(parts);
     }
 }
