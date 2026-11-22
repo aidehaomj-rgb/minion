@@ -330,6 +330,11 @@ public class InputView extends VBox {
     public void initStatusBar() {
         statusLineLabel.getStyleClass().add("status-line");
         statusLineLabel.setVisible(false);   // 有内容时显示
+        statusLineLabel.setWrapText(false);
+        statusLineLabel.setMaxWidth(360);    // 不挤压上传/发送按钮
+        statusLineLabel.setMinWidth(0);
+        statusLineLabel.setManaged(false);   // 隐藏时不占位
+        statusLineLabel.managedProperty().bind(statusLineLabel.visibleProperty());
         bottomRow.getChildren().add(0, statusLineLabel);
     }
 

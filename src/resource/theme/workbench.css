@@ -392,6 +392,13 @@
 .minion-workbench .input-frame .input-textarea .content { -fx-padding: 2 4 2 4; -fx-background-color: -wb-surface; }
 .minion-workbench .input-frame .input-textarea .scroll-pane > .viewport { -fx-background-color: -wb-surface; }
 .minion-workbench .composer-actions { -fx-padding: 7 2 0 2; }
+/* §10.4 两层状态栏：底部 footer（小字·次要色·紧凑·单行截断） */
+.minion-workbench .composer-actions .status-line {
+    -fx-text-fill: -wb-secondary;
+    -fx-font-size: 10.5px;
+    -fx-padding: 0 6 0 2;
+    -fx-max-width: 420;
+}
 .minion-workbench .btn-upload:hover, .minion-workbench .model-picker:hover { -fx-background-color: -wb-hover; }
 .minion-workbench .model-picker {
     -fx-background-radius: 5; -fx-background-color: transparent; -fx-border-color: transparent; -fx-padding: 0;
