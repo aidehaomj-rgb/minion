@@ -2292,6 +2292,7 @@ public class SessionManager {
     public void toggleThinking() {
         boolean next = !Boolean.parseBoolean(config.get("model.thinking", "true"));
         config.set("model.thinking", String.valueOf(next));
+        notifyConfigChange("model.thinking", String.valueOf(next));
         SessionHandle h = currentSession;
         if (h != null && h.controller != null)
             h.controller.onSystem("思考模式已" + (next ? "开启" : "关闭") + "（下一轮请求生效）");
@@ -2303,7 +2304,23 @@ public class SessionManager {
         String next = "read-only".equals(current) ? "workspace-write"
                 : "workspace-write".equals(current) ? "full" : "read-only";
         config.set("permission.mode", next);
+        notifyConfigChange("permission.mode", next);
         return current + " → " + next;
+    }
+
+    /** §4.7 二期通知：ConfigChange（运行时配置变更；活动会话 hook fire-and-forget） */
+    private void notifyConfigChange(String key, String value) {
+        SessionHandle h = currentSession;
+        if (h == null || h.loop == null) return;
+        try {
+            if (h.loop.ccHookSystem().enabled()
+                    && h.loop.ccHookSystem().matches(com.minion.core.hooks.HookSystem.CONFIG_CHANGE, "")) {
+                com.google.gson.JsonObject p = new com.google.gson.JsonObject();
+                p.addProperty("key", key);
+                p.addProperty("value", value);
+                h.loop.ccHookSystem().run(com.minion.core.hooks.HookSystem.CONFIG_CHANGE, "", p);
+            }
+        } catch (Exception ignored) { }
     }
 
     /** §10.1 Vim 模式（/vim 开关，默认关） */

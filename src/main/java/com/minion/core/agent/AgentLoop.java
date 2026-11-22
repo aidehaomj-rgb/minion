@@ -453,6 +453,24 @@ public class AgentLoop {
             return null;
         }
     }
+
+    /**
+     * §4.7 二期通知类事件（切片 37a）：fire-and-forget——PermissionDenied/StopFailure/
+     * TaskCreated/TaskCompleted/WorktreeCreate/WorktreeRemove/ConfigChange/TeammateIdle。
+     * 通知不改变主流程（blocked 忽略——这些事件没有阻断语义位）；超时/失败按 §4.7 ask/deny
+     * 由 HookSystem 内部处理（对通知类等效忽略）。
+     */
+    private void notifyHook(String event, com.google.gson.JsonObject payload) {
+        runCcHook(event, payload);
+    }
+
+    /** §4.7 二期 PermissionDenied 统一载荷 */
+    private void notifyPermissionDenied(String toolName, String reason) {
+        com.google.gson.JsonObject p = new com.google.gson.JsonObject();
+        p.addProperty("tool", toolName);
+        p.addProperty("reason", reason == null ? "" : reason);
+        notifyHook(com.minion.core.hooks.HookSystem.PERMISSION_DENIED, p);
+    }
     private boolean lengthEscalationUsed;
     private Long turnTokenBudget;
     private long turnUsedTokens, lastRoundTokens = -1, prevRoundTokens = -1;
@@ -1654,6 +1672,12 @@ public class AgentLoop {
         ExecutionMode armedMode = pendingExecutionMode;
         if (!automatic) pendingExecutionMode = null;
         boolean newTask = automatic ? false : session.taskState.begin(input, forceNewTask);
+        if (newTask) {   // §4.7 二期：TaskCreated 通知（目标开启，fire-and-forget）
+            com.google.gson.JsonObject p = new com.google.gson.JsonObject();
+            p.addProperty("task_id", session.taskState.id);
+            p.addProperty("objective", input == null ? "" : input);
+            notifyHook(com.minion.core.hooks.HookSystem.TASK_CREATED, p);
+        }
         ExecutionMode requestedMode = automatic
                 ? currentExecutionMode()
                 : (newTask
@@ -2811,6 +2835,18 @@ public class AgentLoop {
         // 不再在退出路径事后执行（旧事后块只标记失败、无法续跑，已废止）
         lastTurnToolRounds=rounds;
         session.taskState.finish(lastTurnSucceeded,exitReason,exitCode);
+        // §4.7 二期通知：TaskCompleted（成功完成）/ StopFailure（失败/暂停结束）——
+        // 在 finish 之后判定（status 由 finish 写入 completed/paused）
+        {
+            com.google.gson.JsonObject p = new com.google.gson.JsonObject();
+            p.addProperty("task_id", session.taskState.id);
+            p.addProperty("exit_code", exitCode == null ? "" : exitCode);
+            p.addProperty("reason", exitReason == null ? "" : exitReason);
+            if (lastTurnSucceeded && "completed".equals(session.taskState.status))
+                notifyHook(com.minion.core.hooks.HookSystem.TASK_COMPLETED, p);
+            else if (!lastTurnSucceeded)
+                notifyHook(com.minion.core.hooks.HookSystem.STOP_FAILURE, p);
+        }
         DiagnosticLog.info("agent-exit","task="+session.taskState.id+" state="+session.taskState.status
                 +" pauseCode="+(session.taskState.pauseCode==null?"none":session.taskState.pauseCode)
                 +" toolRounds="+rounds+" autoContinuations="+session.taskState.automaticContinuations);
@@ -3314,6 +3350,7 @@ public class AgentLoop {
                     ToolResult result = ToolResult.errorWithoutSideEffects(
                             "权限策略拒绝该操作（" + call.name + "）: " + verdict.reason);
                     DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                    notifyPermissionDenied(call.name, verdict.reason);   // §4.7 二期通知
                     return result;
                 }
                 boolean needsHostCheck = verdict.needsAsk() || ccPre.ask || hostCallback.requireForAllTools();
@@ -3326,6 +3363,7 @@ public class AgentLoop {
                         ToolResult result = ToolResult.errorWithoutSideEffects(
                                 "宿主拒绝执行工具（can_use_tool: " + call.name + "）: " + denyReason);
                         DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                        notifyPermissionDenied(call.name, denyReason);   // §4.7 二期通知
                         return result;
                     }
                     if (hostDecision.permissionUpdates != null) {
@@ -3361,6 +3399,7 @@ public class AgentLoop {
                             : (args.has("path") ? args.get("path").getAsString() : args.toString());
                     ToolResult result = ToolResult.error("用户拒绝了该操作（" + call.name + " → " + detail + "），请调整方案");
                     DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                    notifyPermissionDenied(call.name, detail);   // §4.7 二期通知
                     return result;
                 }
                 if (ccPre.ask && !confirmGate.hookAsk(tool, args)) {
@@ -3368,6 +3407,7 @@ public class AgentLoop {
                     ToolResult result = ToolResult.errorWithoutSideEffects(
                             "Hook 要求确认该操作，用户未批准；请调整方案");
                     DiagnosticLog.tool(call.name, elapsedMs(started), false, result.output);
+                    notifyPermissionDenied(call.name, "hook-ask 未批准");   // §4.7 二期通知
                     return result;
                 }
             }
@@ -3397,6 +3437,15 @@ public class AgentLoop {
             DiagnosticLog.tool(call.name, elapsedMs(started), result.ok, result.output);
             FileEvidence file=null;
             if(result.ok) {
+                // §4.7 二期通知：WorktreeCreate / WorktreeRemove（成功进出工作树）
+                if ("EnterWorktree".equals(call.name) || "ExitWorktree".equals(call.name)) {
+                    com.google.gson.JsonObject p = new com.google.gson.JsonObject();
+                    p.addProperty("tool", call.name);
+                    p.addProperty("input", args.toString());
+                    notifyHook("ExitWorktree".equals(call.name)
+                            ? com.minion.core.hooks.HookSystem.WORKTREE_REMOVE
+                            : com.minion.core.hooks.HookSystem.WORKTREE_CREATE, p);
+                }
                 String key=java.util.Arrays.asList("Read","Write","Edit","ArtifactVerification").contains(call.name)?"path":
                         "Artwork".equals(call.name)&&"template".equals(args.has("action")?args.get("action").getAsString():"")?"path":
                         StopGate.mutationEvidence(call.name,args)&&java.util.Arrays.asList("Excel","Document","Database","Artwork").contains(call.name)?"outputPath":null;

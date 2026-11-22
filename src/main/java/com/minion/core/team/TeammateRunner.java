@@ -38,6 +38,9 @@ public final class TeammateRunner {
         final AtomicBoolean running = new AtomicBoolean(true);
         volatile String status = "starting";
         volatile String lastResult = "";
+        /** 最近一轮的 loop（§4.7 TeammateIdle 通知借用其 ccHookSystem） */
+        final java.util.concurrent.atomic.AtomicReference<com.minion.core.agent.AgentLoop> lastLoop =
+                new java.util.concurrent.atomic.AtomicReference<com.minion.core.agent.AgentLoop>();
 
         Teammate(String name, Thread thread, TeamMailbox mailbox) {
             this.name = name;
@@ -106,10 +109,21 @@ public final class TeammateRunner {
                         }
                         // 正常消息 → 跑一轮
                         self.status = "working";
-                        String reply = executeOneTurn(team, self.name, msg.from, msg.text);
+                        String reply = executeOneTurn(team, self, msg.from, msg.text);
                         self.mailbox.send(self.name, msg.from, "text", reply);
                         cursorId = msg.messageId;
                         self.status = "idle";
+                        // §4.7 二期通知：TeammateIdle（成员回闲，可派新任务）
+                        try {
+                            com.minion.core.agent.AgentLoop loop = self.lastLoop.get();
+                            if (loop != null && loop.ccHookSystem().enabled()
+                                    && loop.ccHookSystem().matches(com.minion.core.hooks.HookSystem.TEAMMATE_IDLE, "")) {
+                                com.google.gson.JsonObject p = new com.google.gson.JsonObject();
+                                p.addProperty("team", team);
+                                p.addProperty("teammate", self.name);
+                                loop.ccHookSystem().run(com.minion.core.hooks.HookSystem.TEAMMATE_IDLE, "", p);
+                            }
+                        } catch (Exception notifyIgnored) { }
                     }
                     if (cursorId != null) self.mailbox.ack(self.name, cursorId);
                 }
@@ -127,7 +141,8 @@ public final class TeammateRunner {
     }
 
     /** 单轮执行：构造独立 AgentLoop（受限工具集）跑一次 prompt */
-    private String executeOneTurn(String team, String name, String from, String prompt) {
+    private String executeOneTurn(String team, Teammate self, String from, String prompt) {
+        final String name = self.name;
         try {
             Workspace workspace = new Workspace(workDir);
             LlmClient llm = new DeepSeekClient(
@@ -157,6 +172,7 @@ public final class TeammateRunner {
                 loop.ccHookSystem().tryResumeFromTrust();
             }
             loop.roundLimit = 50;
+            self.lastLoop.set(loop);   // §4.7 TeammateIdle 通知借用
             loop.runUserTurn("[teammate:" + name + "] 来自 " + from + " 的任务:\n" + prompt);
             boolean ok = loop.lastTurnSucceeded();
             // 取最后 assistant 消息

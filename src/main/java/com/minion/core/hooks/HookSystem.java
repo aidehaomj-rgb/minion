@@ -67,11 +67,22 @@ public final class HookSystem {
     public static final String POST_COMPACT = "PostCompact";
     public static final String PERMISSION_REQUEST = "PermissionRequest";
     public static final String INSTRUCTIONS_LOADED = "InstructionsLoaded";
+    // ===== 二期事件（v2.4 §4.7/§14.4，切片 37a）：通知类，阻断仅对带 decision 语义的生效 =====
+    public static final String PERMISSION_DENIED = "PermissionDenied";
+    public static final String STOP_FAILURE = "StopFailure";
+    public static final String TEAMMATE_IDLE = "TeammateIdle";
+    public static final String TASK_CREATED = "TaskCreated";
+    public static final String TASK_COMPLETED = "TaskCompleted";
+    public static final String CONFIG_CHANGE = "ConfigChange";
+    public static final String WORKTREE_CREATE = "WorktreeCreate";
+    public static final String WORKTREE_REMOVE = "WorktreeRemove";
 
     private static final List<String> EVENTS = Collections.unmodifiableList(Arrays.asList(
             PRE_TOOL_USE, POST_TOOL_USE, POST_TOOL_USE_FAILURE, NOTIFICATION, USER_PROMPT_SUBMIT,
             SESSION_START, SESSION_END, STOP, SUBAGENT_START, SUBAGENT_STOP, PRE_COMPACT,
-            POST_COMPACT, PERMISSION_REQUEST, INSTRUCTIONS_LOADED));
+            POST_COMPACT, PERMISSION_REQUEST, INSTRUCTIONS_LOADED,
+            PERMISSION_DENIED, STOP_FAILURE, TEAMMATE_IDLE, TASK_CREATED, TASK_COMPLETED,
+            CONFIG_CHANGE, WORKTREE_CREATE, WORKTREE_REMOVE));
 
     private static final int MAX_CONFIG = 65536, MAX_OUTPUT = 16384;
     private static final long DEFAULT_TIMEOUT_MS = 600_000L;
