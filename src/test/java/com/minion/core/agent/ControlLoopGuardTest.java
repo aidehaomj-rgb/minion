@@ -25,9 +25,9 @@ import java.util.List;
 import static org.junit.Assert.*;
 
 /**
- * 子 agent 相关的空转保护与输出契约（2026-11-23 弱模型派发修复的配套）：
- * 没有可等的子任务还反复 child_wait 要被拦下并指回复核；child_status 必须保持合法 JSON。
- * 来回交替的控制循环保护见同一提交之后的 ControlLoopGuardTest 扩展。
+ * 控制循环保护（2026-11-23 审阅补洞）：此前只拦“同一个内部状态操作连续重复”，模型在两个操作之间
+ * 来回交替（status→verify→status→verify…）或对着空队列反复 child_wait 就能一直空转。
+ * 合法推进不受影响：参数不同的调用、中间夹着真实工作的调用都不计数。
  */
 public class ControlLoopGuardTest {
     @Rule public TemporaryFolder tmp = new TemporaryFolder();
@@ -63,12 +63,44 @@ public class ControlLoopGuardTest {
 
     private void control(String id, String action) { tool(id, "AgentControl", "{\"action\":\"" + action + "\"}"); }
 
+    private ToolCall controlCall(String id, String action) {
+        ToolCall call = new ToolCall();
+        call.id = id;
+        call.name = "AgentControl";
+        call.arguments = "{\"action\":\"" + action + "\"}";
+        return call;
+    }
+
+    /** 实际执行了的 AgentControl 调用数（被抑制的调用没有工具结果） */
+    private int executedControls() {
+        int count = 0;
+        for (com.minion.core.llm.Message m : loop.messages())
+            if (m.role == com.minion.core.llm.Message.Role.TOOL && "AgentControl".equals(m.name)) count++;
+        return count;
+    }
+
     /** 纠偏提示只进下一轮请求、不进会话历史，所以到模型实际收到的请求里找 */
     private boolean requestContains(String text) {
         for (com.minion.core.llm.FakeLlmClient.RequestRecord request : llm.requests)
             for (com.minion.core.llm.Message m : request.messages)
                 if (m.content != null && m.content.contains(text)) return true;
         return false;
+    }
+
+    /** 两个内部状态操作来回交替（中间没有正文，所以结束核验的无进展预算根本不会触发）：几轮内判为控制循环 */
+    @Test public void alternatingControlActionsStopAsControlLoop() {
+        llm.stopKind = "task";
+        for (int i = 0; i < 10; i++) {
+            control("status-" + i, "status");
+            control("verify-" + i, "verify");
+        }
+        loop.runUserTurn("交付文件");
+        assertFalse(loop.lastTurnSucceeded());
+        assertEquals("来回交替的内部状态操作应判为控制循环", "control_loop", loop.session().taskState.pauseCode);
+        assertTrue(notices.stream().anyMatch(s -> s.contains("同一内部状态操作连续重复")));
+        assertTrue("应在几轮内停下，实际请求 " + llm.requests.size(), llm.requests.size() <= 9);
+        assertEquals("各重复到第 3 次起不再执行", 4, executedControls());
+        assertTrue("抑制时要给出纠偏提示", requestContains("不要再次调用"));
     }
 
     /** 没有可等的子任务还反复 child_wait（每次立即返回）：拦下并指回去复核已返回的结果 */
@@ -88,6 +120,17 @@ public class ControlLoopGuardTest {
             if (m.role == com.minion.core.llm.Message.Role.TOOL && "AgentControl".equals(m.name))
                 return String.valueOf(m.content).substring(0, Math.min(300, String.valueOf(m.content).length()));
         return "(无)";
+    }
+
+    /** 同一轮里成对出现的控制调用（已验证小批量协议的模型才会这样）反复重演：同样判为控制循环 */
+    @Test public void repeatedControlPairsWithinOneRoundStopAsControlLoop() {
+        llm.stopKind = "task";
+        for (int i = 0; i < 10; i++)
+            llm.addTurnWithTools(java.util.Arrays.asList(controlCall("status-" + i, "status"),
+                    controlCall("verify-" + i, "verify")), null);
+        loop.runUserTurn("交付文件");
+        assertEquals("control_loop", loop.session().taskState.pauseCode);
+        assertTrue("应在几轮内停下，实际请求 " + llm.requests.size(), llm.requests.size() <= 9);
     }
 
     /** 合法推进：每次参数都不同（逐个复核不同子任务），交替多少次都不算循环 */

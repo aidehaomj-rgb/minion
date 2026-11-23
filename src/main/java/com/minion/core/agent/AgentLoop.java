@@ -2054,8 +2054,11 @@ public class AgentLoop {
         int reviewFormatRecoveries = 0;
         boolean stallCompressionAttempted = false;
         boolean nextRequestCompact = false;
-        String lastControlAction = null;
-        int controlActionRepeats = 0;
+        // 控制循环检测：在“只有控制类调用、没有真实业务工具”的连续区间内，同一指纹累计出现 3 次即抑制。
+        // 按累计而不是“连续相同”来数——只看连续相同会漏掉 A→B→A→B 的来回交替（那种循环带工具调用、
+        // 不进 StopGate，兜底只剩轮数上限）；不同参数的合法推进每个指纹只出现一次，不会被误伤。
+        // 出现真实业务工具即清零。
+        final Map<String, Integer> controlSeen = new LinkedHashMap<String, Integer>();
         int suppressedControlLoops = 0;
         List<StopGate.Receipt> stopReceipts=new ArrayList<StopGate.Receipt>();
         StopGate.Progress stopProgress=new StopGate.Progress();
@@ -2522,8 +2525,6 @@ public class AgentLoop {
                             + " 个损坏的工具调用，其余合法调用将继续执行");
                 }
                 if (toolCalls[0] != null && !toolCalls[0].isEmpty()) {
-                    String controlAction = toolCalls[0].size() == 1
-                            ? repeatedControlAction(toolCalls[0].get(0)) : null;
                     // child_wait 本身不计重复（等待子任务是合法的）；但上一次 child_wait 是“立即返回”
                     // 说明当时已没有可等的子任务，紧接着再调一次就是空转——按无进展的控制调用计数。
                     // 被抑制的那一轮没有执行，这个标记保持不变，连续空等才会一路累计到停机。
@@ -2532,31 +2533,41 @@ public class AgentLoop {
                             && "AgentControl".equalsIgnoreCase(soleCall.name)
                             && "child_wait".equals(toolAction(soleCall))
                             && lastChildWaitIdle;
-                    if (idleChildWait) controlAction = "AgentControl:child_wait#idle";
+                    // 本轮各控制类调用的指纹；出现真实业务工具即终止统计（整轮不算控制循环）
+                    List<String> fingerprints = new ArrayList<String>();
                     boolean hasRealWorkTool = false;
                     for (ToolCall tc : toolCalls[0]) {
-                        if (repeatedControlAction(tc) == null && !idleChildWait) {
+                        String fingerprint = repeatedControlAction(tc);
+                        if (fingerprint == null && !(idleChildWait && tc == soleCall)) {
                             hasRealWorkTool = true;
                             break;
                         }
+                        fingerprints.add(idleChildWait && tc == soleCall ? "AgentControl:child_wait#idle" : fingerprint);
                     }
-                    if (hasRealWorkTool || controlAction == null) {
-                        lastControlAction = null;
-                        controlActionRepeats = 0;
+                    String controlAction = null;
+                    int controlSeenCount = 0;
+                    if (hasRealWorkTool) {
+                        controlSeen.clear();
                         lastChildWaitIdle = false;   // 中间有别的动作：上一次空等不再说明这次也是空等
-                        if (hasRealWorkTool) suppressedControlLoops = 0;
-                    } else if (controlAction.equals(lastControlAction)) {
-                        controlActionRepeats++;
+                        suppressedControlLoops = 0;
                     } else {
-                        lastControlAction = controlAction;
-                        controlActionRepeats = 1;
+                        for (String fingerprint : fingerprints) {
+                            Integer previous = controlSeen.get(fingerprint);
+                            int count = previous == null ? 1 : previous + 1;
+                            if (previous == null && controlSeen.size() >= 256) controlSeen.clear();   // 有界
+                            controlSeen.put(fingerprint, count);
+                            if (count >= 3 && controlAction == null) {   // 本轮首个累计到 3 次的操作决定提示内容
+                                controlAction = fingerprint;
+                                controlSeenCount = count;
+                            }
+                        }
                     }
-                    if (controlAction != null && controlActionRepeats >= 3) {
+                    if (controlAction != null) {
                         toolCalls[0] = null;
                         suppressedControlLoops++;
                         DiagnosticLog.info("agent-control-loop",
                                 "task=" + session.taskState.id + " action=" + controlAction
-                                        + " repeat=" + controlActionRepeats);
+                                        + " seen=" + controlSeenCount);
                         String checkpointReply = ("AgentControl:checkpoint".equals(controlAction)
                                 || "AgentControl:refresh_checkpoint".equals(controlAction))
                                 ? checkpointLoopDeliveryReply() : null;
