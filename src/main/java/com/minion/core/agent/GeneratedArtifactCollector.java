@@ -26,7 +26,10 @@ final class GeneratedArtifactCollector {
     private static final Pattern LINK = Pattern.compile("(?<!!)\\[((?:\\\\.|[^\\]\\\\\\r\\n]){1,200})\\]\\(");
     private static final Pattern LINK_TITLE = Pattern.compile("\\s+(?:\"[^\"]*\"|'[^']*'|\\([^)]*\\))\\s*$");
     private static final Pattern SAVED_RECEIPT = Pattern.compile(
-            "(?im)^\\s*saved\\s+(.+?\\.(?:md|markdown|txt|html?|docx?|pdf|ofd|gd|pptx?|xlsx?|csv|png|jpe?g|gif|bmp))[\"']?(?=\\s|$)");
+            "(?im)^\\s*(?:[-*•✅✓]\\s*)?"
+            + "(?:saved(?:\\s+to)?|created|generated|exported|written(?:\\s+to)?|output(?:\\s+file)?"
+            + "|已保存(?:至|到)?|保存(?:至|到|成功)?|已生成|生成(?:成功|完成|至|到)?|已输出|输出(?:文件|路径|至|到)?|已导出|导出(?:至|到|成功)?|已写入|写入(?:至|到)?|文件路径|交付文件)"
+            + "(?:\\s*(?:[:：=]|->|→)\\s*|\\s+)[\"'`《「]?(.+?\\.(?:md|markdown|txt|html?|docx?|pdf|ofd|gd|pptx?|xlsx?|csv|png|jpe?g|gif|bmp))[\"'`》」]?(?=\\s|$|[，。；,;（(])");
     private final Predicate<Path> allowed;
 
     GeneratedArtifactCollector(Predicate<Path> allowed) { this.allowed = allowed; }

@@ -104,4 +104,24 @@ public class GeneratedArtifactCollectorTest {
         assertEquals(100,collect(c,root,"Python","{}",ToolResult.success(json.toString())).size());
         assertTrue(collect(c,root,"Python","{}",ToolResult.success(String.join("",java.util.Collections.nCopies(262145,"x"))+"\n[late](f0)")).isEmpty());
     }
+
+    @Test public void chineseAndColonSavedReceiptsAreCollectedForPptxAndDocs() throws Exception {
+        Path root = temp.newFolder().toPath();
+        Path pptx = file(root, "工作汇报.pptx");
+        String abs = pptx.toAbsolutePath().normalize().toString();
+        GeneratedArtifactCollector c = collector(root);
+        String[] receipts = {
+                "已保存: " + abs,
+                "已生成：" + abs + "（共16页）",
+                "Saved: \"" + abs + "\"",
+                "输出文件 -> " + abs,
+                "生成成功: 工作汇报.pptx"
+        };
+        for (String out : receipts) {
+            List<GeneratedArtifact> found = collect(c, root, "Python", "{}", ToolResult.success(out));
+            assertEquals("应识别中文/冒号保存回执: " + out, 1, found.size());
+            assertEquals(pptx.toRealPath().toString(), found.get(0).path);
+            assertEquals(GeneratedArtifact.DELIVERABLE, found.get(0).kind);
+        }
+    }
 }

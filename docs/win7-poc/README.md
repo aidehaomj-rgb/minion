@@ -15,18 +15,18 @@
 
 | # | 项目 | 验证方式 | 通过标准 | 证据（实机填写） |
 |---|------|----------|----------|------------------|
-| 1 | Zulu 8 x64 + JavaFX | `java -version`；启动 minion GUI | 显示 1.8.0_222（64-bit）；窗口正常渲染 | |
-| 2 | JNA / DPAPI | GUI 内 `/doctor` → JNA/DPAPI 行 | 「Crypt32 可用（DPAPI 正常）」 | |
-| 3 | rg.exe 架构/版本/哈希 | `ripgrep/rg.exe --version`；`sha256sum` | x64；版本 ≥ 13；记录 SHA-256 | |
-| 4 | Git Bash | `bash --version`；Bash 工具跑 `echo ok` | ≥ 4.x；工具输出 ok | |
-| 5 | Git x64 | `git --version` | x64 或 32 位可用（记录即可） | |
-| 6 | SystemTray + 声音 | ✋ GUI 通知（notify.channel=tray）出现气泡；声音播放 | 气泡可见、声音可闻 | |
-| 7 | LSP server | ✋ 配置 `lsp.servers.python=<内网 server 命令>` 后 LSP 工具 hover | 至少一个 server 握手成功并返回结果 | |
-| 8 | jsoup/html2md | 脚本项 8（内网 WebFetch 抓取本机测试页） | 正文提取为 Markdown | |
-| 9 | WebP 解码 | 脚本项 9（读 WebP 样例图） | ✋ 用真实 WebP 样例验证；失败则登记「放弃 WebP，降级不支持」（裁决 2026-11-22） | |
-| 10 | 候选 IDE + 插件 API | ✋ 列出内网可用 IDE（VS Code 离线版/Eclipse/IDEA 离线）及其插件 API 摘要 | 满足 §12.3 证据要求或取得正式例外 | |
-| 11 | 8GB 并发压测 | ✋ 开 2 个会话 + 1 teammate + MCP server | 无 OOM、无句柄泄漏（任务管理器观察 10 分钟） | |
-| 12 | 断网防逃逸 | ✋ 拔网线后 WebFetch 白名单外域名 | 拒绝且不挂起 | |
+| 1 | Zulu 8 x64 + JavaFX | `java -version`；启动 minion GUI | 显示 1.8.0_222（64-bit）；窗口正常渲染 | ✅ 2026-11-23 Win7 专业版 SP1 x64 (i5-6600) `/doctor`：`JDK 1.8.0_222（64 位）`，`JavaFX 可用`，堆上限 1.9 GB，GUI 正常启动 |
+| 2 | JNA / DPAPI | GUI 内 `/doctor` → JNA/DPAPI 行 | 「Crypt32 可用（DPAPI 正常）」 | ✅ 2026-11-23 `/doctor`：`Crypt32 可用（DPAPI 正常）`；PowerShell `ProtectedData` 往返 PASS |
+| 3 | rg.exe 架构/版本/哈希 | `ripgrep/rg.exe --version`；`sha256sum` | x64；版本 ≥ 13；记录 SHA-256 | ⚠️ 2026-11-23 未随包解压，`/doctor` 显示「Grep 回退 Java 实现」（待确认首次 Grep 自解压或随包放置 rg.exe） |
+| 4 | Git Bash | `bash --version`；Bash 工具跑 `echo ok` | ≥ 4.x；工具输出 ok | ✅ 2026-11-23 `/doctor`：`C:\Users\4602\AppData\Local\Programs\Git\bin\bash.exe`；实测「用 Bash 执行 echo ok」正常通过 |
+| 5 | Git x64 | `git --version` | x64 或 32 位可用（记录即可） | ✅ 2026-11-23 `git version 2.46.2.windows.1 (arch=x64)`；另测 Python 3.7.6 (`D:\Anaconda3\python.exe`) + `sqlite 3.39.4` 通过；Office COM `PowerPoint=True, Word=True` |
+| 6 | SystemTray + 声音 | ✋ GUI 通知（notify.channel=tray）出现气泡；声音播放 | 气泡可见、声音可闻 | 待实机确认 |
+| 7 | LSP server | ✋ 配置 `lsp.servers.python=<内网 server 命令>` 后 LSP 工具 hover | 至少一个 server 握手成功并返回结果 | ℹ️ 2026-11-23 内网机 PATH 未检测到常见 LSP server，保持 `lsp.enabled=false` |
+| 8 | jsoup/html2md | 脚本项 8（内网 WebFetch 抓取本机测试页） | 正文提取为 Markdown | 待实机确认 |
+| 9 | WebP 解码 | 脚本项 9（读 WebP 样例图） | ✋ 用真实 WebP 样例验证；失败则登记「放弃 WebP，降级不支持」（裁决 2026-11-22） | 待实机确认 |
+| 10 | 候选 IDE + 插件 API | ✋ 列出内网可用 IDE（VS Code 离线版/Eclipse/IDEA 离线）及其插件 API 摘要 | 满足 §12.3 证据要求或取得正式例外 | ✅ 2026-11-23 实机截图确认已安装 **Visual Studio Code 1.70.2**（Commit `e4503b30fc78200f846c62cf8091b76ff5547662`，Electron `18.3.5`，Chromium `100.0.4896.160`，Node.js `16.13.2`，OS `Windows_NT x64 6.1.7601`）；已按路径 A 实施 `IdeBridge` + `/ide` + 离线插件 `tools/vscode-minion-bridge/` |
+| 11 | 8GB 并发压测 | ✋ 开 2 个会话 + 1 teammate + MCP server | 无 OOM、无句柄泄漏（任务管理器观察 10 分钟） | 待实机确认 |
+| 12 | 断网防逃逸 | ✋ 拔网线后 WebFetch 白名单外域名 | 拒绝且不挂起 | ✅ 2026-11-23 内网模型端点 `http://10.56.207.243:3001/v1/chat/completions` 可达，`https://example.com` 外网不可达（NameResolutionFailure） |
 
 ## 脚本覆盖项（win7-poc.sh 自动输出）
 
