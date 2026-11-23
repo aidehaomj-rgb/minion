@@ -572,7 +572,11 @@ public class SessionManager {
         String projSkills = WorkspacePaths.projectSkillsDir(w);
         workspace.setExtraAllowedDirs(projSkills == null
                 ? new ArrayList<String>() : java.util.Collections.singletonList(projSkills));
-        ConfirmGate gate = new ConfirmGate(config, confirmUi);        // v2.4 §4.1 项目/本地层权限规则来源（settings.json；文件缺失=空来源）
+        // v2.4 §4.1 项目/本地层权限规则来源（settings.json；文件缺失=空来源）
+        // §12.3 该工作区有已连接的 IDE 时，确认改在 IDE 里弹；未连接/通道故障回落 confirmUi
+        final String ideKey = ideBridgeKey(Paths.get(w.workDir));
+        ConfirmGate gate = new ConfirmGate(config, new com.minion.core.bridge.IdeConfirmUi(confirmUi,
+                () -> com.minion.core.bridge.IdeConfirmUi.channel(ideBridges.get(ideKey))));
         gate.setProjectSettings(
                 java.nio.file.Paths.get(w.workDir, ".minion", "settings.json"),
                 java.nio.file.Paths.get(w.workDir, ".minion", "settings.local.json"));
@@ -2545,9 +2549,7 @@ public class SessionManager {
                 ? h.session.workDir
                 : (curCtx != null ? curCtx.workspace.workDir() : jarDir.toString());
         Path wsPath = Paths.get(workDir);
-        String wsKey;
-        try { wsKey = wsPath.toRealPath().toString(); }
-        catch (Exception e) { wsKey = wsPath.toAbsolutePath().normalize().toString(); }
+        String wsKey = ideBridgeKey(wsPath);
         String sub = parts.length >= 2 ? parts[1].toLowerCase(java.util.Locale.ROOT) : "status";
 
         if ("stop".equals(sub) || "disconnect".equals(sub) || "关闭".equals(sub)) {
@@ -2617,6 +2619,12 @@ public class SessionManager {
         } catch (Exception e) {
             return "IDE 桥接操作失败: " + e.getMessage();
         }
+    }
+
+    /** 桥接表键：工作区目录 realpath（取不到时退回归一化绝对路径） */
+    private static String ideBridgeKey(Path wsPath) {
+        try { return wsPath.toRealPath().toString(); }
+        catch (Exception e) { return wsPath.toAbsolutePath().normalize().toString(); }
     }
 
     private com.minion.core.bridge.IdeBridge ensureIdeBridge(Path wsPath, String wsKey) throws IOException {

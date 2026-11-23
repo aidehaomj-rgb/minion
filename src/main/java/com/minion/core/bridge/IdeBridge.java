@@ -138,18 +138,26 @@ public final class IdeBridge implements Closeable {
     public static final class ToolApproval {
         public final boolean allowed;
         public final String reason;
+        /** true=通道故障（未连接、超时、断线、畸形响应、被中断），不是 IDE 那边用户的拒绝；结果同样是拒绝 */
+        public final boolean failed;
 
-        private ToolApproval(boolean allowed, String reason) {
+        private ToolApproval(boolean allowed, String reason, boolean failed) {
             this.allowed = allowed;
             this.reason = reason == null ? "" : reason;
+            this.failed = failed;
         }
 
         public static ToolApproval allow(String reason) {
-            return new ToolApproval(true, reason);
+            return new ToolApproval(true, reason, false);
         }
 
         public static ToolApproval deny(String reason) {
-            return new ToolApproval(false, reason);
+            return new ToolApproval(false, reason, false);
+        }
+
+        /** 通道故障导致的拒绝（调用方据此决定是回落本地确认，而不是当作用户已拒绝） */
+        public static ToolApproval failed(String reason) {
+            return new ToolApproval(false, reason, true);
         }
     }
 
@@ -319,10 +327,11 @@ public final class IdeBridge implements Closeable {
 
     /**
      * 向 IDE 请求工具执行确认（fail-closed：未连接、超时、断线或畸形响应均返回拒绝）。
+     * 通道故障的拒绝带 failed=true，与 IDE 用户的明确拒绝区分（GUI 确认通道 {@link IdeConfirmUi} 据此回落本地确认框）。
      */
     public ToolApproval canUseTool(String toolName, JsonObject input, String summary, long timeoutMs) {
         if (!isConnected()) {
-            return ToolApproval.deny("IDE 未连接（fail-closed 拒绝）");
+            return ToolApproval.failed("IDE 未连接（fail-closed 拒绝）");
         }
         JsonObject payload = new JsonObject();
         payload.addProperty("tool", toolName == null ? "" : toolName);
@@ -332,14 +341,19 @@ public final class IdeBridge implements Closeable {
             JsonObject resp = sendRequest("can_use_tool", payload, timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS);
             JsonObject data = resp.has("data") && resp.get("data").isJsonObject()
                     ? resp.getAsJsonObject("data") : resp;
-            boolean allowed = data.has("allowed") && data.get("allowed").isJsonPrimitive()
-                    && data.get("allowed").getAsBoolean();
+            // allowed 必须是明确的布尔值（或 "true"/"false" 文本）：畸形响应是通道故障，不能当成用户拒绝
+            JsonElement verdict = data.get("allowed");
+            String answer = verdict != null && verdict.isJsonPrimitive() ? verdict.getAsString().trim() : "";
+            if (verdict == null || !verdict.isJsonPrimitive()
+                    || !(verdict.getAsJsonPrimitive().isBoolean() || "true".equalsIgnoreCase(answer) || "false".equalsIgnoreCase(answer)))
+                return ToolApproval.failed("IDE 权限回调响应畸形（fail-closed 拒绝）");
+            boolean allowed = verdict.getAsBoolean();
             String reason = str(data, "reason");
             return allowed
                     ? ToolApproval.allow(reason.isEmpty() ? "IDE 已批准" : reason)
                     : ToolApproval.deny(reason.isEmpty() ? "IDE 拒绝执行" : reason);
         } catch (Exception e) {
-            return ToolApproval.deny("IDE 权限回调失败（fail-closed 拒绝）: " + e.getMessage());
+            return ToolApproval.failed("IDE 权限回调失败（fail-closed 拒绝）: " + e.getMessage());
         }
     }
 

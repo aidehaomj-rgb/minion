@@ -25,6 +25,10 @@
 2. **会话与命令接线**：
    - `Config.ideBridgeEnabled()`（`ide.bridge.enabled` 默认保持 `false`，保守起步）
    - `CommandDispatcher` + `SessionManager` 接入 `/ide [status|start|stop|selection|diagnostics|open <file> [line]]`，`SessionManager.shutdown()` 自动清理全部桥接与锁文件
+   - 工具确认（2026-11-23 接线）：会话 `ConfirmGate` 经 `IdeConfirmUi` 提问——所在工作区有已连接的 IDE 时，
+     需要用户确认的操作在 IDE 里弹确认（`can_use_tool`，IDE 端只有允许/拒绝）；未连接或通道故障
+     （未响应/断线/畸形响应）回落本地确认框，两条通道都不会自动放行；IDE 明确拒绝即拒绝。
+     没有启动桥接的工作区行为与接线前完全一致。
 3. **离线 VS Code 1.70.2 插件**：`tools/vscode-minion-bridge/`
    - `package.json`（`engines.vscode: ^1.60.0`，零 npm 依赖）
    - `extension.js`（纯 Node 16 内置模块 + VS Code API，上报 `extension.js` SHA-256 指纹）

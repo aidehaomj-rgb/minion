@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.minion.core.cli.SdkFrameIo;
 import com.minion.core.security.ProjectTrustStore;
+import com.minion.core.tools.confirm.ConfirmUi;
 import com.minion.gui.command.CommandDispatcher;
 import org.junit.Rule;
 import org.junit.Test;
@@ -146,8 +147,10 @@ public class IdeBridgeTest {
 
         ExecutorService pool = Executors.newSingleThreadExecutor();
         try (IdeBridge bridge = new IdeBridge(ws, lockDir, null, null).start()) {
-            // 未连接时 canUseTool 必须 fail-closed 拒绝
-            assertFalse(bridge.canUseTool("Bash", new JsonObject(), "echo hi", 500).allowed);
+            // 未连接时 canUseTool 必须 fail-closed 拒绝，且标成通道故障（不是 IDE 用户拒绝）
+            IdeBridge.ToolApproval offline = bridge.canUseTool("Bash", new JsonObject(), "echo hi", 500);
+            assertFalse(offline.allowed);
+            assertTrue(offline.failed);
 
             CountDownLatch connected = new CountDownLatch(1);
             List<String> receivedTypes = new CopyOnWriteArrayList<String>();
@@ -197,8 +200,11 @@ public class IdeBridgeTest {
                                 // 故意不回复以验证超时 fail-closed
                                 continue;
                             }
-                            data.addProperty("allowed", "AllowTool".equals(tool));
-                            data.addProperty("reason", "AllowTool".equals(tool) ? "user ok" : "user denied");
+                            boolean allow = "AllowTool".equals(tool) || IdeConfirmUi.TOOL_LABEL.equals(tool);
+                            data.addProperty("allowed", allow);
+                            data.addProperty("reason", allow ? "user ok" : "user denied");
+                            // 模拟畸形响应：有 allowed 字段但不是布尔值
+                            if ("MalformedTool".equals(tool)) data.addProperty("allowed", "yes");
                         }
                         resp.add("data", data);
                         writeFrame(out, resp);
@@ -239,13 +245,31 @@ public class IdeBridgeTest {
             assertEquals("warning", diags.get(0).severity);
             assertEquals("unused class", diags.get(0).message);
 
-            // 5. canUseTool：允许 / 拒绝 / 超时 fail-closed
+            // 5. canUseTool：允许 / 拒绝 / 超时 fail-closed；通道故障与用户拒绝要能区分
             assertTrue(bridge.canUseTool("AllowTool", new JsonObject(), "ok", 2000).allowed);
-            assertFalse(bridge.canUseTool("DenyTool", new JsonObject(), "no", 2000).allowed);
-            assertFalse(bridge.canUseTool("SlowTool", new JsonObject(), "timeout", 250).allowed);
+            IdeBridge.ToolApproval denied = bridge.canUseTool("DenyTool", new JsonObject(), "no", 2000);
+            IdeBridge.ToolApproval timedOut = bridge.canUseTool("SlowTool", new JsonObject(), "timeout", 250);
+            IdeBridge.ToolApproval malformed = bridge.canUseTool("MalformedTool", new JsonObject(), "bad", 2000);
+            assertFalse(denied.allowed);
+            assertFalse("IDE 用户的明确拒绝不是通道故障", denied.failed);
+            assertEquals("user denied", denied.reason);
+            assertFalse(timedOut.allowed);
+            assertTrue("超时是通道故障", timedOut.failed);
+            assertFalse(malformed.allowed);
+            assertTrue("畸形响应同样是拒绝，且不会被当成用户拒绝", malformed.failed);
+
+            // 6. GUI 确认通道：IDE 已连接时确认在 IDE 里完成，本地确认框不再被打扰
+            AtomicInteger localAsks = new AtomicInteger();
+            IdeConfirmUi ui = new IdeConfirmUi(message -> {
+                localAsks.incrementAndGet();
+                return ConfirmUi.Decision.REJECT;
+            }, () -> IdeConfirmUi.channel(bridge));
+            assertEquals(ConfirmUi.Decision.APPROVE, ui.ask("! 高危操作 Bash → rm -rf build"));
+            assertEquals(0, localAsks.get());
 
             assertTrue(receivedTypes.contains("open_file"));
             assertTrue(receivedTypes.contains("open_diff"));
+            assertTrue(receivedTypes.contains("can_use_tool"));
             clientTask.cancel(true);
         } finally {
             pool.shutdownNow();
