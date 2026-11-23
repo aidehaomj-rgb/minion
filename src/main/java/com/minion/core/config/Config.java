@@ -290,6 +290,9 @@ public class Config {
     /** §3.9 内网白名单（逗号分隔：域名后缀 / 单 IP / CIDR） */
     public String toolsWebfetchIntranetAllowlist() { return get("tools.webfetch.intranet.allowlist", ""); }
 
+    /** v2.4 §12.3 本地 IDE 桥接（ide.bridge.enabled 默认 false；开启后监听 127.0.0.1 供 VS Code 1.70+ 插件发现） */
+    public boolean ideBridgeEnabled() { return Boolean.parseBoolean(get("ide.bridge.enabled", "false")); }
+
     private long longOf(String key, long fallback) {
         try { return Long.parseLong(get(key, String.valueOf(fallback)).trim()); }
         catch (Exception e) { return fallback; }

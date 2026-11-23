@@ -29,6 +29,9 @@ public class CommandDispatcher {
     /** §7.2 /plugin 插件管理（列表/安装/启停/回退/市场）；未接线时返回提示 */
     private java.util.function.Function<String[], String> plugin = parts -> null;
 
+    /** §12.3 /ide 本地 IDE 桥接命令处理（status/start/stop/selection/diagnostics/open） */
+    private java.util.function.BiFunction<SessionHandle, String[], String> ideHandler = (h, parts) -> null;
+
     /** §10.7 会话 → 后台任务注册表（ProcessTool 唯一真源；null=无后台段） */
     private java.util.function.Function<SessionHandle, com.minion.core.agent.RuntimeJobRegistry>
             taskRegistry = h -> null;
@@ -71,6 +74,11 @@ public class CommandDispatcher {
 
     public CommandDispatcher plugin(java.util.function.Function<String[], String> handler) {
         this.plugin = handler;
+        return this;
+    }
+
+    public CommandDispatcher ide(java.util.function.BiFunction<SessionHandle, String[], String> handler) {
+        this.ideHandler = handler;
         return this;
     }
 
@@ -153,11 +161,11 @@ public class CommandDispatcher {
             return "主题 " + picked.label + " 已保存（重启或重开窗口后完全应用）";
         }
         if ("/ide".equals(cmd)) {
-            // §12.3 IDE 桥：ide.bridge.enabled=false（POC 第 10 项证据待取得，见
-            // docs/ide-bridge-exception.md 路径 B 备档；路径 A 实施后此提示替换为桥接状态）
-            return "IDE 桥未启用（ide.bridge.enabled=false）。"
-                    + "Win7 POC 第 10 项（候选 IDE + 插件 API 实测）证据取得后启用——"
-                    + "详见 docs/ide-bridge-exception.md";
+            // §12.3 本地 IDE 桥接（路径 A）：状态查看、启停、选区/诊断/打开文件
+            String result = ideHandler == null ? null : ideHandler.apply(h, parts);
+            return result == null
+                    ? "IDE 桥接未接线（配置 ide.bridge.enabled=true 或输入 /ide start 启动监听）"
+                    : result;
         }
         if ("/tasks".equals(cmd) || "/bashes".equals(cmd) || "/任务面板".equals(cmd)) {
             // §10.6/§10.7 共用可视化模型（只读快照；变更走 TaskV2/TodoWrite/TaskStop 工具）
@@ -196,7 +204,6 @@ public class CommandDispatcher {
         if ("/plugin".equals(cmd) || "/plugins".equals(cmd) || "/reload-plugins".equals(cmd))
             return "插件管理：请使用 GUI 设置窗口；本版本无 CLI 插件命令（§7.2 Plugins 随后端切片）";
         if ("/mcp".equals(cmd)) return dispatchLocalTool(h, "MCP", simpleAction(parts, "list"));
-        if ("/ide".equals(cmd)) return "IDE 桥：lsp.enabled=true 且 lsp.servers 配置后可用（/doctor 查看）";
         if ("/security-review".equals(cmd) || "/安全审查".equals(cmd)) return armMode(h, ExecutionMode.REVIEW);
         if ("/commit".equals(cmd) || "/提交".equals(cmd)) return commitText(parts);
         if ("/statusline".equals(cmd)) return "StatusLine：随第 10 章 UI 切片实现";

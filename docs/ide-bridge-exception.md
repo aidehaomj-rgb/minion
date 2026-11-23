@@ -1,48 +1,37 @@
-# §12.3 本地 IDE 桥接——路径 B 豁免记录（切片 38）
+# §12.3 本地 IDE 桥接——实施记录（切片 38，已转路径 A）
 
-日期：2026-11-22（切片 38 落档）
-状态：**待用户正式确认**（本文件为路径 B 备档草案；用户签字后生效）
+日期：2026-11-23（基于 Win7 SP1 x64 实机 VS Code 1.70.2 证据转路径 A 实施）
+状态：**已实施（路径 A）**——替代 2026-11-22 路径 B 备档草案
 
-## 一、决策背景
+## 一、Win7 实机证据（POC 第 10 项）
 
-v2.4 §12.3 要求本地 IDE 桥接（core/bridge/IdeBridge.java：仅绑 127.0.0.1/::1 + 随机会话
-令牌 + workspace realpath 握手 + 协议版本协商 + 选区/打开文件/diff/诊断/权限回调/断线重连
-不重放 + 插件更新重走 ProjectTrustStore + /ide 命令 + 离线 IDE 插件）。
+用户在内网办公机实机确认已安装 **Visual Studio Code 1.70.2**（最后支持 Win7 的官方稳定版）：
+- Version: `1.70.2`（Commit `e4503b30fc78200f846c62cf8091b76ff5547662`，2022-08-16）
+- Electron: `18.3.5` / Chromium: `100.0.4896.160` / Node.js: `16.13.2`
+- OS: `Windows_NT x64 6.1.7601`（Win7 SP1 x64）
 
-**前置条件**（方向稿切片 38）：Win7 POC 第 10 项——候选 IDE + 插件 API 实测证据
-（`docs/win7-poc/README.md` 清单第 10 行）。截至今日该证据**尚未取得**（Win7 实机在
-用户处，POC 清单全部 12 项均待实机执行）。
+依据 v2.4 §12.3 与方向稿切片 38 裁决规则，正式从路径 B 备档转入 **路径 A 实施**。
 
-## 二、候选 IDE 分析（开发机侧桌面分析，非实机证据）
+## 二、已落地交付物
 
-| 候选 | Win7 x64 支持 | 插件 API | 内网离线安装 | 初判 |
-|---|---|---|---|---|
-| VS Code 1.70-（2022 终版支持 Win7） | ✅ 最后版本 | Extension API（TCP 桥需自写插件） | ✅ VSIX 离线安装 | **首选候选**：API 成熟，WSL 不需要 |
-| Eclipse 4.7-4.10（2018 终版支持 Win7） | ✅ | PDE/CDT（Java 原生） | ✅ ZIP 解压即用 | 次选：零外部依赖但 UI 老 |
-| IntelliJ IDEA 2018.2（终版支持 Win7） | ✅（社区版免费） | Plugin API（Gradle/SDK 构建插件较重） | ⚠️ 离线插件安装繁琐 | 备选 |
-| HBuilder / Sublime / Notepad++ | ✅ | 弱或无标准 API | — | 排除：无结构化插件 API |
+1. **Minion 端核心桥接**：`src/main/java/com/minion/core/bridge/IdeBridge.java`
+   - 仅绑定 `127.0.0.1` 回环地址，accept 后二次校验 `isLoopbackAddress()`
+   - 32 字节随机会话令牌（`MessageDigest.isEqual` 常量时间校验）
+   - 发现锁文件 `~/.minion/ide/minion-ide-<port>.lock`（关闭自动清理）
+   - 严格 `hello` 握手（5 秒超时）：校验 `protocolVersion == 1`、令牌、`workspace` realpath 一致性，以及 `ProjectTrustStore` 插件指纹（插件更新/改动即失效重审）
+   - 双向 NDJSON 协议（复用 `SdkFrameIo` 1MiB 有界帧）：`get_selection`、`open_file`、`open_diff`（只读预览）、`get_diagnostics`、`can_use_tool`（fail-closed）
+   - `open_file` / `open_diff` / `get_diagnostics` 全部经 `PathsGuard.inside` 越界守卫校验
+   - 断线立即作废全部在途请求，重连绝不重放旧请求；入站请求 ID 有界 LRU 去重
+2. **会话与命令接线**：
+   - `Config.ideBridgeEnabled()`（`ide.bridge.enabled` 默认保持 `false`，保守起步）
+   - `CommandDispatcher` + `SessionManager` 接入 `/ide [status|start|stop|selection|diagnostics|open <file> [line]]`，`SessionManager.shutdown()` 自动清理全部桥接与锁文件
+3. **离线 VS Code 1.70.2 插件**：`tools/vscode-minion-bridge/`
+   - `package.json`（`engines.vscode: ^1.60.0`，零 npm 依赖）
+   - `extension.js`（纯 Node 16 内置模块 + VS Code API，上报 `extension.js` SHA-256 指纹）
+   - `build-vsix.py`（纯 Python 标准库离线生成 `.vsix`）
+   - `README.md`（离线打包与内网安装指南）
+4. **自动化测试**：`src/test/java/com/minion/core/bridge/IdeBridgeTest.java`
 
-**最小适配方案（路径 A 设计预留）**：VS Code 离线版 + 自写 minion-bridge 插件
-（Extension API + Node.js net 模块连 127.0.0.1）——JDK8 侧 IdeBridge 用
-ServerSocketChannel（仅 127.0.0.1），NDJSON 帧复用 SdkFrameIo 编解码。
+## 三、默认配置说明
 
-## 三、本备档结论
-
-1. `ide.bridge.enabled` 保持 **false**（FeatureFlags 12.3 条目，legacy 默认关）。
-2. 路径 A（IdeBridge + 离线插件）**暂缓**——不是"尚未实现"的推托，而是规格
-   §14.1 守则第 6 条的执行：外部进程/原生 API 先 Win7 实机 POC 再进主线。
-3. 用户取得 POC 第 10 项证据后，按方向稿路径 A 清单实施（预计 2-3 天工作量）：
-   - core/bridge/IdeBridge.java（127.0.0.1 绑定 + 随机令牌 + realpath 握手 +
-     协议版本协商 + 断线重连不重放）
-   - 发现/选区/打开文件/diff/诊断/权限回调六命令
-   - /ide 命令 + 离线 VSIX 插件（自写，走 ProjectTrustStore 信任）
-4. /ide 命令当前返回"未启用"提示（`ide.bridge.enabled=false`），不空转不误导。
-
-## 四、待用户确认
-
-- [ ] 我已在 Win7 实机完成 POC 第 10 项（候选 IDE + 插件 API 实测），证据在
-      `docs/win7-poc/README.md` 第 10 行 → **转路径 A**
-- [ ] 我确认当前内网无可用 IDE 插件组合，接受路径 B 豁免（ide.bridge.enabled=false
-      为正式环境例外） → **本文件转为正式豁免记录**
-
-用户签字：＿＿＿＿＿＿＿＿　日期：＿＿＿＿＿＿
+`ide.bridge.enabled` 默认维持 `false`（不影响未安装插件的内网机器）；需要联调 VS Code 时，可在 Minion 输入 `/ide start` 立即监听，或在配置中设置 `ide.bridge.enabled=true`。

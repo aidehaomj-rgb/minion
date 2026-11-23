@@ -1,0 +1,33 @@
+{
+  "name": "minion-ide-bridge",
+  "displayName": "Minion IDE Bridge",
+  "description": "Minion 本地回环 IDE 桥接插件（支持 VS Code 1.70+ / Win7 x64 内网离线运行）",
+  "version": "0.1.0",
+  "publisher": "minion",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "minionBridge.connect",
+        "title": "Minion: 连接本地 IDE 桥接"
+      },
+      {
+        "command": "minionBridge.disconnect",
+        "title": "Minion: 断开本地 IDE 桥接"
+      },
+      {
+        "command": "minionBridge.status",
+        "title": "Minion: 查看 IDE 桥接状态"
+      }
+    ]
+  }
+}

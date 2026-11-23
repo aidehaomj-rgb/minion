@@ -135,6 +135,9 @@ public class SessionManager {
     /** §10.9 每工作空间信任闸门缓存（workspace realpath → ProjectTrustStore+ConfirmUi 弹窗） */
     private final java.util.Map<String, com.minion.core.security.TrustGate> trustGates =
             new java.util.concurrent.ConcurrentHashMap<String, com.minion.core.security.TrustGate>();
+    /** §12.3 每工作空间本地 IDE 桥接实例（workspace realpath → IdeBridge） */
+    private final java.util.Map<String, com.minion.core.bridge.IdeBridge> ideBridges =
+            new java.util.concurrent.ConcurrentHashMap<String, com.minion.core.bridge.IdeBridge>();
     /** §10.7 会话 → 后台进程唯一真源（newRegistry 登记；/tasks 与任务面板经此取注册表） */
     private final java.util.Map<String, com.minion.core.tools.dev.ProcessTool> processBySession =
             new java.util.concurrent.ConcurrentHashMap<String, com.minion.core.tools.dev.ProcessTool>();
@@ -200,6 +203,7 @@ public class SessionManager {
                 .stats(this::statsText)
                 .doctor(this::doctorText)
                 .plugin(this::pluginCommand)
+                .ide(this::ideCommand)
                 .taskRegistry(h -> backgroundRegistryOf(h.id))
                 .styleCatalog(h -> outputStyleCatalog())
                 .styleSetter((h, name) -> config.set("output.style", name))
@@ -2534,12 +2538,119 @@ public class SessionManager {
      *  killTree 清杀子进程需要时间，工具池是 daemon 线程，JVM 退出不等它——
      *  不等就退出会让 killTree 没跑完，bash 子进程变孤儿继续占 CPU（关窗残留实测根因）。
      *  工具任务中断后最多 killTree(5s)+join(5s) 结束，等 8s 足够；杀不掉的极端情况限时返回。 */
+    /** §12.3 本地 IDE 桥接命令（/ide [status|start|stop|selection|diagnostics|open <file> [line]]） */
+    public String ideCommand(SessionHandle h, String[] parts) {
+        WorkspaceCtx curCtx = ctxByName.get(currentWorkspaceName);
+        String workDir = (h != null && h.session != null && h.session.workDir != null && !h.session.workDir.isEmpty())
+                ? h.session.workDir
+                : (curCtx != null ? curCtx.workspace.workDir() : jarDir.toString());
+        Path wsPath = Paths.get(workDir);
+        String wsKey;
+        try { wsKey = wsPath.toRealPath().toString(); }
+        catch (Exception e) { wsKey = wsPath.toAbsolutePath().normalize().toString(); }
+        String sub = parts.length >= 2 ? parts[1].toLowerCase(java.util.Locale.ROOT) : "status";
+
+        if ("stop".equals(sub) || "disconnect".equals(sub) || "关闭".equals(sub)) {
+            com.minion.core.bridge.IdeBridge existing = ideBridges.remove(wsKey);
+            if (existing == null) return "当前工作区未启动本地 IDE 桥接。";
+            existing.close();
+            return "已关闭当前工作区的本地 IDE 桥接（锁文件已清理）。";
+        }
+        if ("start".equals(sub) || "connect".equals(sub) || "启动".equals(sub)) {
+            try {
+                com.minion.core.bridge.IdeBridge bridge = ensureIdeBridge(wsPath, wsKey);
+                return bridge.statusText();
+            } catch (Exception e) {
+                return "启动本地 IDE 桥接失败: " + e.getMessage();
+            }
+        }
+        if ("status".equals(sub) || "状态".equals(sub)) {
+            com.minion.core.bridge.IdeBridge existing = ideBridges.get(wsKey);
+            if (existing == null && config.ideBridgeEnabled()) {
+                try { existing = ensureIdeBridge(wsPath, wsKey); }
+                catch (Exception e) { return "启动本地 IDE 桥接失败: " + e.getMessage(); }
+            }
+            if (existing == null) {
+                return "本地 IDE 桥接未启动（ide.bridge.enabled=" + config.ideBridgeEnabled() + "）。\n"
+                        + "  - 输入 /ide start 立即启动回环监听（127.0.0.1）\n"
+                        + "  - 或在配置中设置 ide.bridge.enabled=true 后自动监听\n"
+                        + "  - 离线 VS Code 1.70+ 插件源码位于 tools/vscode-minion-bridge/";
+            }
+            return existing.statusText();
+        }
+        com.minion.core.bridge.IdeBridge bridge = ideBridges.get(wsKey);
+        if (bridge == null || !bridge.isConnected()) {
+            return "IDE 尚未连接，请先执行 /ide start 并在 VS Code 中连接 Minion IDE Bridge。";
+        }
+        try {
+            if ("selection".equals(sub) || "选区".equals(sub)) {
+                com.minion.core.bridge.IdeBridge.Selection sel = bridge.getSelection();
+                if (sel.isEmpty()) return "IDE 当前无选区。";
+                return "IDE 选区：" + sel.file + " (" + sel.startLine + ":" + sel.startColumn
+                        + " - " + sel.endLine + ":" + sel.endColumn + ")\n" + sel.text;
+            }
+            if ("diagnostics".equals(sub) || "诊断".equals(sub)) {
+                Path target = parts.length >= 3 ? Paths.get(parts[2]) : null;
+                List<com.minion.core.bridge.IdeBridge.DiagnosticItem> items = bridge.getDiagnostics(target);
+                if (items.isEmpty()) return "IDE 当前无诊断信息。";
+                StringBuilder sb = new StringBuilder("IDE 诊断（共 " + items.size() + " 条）：");
+                int limit = Math.min(items.size(), 30);
+                for (int i = 0; i < limit; i++) {
+                    com.minion.core.bridge.IdeBridge.DiagnosticItem d = items.get(i);
+                    sb.append("\n  [").append(d.severity).append("] ").append(d.file)
+                            .append(':').append(d.line).append(':').append(d.column)
+                            .append(" — ").append(d.message);
+                }
+                if (items.size() > limit) sb.append("\n  … 其余 ").append(items.size() - limit).append(" 条已省略");
+                return sb.toString();
+            }
+            if ("open".equals(sub) || "打开".equals(sub)) {
+                if (parts.length < 3) return "用法：/ide open <工作区内文件路径> [行号]";
+                int line = 1;
+                if (parts.length >= 4) {
+                    try { line = Math.max(1, Integer.parseInt(parts[3])); } catch (NumberFormatException ignored) { }
+                }
+                bridge.openFile(Paths.get(parts[2]), line, 1);
+                return "已在 IDE 打开文件：" + parts[2] + "（第 " + line + " 行）";
+            }
+            return "用法：/ide [status | start | stop | selection | diagnostics [file] | open <file> [line]]";
+        } catch (Exception e) {
+            return "IDE 桥接操作失败: " + e.getMessage();
+        }
+    }
+
+    private com.minion.core.bridge.IdeBridge ensureIdeBridge(Path wsPath, String wsKey) throws IOException {
+        com.minion.core.bridge.IdeBridge existing = ideBridges.get(wsKey);
+        if (existing != null && existing.isRunning()) return existing;
+        com.minion.core.security.ProjectTrustStore trustStore = config.trustStoreEnabled()
+                ? com.minion.core.security.ProjectTrustStore.load(jarDir) : null;
+        com.minion.core.bridge.IdeBridge.PluginTrustApprover approver = trustStore == null ? null
+                : (spec, check) -> confirmUi.ask("本地 IDE 插件信任确认（§10.9 / §12.3）\n插件: " + spec.preview()
+                        + "\n原因: " + check.reason
+                        + "\n指纹: " + check.actual
+                        + "\n\n批准后此指纹持久生效，插件升级或改动后须重新批准。是否允许连接？")
+                        == ConfirmUi.Decision.APPROVE;
+        com.minion.core.bridge.IdeBridge created = new com.minion.core.bridge.IdeBridge(
+                wsPath, com.minion.core.bridge.IdeBridge.defaultLockDir(), trustStore, approver).start();
+        com.minion.core.bridge.IdeBridge raced = ideBridges.putIfAbsent(wsKey, created);
+        if (raced != null && raced.isRunning()) {
+            created.close();
+            return raced;
+        }
+        ideBridges.put(wsKey, created);
+        return created;
+    }
+
     public void shutdown() {
         navigationClosed=true;
         navigationSerial.incrementAndGet();
         navigationLoader.shutdownNow();
         jobClock.shutdownNow();
         branches.shutdownNow();
+        for (com.minion.core.bridge.IdeBridge bridge : ideBridges.values()) {
+            try { bridge.close(); } catch (Exception ignored) { }
+        }
+        ideBridges.clear();
         for (WorkspaceCtx ctx : ctxByName.values()) {
             for (SessionHandle h : ctx.sessions) {
                 if (!h.isLoaded()) { h.pool.shutdownNow(); continue; }
