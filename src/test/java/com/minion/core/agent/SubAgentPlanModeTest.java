@@ -21,7 +21,8 @@ import java.util.Collections;
 import static org.junit.Assert.*;
 
 /**
- * §8.1 子代理增强验收：plan 模式（只读规划）、run_in_background 登记即返回、mode 校验。
+ * §8.1 子代理增强验收：plan 模式（只读规划）、mode 校验。
+ * run_in_background 的真实执行行为见 BackgroundChildAgentTest（2026-11-23 起不再只是登记）。
  */
 public class SubAgentPlanModeTest {
 
@@ -68,33 +69,6 @@ public class SubAgentPlanModeTest {
         // 只读白名单内已注册工具（CodeIndex）保持可见
         assertTrue(rig.llm.requests.get(1).tools.stream()
                 .anyMatch(t -> "codeindex".equalsIgnoreCase(t.getAsJsonObject("function").get("name").getAsString())));
-    }
-
-    /** run_in_background：登记即返回 childId，不消耗子 agent LLM 请求，child 进入 taskState */
-    @Test public void runInBackgroundRegistersWithoutExecuting() throws Exception {
-        Rig rig = new Rig(tmp);
-        rig.llm.addTurnWithTools(Collections.singletonList(rig.taskCall(
-                "{\"description\":\"后台调研\",\"mode\":\"plan\",\"run_in_background\":true}")), null);
-        rig.llm.addTurn("已登记后台任务");
-        rig.loop.runUserTurn("派后台");
-        // 只有主 agent 请求（1 轮派发 + 后续），没有任何子 agent 请求
-        assertTrue(rig.llm.requests.size() >= 1);
-        for (int i = 1; i < rig.llm.requests.size(); i++)
-            assertFalse("run_in_background 不应执行子 agent", rig.llm.requests.get(i).messages.size() == 2
-                    && rig.llm.requests.get(i).messages.get(1).content.contains("后台调研"));
-        // tool 结果包含 childId 与跟踪指引
-        Message toolMsg = null;
-        for (Message m : rig.loop.messages())
-            if (Message.Role.TOOL == m.role) { toolMsg = m; break; }
-        assertNotNull(toolMsg);
-        assertTrue(toolMsg.content.contains("childId="));
-        assertTrue(toolMsg.content.contains("child_status"));
-        // taskState 中登记了 plan 模式 child
-        TaskState.Child registered = null;
-        for (TaskState.Child c : rig.loop.session().taskState.children)
-            if (c.assignment.contains("后台调研")) registered = c;
-        assertNotNull(registered);
-        assertEquals("plan", registered.mode);
     }
 
     /** 非法 mode 拒绝（fail-closed，不静默当 worker） */

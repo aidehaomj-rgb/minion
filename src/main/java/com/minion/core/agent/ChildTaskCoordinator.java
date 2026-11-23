@@ -132,9 +132,13 @@ public final class ChildTaskCoordinator implements AutoCloseable, TaskTool.Dispa
     private void validate(Assignment a)throws Exception{
         if(a==null)throw new IllegalArgumentException("空assignment");required(a.stepId,"stepId");required(a.description,"description");required(a.acceptance,"acceptance");
         if(a.description.length()>16000||(a.prompt!=null&&a.prompt.length()>32000)||a.acceptance.length()>8000||(a.allowedTools!=null&&a.allowedTools.length()>2000))throw new IllegalArgumentException("分工过长，请把完整资料落文件并只提交范围/验收/证据路径");
-        if(!a.stepId.matches("[A-Za-z0-9_.-]{1,128}")||!Arrays.asList("worker","explore").contains(a.mode))throw new IllegalArgumentException("stepId/mode非法");
-        if(a.timeoutMillis<1000||a.timeoutMillis>TimeUnit.HOURS.toMillis(24))throw new IllegalArgumentException("timeoutMillis须为1000..86400000");
-        if(a.scope==null||a.scope.isEmpty()||a.scope.size()>128||a.dependsOn==null||a.dependsOn.size()>128)throw new IllegalArgumentException("需显式scope与dependsOn，分别最多128项");
+        // 校验文案写成“能照着改”的指引：内网弱模型拿到“stepId/mode非法”这类简略提示时只会放弃派发
+        if(!a.stepId.matches("[A-Za-z0-9_.-]{1,128}"))throw new IllegalArgumentException("stepId 只能由英文、数字、下划线、点、短横线组成（1..128 位），收到「"
+                +(a.stepId.length()>60?a.stepId.substring(0,60)+"…":a.stepId)+"」");
+        if(!Arrays.asList("worker","explore").contains(a.mode))throw new IllegalArgumentException("mode 只支持 worker（可写，需要 scope）或 explore（只读），收到「"+a.mode+"」");
+        if(a.timeoutMillis<1000||a.timeoutMillis>TimeUnit.HOURS.toMillis(24))throw new IllegalArgumentException("timeoutMillis 须为 1000..86400000 毫秒（如 600000 表示 10 分钟），收到 "+a.timeoutMillis);
+        if(a.scope==null||a.scope.isEmpty())throw new IllegalArgumentException("缺少 scope：请给出允许写入的相对路径前缀数组（如 [\"src/\"]）；只读任务可填 [\".\"]");
+        if(a.scope.size()>128||a.dependsOn==null||a.dependsOn.size()>128)throw new IllegalArgumentException("scope 与 dependsOn 各最多 128 项；没有依赖时 dependsOn 填 []");
         List<String> scopes=new ArrayList<String>();for(String s:a.scope){
             required(s,"scope");s=s.replace('\\','/');Path relative=Paths.get(s);
             if(relative.isAbsolute()||s.contains(":")||s.contains("*")||s.contains("?")||s.matches("(^|.*/)\\.\\.(/.*|$)"))throw new IllegalArgumentException("scope只支持相对路径前缀，禁止glob/越界");

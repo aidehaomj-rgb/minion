@@ -582,6 +582,8 @@ public class AgentLoop {
         this.executionGuard.mutationAuthorizer((name,args)->{
             for(ChildTaskHost retired:retiredChildHosts)if(retired.mutationsPending())throw new IllegalStateException("旧修订子任务尚未物理退出，暂不执行主任务写入");
             ChildTaskHost host=childHost;if(host!=null&&host.mutationsPending())throw new IllegalStateException("子任务正在执行或等待依赖；先child_status/child_review/child_wait，写入工具未执行");
+            // §8.1 后台写入型子任务没有写范围隔离：其在执行/排队期间主任务不写入，避免并发改同一文件
+            if(backgroundWorkerBusy())throw new IllegalStateException("后台写入型子任务正在执行或排队，主任务暂不写入；先用 AgentControl child_wait 等其返回");
         });
         this.executionGuard.allowTrackingRoot(promptBuilder.tempDir());
         this.executionGuard.waitObserver(ms->phaseTimings.record(com.minion.core.llm.PhaseTimings.Phase.LOCK_WAIT,ms));
@@ -643,20 +645,286 @@ public class AgentLoop {
         setSubAgentRunner(args -> launchChild(args));
     }
 
-    /** §8.1 异步入口：登记子任务并立即返回 childId；完成经通知/AgentControl child_status/child_wait 取回 */
-    private String launchChildBackground(JsonObject args) {
-        String desc=text(args,"description","无描述");
-        if(args.has("prompt")&&!args.get("prompt").isJsonNull()) desc+="\n补充要求/返回格式: "+args.get("prompt").getAsString();
-        String mode=text(args,"mode",session.subAgentMode==null?"worker":session.subAgentMode);
-        if(!"worker".equals(mode)&&!"explore".equals(mode)&&!"plan".equals(mode)) return "子Agent失败: mode只支持worker/explore/plan";
-        TaskState.Child child;
-        synchronized(session.taskState){ child=session.taskState.startChild(desc); }
-        String path=java.nio.file.Paths.get(workspace.workDir(),".minion","subagents",session.id,child.id+".json").toAbsolutePath().toString();
-        session.taskState.configureChild(child.id,mode,text(args,"allowedTools",session.subAgentTools),null,path);
-        // 登记即返回：任务提交复用既有协调队列（childHost 有容量上限；容量满时如实返回）。
-        // TaskTool 的结构化入口本身返回"已登记排队"，这里对齐其语义——异步登记不算完成。
-        return "childId="+child.id+"（已登记；请改用 task 工具的结构化入口（stepId/scope/dependsOn）"+
-               "进入协调队列，或用 AgentControl child_status/child_wait 跟踪；排队不算完成）";
+    // ==================== §8.1 后台子 agent（task 的 run_in_background=true） ====================
+    // 2026-11-23 修复：此前只登记不执行——子任务永远停在 running，模型按提示 child_wait 等不到结果，
+    // 僵尸记录还会挡住结构化派发（“旧同步worker仍在执行”）。现在由有界后台池真正执行 executeChild，
+    // 返回结果在下一轮安全检查点注入主对话（不插在 tool_calls 与 tool 结果之间）。
+
+    /** 后台并发上限（与协调队列一致；8GB Win7 目标机有界并发） */
+    static final int BACKGROUND_CHILD_CONCURRENCY = 2;
+    /** 未结束后台子任务上限（排队+运行）；超过即拒绝本次派发，不无限堆积 */
+    static final int BACKGROUND_CHILD_MAX_PENDING = 16;
+    /** 后台子任务默认最长执行时间（毫秒）；超时中断子 agent，按失败/中断收尾 */
+    static final long BACKGROUND_CHILD_DEFAULT_TIMEOUT_MS = 600_000L;
+
+    /** 一个后台子任务的执行状态（登记即入表；结束后出表） */
+    static final class BackgroundChild {
+        final String childId, taskId, mode;
+        final long revision, timeoutMillis, enqueuedAt = System.currentTimeMillis();
+        final java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+        final java.util.concurrent.atomic.AtomicBoolean finished = new java.util.concurrent.atomic.AtomicBoolean();
+        /** 是否已被后台池接走（决定收尾时是否归还并发名额） */
+        boolean started;
+
+        BackgroundChild(String childId, String taskId, long revision, String mode, long timeoutMillis) {
+            this.childId = childId; this.taskId = taskId; this.revision = revision;
+            this.mode = mode; this.timeoutMillis = timeoutMillis;
+        }
+        boolean matches(String task, long rev) { return taskId.equals(task) && revision == rev; }
+    }
+
+    private final Object backgroundLock = new Object();
+    private final Map<String, BackgroundChild> backgroundChildren = new LinkedHashMap<String, BackgroundChild>();
+    private final java.util.ArrayDeque<BackgroundChild> backgroundQueue = new java.util.ArrayDeque<BackgroundChild>();
+    private int backgroundRunning, backgroundWorkersRunning;
+    private volatile boolean backgroundClosed;
+    private volatile ExecutorService backgroundPool;
+    /** 当前任务/修订下已返回的后台子任务数（child_wait/child_status 的“没有可等任务”提示用） */
+    private String backgroundCounterTask;
+    private long backgroundCounterRevision;
+    private int backgroundReturned;
+    /** 上一次 child_wait 是否“立即返回”（当时没有可等的子任务）；紧接着再等就是空转 */
+    private volatile boolean lastChildWaitIdle;
+    /** child_wait 实际阻塞不足这个时长视为立即返回 */
+    private static final long IDLE_CHILD_WAIT_MS = 500L;
+
+    /** 后台登记：立即返回 childId；排队/运行都不算完成 */
+    private String launchChildBackground(TaskState.Child registered, JsonObject args) {
+        TaskState.Child child = session.taskState.child(registered.id);
+        long timeout = BACKGROUND_CHILD_DEFAULT_TIMEOUT_MS;
+        if (args.has("timeoutMillis") && !args.get("timeoutMillis").isJsonNull()) {
+            try { timeout = args.get("timeoutMillis").getAsLong(); } catch (RuntimeException ignored) { }
+        }
+        if (timeout < 1000 || timeout > 86_400_000L) timeout = BACKGROUND_CHILD_DEFAULT_TIMEOUT_MS;
+        BackgroundChild job = new BackgroundChild(child.id, session.taskState.id,
+                session.taskState.revision(), child.mode, timeout);
+        if (!enqueueBackgroundChild(job)) {
+            String refused = "子Agent失败: 后台子任务排队已满（最多同时 " + BACKGROUND_CHILD_MAX_PENDING
+                    + " 个），本次未派发；请先等待已派发的子任务返回";
+            session.taskState.finishChild(child.id, refused, false, child.transcript);
+            return refused;
+        }
+        return "childId=" + child.id + "（mode=" + child.mode + "；已进入后台执行，排队/运行都不算完成）。\n"
+                + "可继续用 task 派发其余子任务；全部派发后调用 AgentControl child_wait 等待，"
+                + "child_status 可查看进度。子任务返回后其结果会注入对话并出现在任务状态里，"
+                + "用 AgentControl review(childId,note) 复核；完整记录: " + child.transcript;
+    }
+
+    private boolean enqueueBackgroundChild(BackgroundChild job) {
+        synchronized (backgroundLock) {
+            if (backgroundClosed || backgroundChildren.size() >= BACKGROUND_CHILD_MAX_PENDING) return false;
+            backgroundChildren.put(job.childId, job);
+            backgroundQueue.addLast(job);
+        }
+        pumpBackgroundChildren();
+        return true;
+    }
+
+    /** 启动可执行的后台子任务：总数≤2；写入型（worker）没有写范围隔离，同时≤1 */
+    private void pumpBackgroundChildren() {
+        synchronized (backgroundLock) {
+            if (backgroundClosed) return;
+            for (java.util.Iterator<BackgroundChild> it = backgroundQueue.iterator(); it.hasNext();) {
+                BackgroundChild job = it.next();
+                if (backgroundRunning >= BACKGROUND_CHILD_CONCURRENCY) break;
+                boolean worker = "worker".equals(job.mode);
+                if (worker && backgroundWorkersRunning > 0) continue;
+                it.remove();
+                job.started = true;
+                backgroundRunning++;
+                if (worker) backgroundWorkersRunning++;
+                backgroundPool().submit(() -> runBackgroundChild(job));
+            }
+        }
+    }
+
+    private ExecutorService backgroundPool() {
+        ExecutorService pool = backgroundPool;
+        if (pool == null) {
+            synchronized (backgroundLock) {
+                if (backgroundPool == null) backgroundPool = Executors.newCachedThreadPool(r -> {
+                    Thread thread = new Thread(r, "minion-background-child");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+                pool = backgroundPool;
+            }
+        }
+        return pool;
+    }
+
+    /** 后台线程主体：看门狗负责超时/取消中断（执行线程可能阻塞在模型流上，仅靠线程中断不够） */
+    private void runBackgroundChild(BackgroundChild job) {
+        Thread watchdog = new Thread(() -> {
+            long deadline = System.currentTimeMillis() + job.timeoutMillis;
+            while (!job.finished.get()) {
+                boolean timedOut = System.currentTimeMillis() >= deadline;
+                if (job.cancelled.get() || timedOut) {
+                    SubAgentLoop sub = activeChildren.get(job.childId);
+                    if (sub != null) {
+                        if (timedOut && !job.cancelled.get())
+                            DiagnosticLog.warn("agent", "后台子Agent超时(" + job.timeoutMillis + "ms)，已中断: " + job.childId);
+                        sub.interrupt();
+                        return;
+                    }
+                }
+                try { Thread.sleep(250); } catch (InterruptedException done) { return; }
+            }
+        }, "minion-background-child-watchdog");
+        watchdog.setDaemon(true);
+        try {
+            watchdog.start();
+            String result = null;
+            TaskState.Child child = session.taskState.child(job.childId);
+            if (child != null && !job.cancelled.get() && !backgroundClosed)   // 登记已被清理则没有可执行的东西
+                result = executeChild(child, false);
+            if (result != null && !job.cancelled.get()) {
+                synchronized (backgroundLock) {   // 当前任务/修订的已返回计数（child_wait 文案用）
+                    if (!job.taskId.equals(backgroundCounterTask) || backgroundCounterRevision != job.revision) {
+                        backgroundCounterTask = job.taskId; backgroundCounterRevision = job.revision; backgroundReturned = 0;
+                    }
+                    backgroundReturned++;
+                }
+                // 返回内容在下一轮安全检查点注入主对话（截断保护上下文）；子 agent 看不到主对话，
+                // 主 agent 也无需再去读完整记录文件才能拿到结论
+                child = session.taskState.child(job.childId);
+                pendingControlNotices.add(Message.taskControl("[后台子Agent返回] childId=" + job.childId
+                        + " mode=" + job.mode + " 状态=" + (child == null || child.status == null ? "" : child.status)
+                        + "\n" + clipNotice(result) + "\n请实际核对后用 AgentControl review(childId,note) 复核；"
+                        + "子Agent自报不是核验事实。"));
+            }
+        } finally {
+            watchdog.interrupt();
+            backgroundFinished(job);
+            persistSession();
+        }
+    }
+
+    private static String clipNotice(String text) {
+        if (text == null) return "";
+        return text.length() <= 4000 ? text : text.substring(0, 4000) + "…[已截断，完整内容见子Agent记录]";
+    }
+
+    /** 收尾（幂等）：出表、归还名额、继续启动排队任务 */
+    private void backgroundFinished(BackgroundChild job) {
+        if (!job.finished.compareAndSet(false, true)) return;
+        synchronized (backgroundLock) {
+            backgroundChildren.remove(job.childId);
+            if (job.started) {
+                backgroundRunning--;
+                if ("worker".equals(job.mode)) backgroundWorkersRunning--;
+            }
+        }
+        pumpBackgroundChildren();
+    }
+
+    /** 取消后台子任务：排队的直接收尾，运行中的中断其 SubAgentLoop（由 executeChild 的 finally 落账） */
+    private void cancelBackgroundChildren(java.util.function.Predicate<BackgroundChild> which, String reason) {
+        List<BackgroundChild> targets;
+        synchronized (backgroundLock) { targets = new ArrayList<BackgroundChild>(backgroundChildren.values()); }
+        for (BackgroundChild job : targets) {
+            if (!which.test(job)) continue;
+            job.cancelled.set(true);
+            SubAgentLoop sub = activeChildren.get(job.childId);
+            if (sub != null) sub.interrupt();
+            boolean stillQueued;
+            synchronized (backgroundLock) { stillQueued = backgroundQueue.remove(job); }
+            if (stillQueued) {
+                backgroundFinished(job);
+                session.taskState.finishChild(job.childId, "子Agent失败: 已取消（" + reason + "），未执行", false, null);
+            }
+        }
+    }
+
+    /** 当前任务/修订下是否还有后台子任务在排队或运行 */
+    private boolean backgroundChildrenBusy() {
+        String task = session.taskState.id;
+        long revision = session.taskState.revision();
+        synchronized (backgroundLock) {
+            for (BackgroundChild job : backgroundChildren.values()) if (job.matches(task, revision)) return true;
+            return false;
+        }
+    }
+
+    /** 是否有写入型后台子任务排队/运行（没有写范围隔离，主任务不得同时写入） */
+    private boolean backgroundWorkerBusy() {
+        synchronized (backgroundLock) {
+            for (BackgroundChild job : backgroundChildren.values()) if ("worker".equals(job.mode)) return true;
+            return false;
+        }
+    }
+
+    /** 有界等待后台子任务结束（当前任务/修订）；可被中断 */
+    private void waitBackgroundChildren(long timeoutMillis) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (backgroundChildrenBusy()) {
+            long remain = deadline - System.currentTimeMillis();
+            if (remain <= 0) return;
+            Thread.sleep(Math.min(200, remain));
+        }
+    }
+
+    /**
+     * 把后台子任务情况并入 child_status/child_wait 的 JSON 结果。输出必须保持是合法 JSON
+     * （测试与消费方直接解析），所以只加字段、不在后面拼接文字。有在跑的列出来；没有在跑的
+     * 明确说“没有可等的”，并指回去复核已返回的结果——否则弱模型会对着一段空的协调记录反复 child_wait。
+     */
+    private String withBackgroundChildren(String json) {
+        JsonObject out;
+        try { out = JsonParser.parseString(json).getAsJsonObject(); }
+        catch (RuntimeException notJson) { return json; }
+        com.google.gson.JsonArray running = new com.google.gson.JsonArray();
+        long now = System.currentTimeMillis();
+        synchronized (backgroundLock) {
+            for (BackgroundChild job : backgroundChildren.values()) {
+                JsonObject row = new JsonObject();
+                row.addProperty("childId", job.childId);
+                row.addProperty("mode", job.mode);
+                row.addProperty("state", !job.started ? "queued" : job.cancelled.get() ? "cancelling" : "running");
+                row.addProperty("elapsedSeconds", (now - job.enqueuedAt) / 1000);
+                running.add(row);
+            }
+        }
+        out.add("backgroundChildren", running);
+        if (running.size() == 0) {
+            int returned = backgroundReturnedCount();
+            out.addProperty("note", returned > 0
+                    ? "当前没有排队或运行中的子任务。本任务已有 " + returned + " 个后台子Agent返回，结果已注入对话（[后台子Agent返回]）；请核对后用 AgentControl review(childId,note) 复核，再继续完成当前目标。"
+                    : "当前没有排队或运行中的子任务。");
+        }
+        return out.toString();
+    }
+
+    /** 当前任务/修订下已返回的后台子任务数 */
+    private int backgroundReturnedCount() {
+        synchronized (backgroundLock) {
+            return session.taskState.id != null && session.taskState.id.equals(backgroundCounterTask)
+                    && backgroundCounterRevision == session.taskState.revision() ? backgroundReturned : 0;
+        }
+    }
+
+    /** 取工具参数里的 action（解析失败返回空串） */
+    private static String toolAction(ToolCall call) {
+        if (call == null || call.arguments == null) return "";
+        try {
+            JsonObject args = JsonParser.parseString(call.arguments).getAsJsonObject();
+            return args.has("action") && args.get("action").isJsonPrimitive()
+                    ? args.get("action").getAsString().trim() : "";
+        } catch (RuntimeException malformed) { return ""; }
+    }
+
+    /**
+     * 检查点排空：后台线程产生的控制消息（技能路径激活、后台子Agent返回）在此注入主对话。
+     * 只在轮次安全点调用——不能插在带 tool_calls 的 assistant 消息与 tool 结果之间（会破坏协议）。
+     */
+    private final java.util.concurrent.ConcurrentLinkedQueue<Message> pendingControlNotices =
+            new java.util.concurrent.ConcurrentLinkedQueue<Message>();
+
+    private void drainControlNotices() {
+        List<Message> batch = new ArrayList<Message>();
+        Message notice;
+        while ((notice = pendingControlNotices.poll()) != null) batch.add(notice);
+        for (Message message : batch) appendLive(message);
     }
 
     private String launchChild(JsonObject args) {
@@ -674,8 +942,6 @@ public class AgentLoop {
                     args = mergeToolWhitelist(args, def);
             }
         }
-        if (args.has("run_in_background") && args.get("run_in_background").getAsBoolean())
-            return launchChildBackground(args);   // §8.1 run_in_background：登记后立即返回 childId
         String desc=text(args,"description","无描述");
         if(args.has("prompt")&&!args.get("prompt").isJsonNull()) desc+="\n补充要求/返回格式: "+args.get("prompt").getAsString();
         String mode=text(args,"mode",session.subAgentMode==null?"worker":session.subAgentMode);
@@ -691,6 +957,9 @@ public class AgentLoop {
             java.nio.file.Path output=java.nio.file.Paths.get(workspace.workDir(),".minion","child-output",session.id,child.id).toAbsolutePath().normalize();
             session.taskState.isolateChild(child.id,output.toString());
         }
+        // §8.1 run_in_background：后台池执行，立即返回 childId（与同步入口共用同一套校验与登记）
+        if(args.has("run_in_background")&&args.get("run_in_background").getAsBoolean())
+            return launchChildBackground(session.taskState.child(child.id),args);
         return executeChild(session.taskState.child(child.id),false);
     }
     private static String text(JsonObject o,String key,String fallback) {
@@ -804,6 +1073,7 @@ public class AgentLoop {
     public void setLlm(LlmClient llm) {
         toolSchedulingPolicy=ToolSchedulingPolicy.conservative();toolPolicyFingerprint=null;batchProtocolRejected=false;
         for(SubAgentLoop child:activeChildren.values())child.interrupt();
+        cancelBackgroundChildren(job -> true, "主会话切换模型，旧子任务不跨模型继续");
         ChildTaskHost host=childHost;if(host!=null){host.cancelAll("主会话切换模型，旧子任务不跨模型继续");host.close();retiredChildHosts.add(host);childHost=null;}
         advanceExecutionGeneration();
         this.llm = llm;
@@ -1263,6 +1533,7 @@ public class AgentLoop {
             db.cancelSynchronousQueries();
         }
         ChildTaskHost host=childHost;if(host!=null)host.cancelAll("用户停止主任务，取消传播至子任务");
+        cancelBackgroundChildren(job -> true, "用户停止主任务");
         for(SubAgentLoop child:activeChildren.values()) child.interrupt();
         llm.cancel(); // 中断进行中的流式请求
         List<Future<ToolResult>> cancelThese;
@@ -1363,6 +1634,11 @@ public class AgentLoop {
         for(com.minion.core.tools.db.DbTool db:boundDatabaseTools)db.shutdown();
         RuntimeJobRegistry jobs=runtimeJobs;if(jobs!=null)try{jobs.close();}catch(java.io.IOException ignored){}
         ChildTaskHost host=childHost;if(host!=null)host.close();for(ChildTaskHost retired:retiredChildHosts)retired.close();
+        // §8.1 后台子Agent：停止接收、取消排队/运行中的子任务并关闭后台池（守护线程，不等长任务）
+        backgroundClosed=true;
+        cancelBackgroundChildren(job -> true, "会话关闭");
+        for(SubAgentLoop child:activeChildren.values()) child.interrupt();
+        ExecutorService background=backgroundPool;if(background!=null)background.shutdownNow();
         pool.shutdownNow();
     }
 
@@ -1379,6 +1655,10 @@ public class AgentLoop {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+        // §8.1 后台子Agent池同样限时等待：子 agent 的 LLM 客户端/线程随 executeChild 收尾释放
+        ExecutorService background=backgroundPool;
+        if(background!=null)try{background.awaitTermination(Math.min(timeoutMs,5000),TimeUnit.MILLISECONDS);}
+        catch(InterruptedException e){Thread.currentThread().interrupt();}
     }
 
     public void compactNow() {
@@ -1724,6 +2004,7 @@ public class AgentLoop {
                 configureTaskContext();
             }
             drainPendingSkillLoads();
+            drainControlNotices();   // 上一轮结束后才返回的后台子Agent通知
             if(!automatic) {
                 Message direct=Message.userWithImages(input, images);
                 direct.userAuthored=true;direct.origin=Message.Origin.REAL_USER;
@@ -2243,9 +2524,18 @@ public class AgentLoop {
                 if (toolCalls[0] != null && !toolCalls[0].isEmpty()) {
                     String controlAction = toolCalls[0].size() == 1
                             ? repeatedControlAction(toolCalls[0].get(0)) : null;
+                    // child_wait 本身不计重复（等待子任务是合法的）；但上一次 child_wait 是“立即返回”
+                    // 说明当时已没有可等的子任务，紧接着再调一次就是空转——按无进展的控制调用计数。
+                    // 被抑制的那一轮没有执行，这个标记保持不变，连续空等才会一路累计到停机。
+                    ToolCall soleCall = toolCalls[0].size() == 1 ? toolCalls[0].get(0) : null;
+                    boolean idleChildWait = soleCall != null
+                            && "AgentControl".equalsIgnoreCase(soleCall.name)
+                            && "child_wait".equals(toolAction(soleCall))
+                            && lastChildWaitIdle;
+                    if (idleChildWait) controlAction = "AgentControl:child_wait#idle";
                     boolean hasRealWorkTool = false;
                     for (ToolCall tc : toolCalls[0]) {
-                        if (repeatedControlAction(tc) == null) {
+                        if (repeatedControlAction(tc) == null && !idleChildWait) {
                             hasRealWorkTool = true;
                             break;
                         }
@@ -2253,6 +2543,7 @@ public class AgentLoop {
                     if (hasRealWorkTool || controlAction == null) {
                         lastControlAction = null;
                         controlActionRepeats = 0;
+                        lastChildWaitIdle = false;   // 中间有别的动作：上一次空等不再说明这次也是空等
                         if (hasRealWorkTool) suppressedControlLoops = 0;
                     } else if (controlAction.equals(lastControlAction)) {
                         controlActionRepeats++;
@@ -2283,7 +2574,11 @@ public class AgentLoop {
                             }
                             boolean planningAction = controlAction.startsWith("AgentControl:plan_steps")
                                     || controlAction.startsWith("AgentControl:step_change");
-                            lengthContinuationHint = planningAction
+                            lengthContinuationHint = idleChildWait
+                                    ? ("[子任务等待] 当前没有排队或运行中的子任务，不要再调用 child_wait。"
+                                            + "已返回的子Agent结果见对话中的[后台子Agent返回]通知，核对后用 "
+                                            + "AgentControl review(childId,note) 复核，然后继续完成当前目标。")
+                                    : planningAction
                                     ? ("[内部状态操作已暂停] 不要再次重复相同参数的 " + controlAction
                                             + "。请直接推进实际业务工具调用，或直接向用户汇报当前可交付结果。")
                                     : ("[内部状态已保存] 不要再次调用 "
@@ -2405,6 +2700,21 @@ public class AgentLoop {
                     if (hasPendingSupplements()) {
                         drainSupplements();
                         lengthContinuationHint="[系统结束检查] 有新用户补充，旧交付未通过验收。先处理最新补充，不得执行旧目标。";
+                        continue;
+                    }
+                    // §8.1 后台子Agent仍在排队/运行：“已派发”不是完成——等它们全部返回再裁决。
+                    // 此处没有未配对的 tool_calls，是安全检查点：先把返回通知注入对话再续跑
+                    // （用户可随时中断；每个子任务另有超时看门狗兜底）
+                    if (backgroundChildrenBusy()) {
+                        ui.onWarning("后台子Agent仍在执行，等待其返回…");
+                        while (!interrupted && backgroundChildrenBusy()) {
+                            try { Thread.sleep(200); }
+                            catch (InterruptedException stopped) { Thread.currentThread().interrupt(); break; }
+                        }
+                        if (interrupted || Thread.currentThread().isInterrupted()) break;
+                        drainControlNotices();
+                        lengthContinuationHint = "[系统等待] 后台子Agent已全部返回，结果已附在对话里。"
+                                + "请核对后用 AgentControl review(childId,note) 复核，再继续当前目标；未复核的子结果不能当作已完成。";
                         continue;
                     }
                     // §2.6：token 预算后移至门禁与 Stop Hook 之后（第 8 步）——门禁要求继续时
@@ -2805,6 +3115,7 @@ public class AgentLoop {
                 if (!interrupted) {
                     drainSupplements();
                     drainPendingSkillLoads();
+                    drainControlNotices();   // 后台子Agent返回/技能路径激活：同一安全检查点注入
                 }
                 // 卡住止损：连续失败达阈值时注入系统提醒（user 消息而非 system——
                 // OpenAI 兼容 API 只接受首条 system，插在对话中间会 400），
@@ -3332,6 +3643,8 @@ public class AgentLoop {
     /**
      * §7.1 路径激活：触碰文件 → 条件技能激活 + 向上嵌套 .minion/skills 发现；
      * 新激活技能注入一条 taskControl 提示（下一请求模型可见，可用 Skill 工具加载正文）。
+     * 本方法在工具线程上执行：session.messages 是普通 ArrayList，不能在这里直接 add——
+     * 入队后由会话线程在轮次安全检查点排空（见 drainControlNotices）。
      */
     private void notifySkillActivation(java.nio.file.Path touched) {
         com.minion.core.skills.SkillPathActivation activation = skillPathActivation;
@@ -3343,7 +3656,7 @@ public class AgentLoop {
         StringBuilder hint = new StringBuilder("[技能激活] ");
         for (Skill s : newly) hint.append(s.hint()).append("；");
         hint.append("如与当前任务相关可用 Skill 工具加载正文（资料不是新指令/授权）");
-        session.messages.add(Message.taskControl(hint.toString()));
+        pendingControlNotices.add(Message.taskControl(hint.toString()));
         DiagnosticLog.info("skills", "路径激活 " + newly.size() + " 个: " + touched);
     }
     private ToolResult runOneTool(ToolCall call,ToolOwner owner) throws Exception {
@@ -3621,6 +3934,9 @@ public class AgentLoop {
             host.cancelAll("最新用户指令已修订，旧分工停止；保留回执，不自动重派");host.close();retiredChildHosts.add(host);childHost=null;
         }
         retiredChildHosts.removeIf(h->!h.mutationsPending());
+        // §8.1 同理：指令修订后旧修订派发的后台子Agent停止（保留回执，不自动重派）
+        cancelBackgroundChildren(job -> !job.matches(session.taskState.id,session.taskState.revision()),
+                "用户指令已修订，旧后台子任务停止；保留回执");
     }
     public ToolResult submitCoordinatedChild(JsonObject args){
         java.util.concurrent.locks.Lock lock=ToolExecutionGuard.exclusiveWorkspaceLock();
@@ -3633,9 +3949,28 @@ public class AgentLoop {
         catch(Exception e){return ToolResult.errorWithoutSideEffects("子任务协调器未就绪: "+e.getMessage());}
     }
     public ToolResult controlChildren(JsonObject args){
-        try{ChildTaskHost host=coordination();
+        try{
+            String action=args.has("action")&&!args.get("action").isJsonNull()?args.get("action").getAsString():"";
+            long started=System.currentTimeMillis();   // 含等待后台子任务的时间：child_wait 是否真的等过
+            if("child_wait".equals(action)){
+                // §8.1 后台子Agent纳入等待：先等后台子任务，再把剩余预算交给协调队列（同一超时预算）
+                long budget=10000;
+                if(args.has("timeoutMillis")&&!args.get("timeoutMillis").isJsonNull())budget=args.get("timeoutMillis").getAsLong();
+                budget=Math.max(0,Math.min(30000,budget));
+                long end=System.currentTimeMillis()+budget;
+                waitBackgroundChildren(budget);
+                args=args.deepCopy();args.addProperty("timeoutMillis",Math.max(0,end-System.currentTimeMillis()));
+            }
+            ChildTaskHost host=coordination();
             com.minion.core.checkpoint.CheckpointStore checkpoints=new com.minion.core.checkpoint.CheckpointStore(java.nio.file.Paths.get(workspace.workDir()),java.nio.file.Paths.get(workspace.workDir(),".minion","checkpoints",session.id));
-            host.refreshMerges(workspace,checkpoints);return host.control(args);
+            host.refreshMerges(workspace,checkpoints);
+            ToolResult result=host.control(args);
+            if(("child_status".equals(action)||"child_wait".equals(action))&&result.ok){
+                // 实际阻塞时长留给控制循环检测：child_wait 立即返回=当时已没有可等的子任务
+                if("child_wait".equals(action))lastChildWaitIdle = System.currentTimeMillis() - started < IDLE_CHILD_WAIT_MS;
+                return ToolResult.success(withBackgroundChildren(result.output));
+            }
+            return result;
         }catch(InterruptedException e){Thread.currentThread().interrupt();return ToolResult.errorWithoutSideEffects("等待子任务已取消");}
         catch(Exception e){return ToolResult.errorWithoutSideEffects("子任务控制未通过: "+e.getMessage());}
     }

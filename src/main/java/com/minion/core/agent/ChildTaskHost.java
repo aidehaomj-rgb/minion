@@ -38,7 +38,10 @@ public final class ChildTaskHost implements AutoCloseable {
     public ToolResult submit(JsonObject args){
         if(!matches()||closed)return ToolResult.errorWithoutSideEffects("子任务所属修订已失效，请重新读取当前要求");
         if(recovered)return ToolResult.errorWithoutSideEffects("已恢复协调记录，先child_status核对；child_resume_queue需明确旧执行已退出的依据，不自动重放");
-        if(!args.has("revision")||args.get("revision").getAsLong()!=revision)return ToolResult.errorWithoutSideEffects("需当前revision，不能把旧分工送入新指令");
+        // 文案给出当前修订号：模型抄到旧修订号时能直接改成正确的值
+        if(!args.has("revision")||args.get("revision").isJsonNull())return ToolResult.errorWithoutSideEffects("缺少 revision：当前任务修订号为 "+revision+"（任务状态里“指令修订: "+revision+"”）");
+        if(args.get("revision").getAsLong()!=revision)return ToolResult.errorWithoutSideEffects("revision 已过期：当前任务修订号为 "+revision+"，收到 "+args.get("revision")
+                +"。用户指令已变更，请按最新指令重新派发，不要把旧分工送入新指令");
         ToolResult result=coordinator.submit(args);sync();return result;
     }
     public void sync(){
