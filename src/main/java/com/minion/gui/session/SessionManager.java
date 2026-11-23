@@ -2642,6 +2642,10 @@ public class SessionManager {
     }
 
     public void shutdown() {
+        // 关闭后保留这个已关闭的实例，不要置空：下面才会中断各会话，会话线程收尾时的
+        // notifyRunningChanged(false) 会经 notifier() 惰性重建——那样托盘图标会被再建一次，
+        // 而那一次不会再被清理（关窗后图标残留的根因之一）。已关闭实例的 notify() 是空操作。
+        notifier().close();
         navigationClosed=true;
         navigationSerial.incrementAndGet();
         navigationLoader.shutdownNow();

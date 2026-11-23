@@ -52,6 +52,10 @@ public class MinionApp extends Application {
         alert.show();
     }
 
+    @Override public void stop() {
+        if (sessionManager != null) sessionManager.shutdown();
+    }
+
     public static Config config() { return config; }
     public static WorkspaceManager workspaces() { return workspaces; }
     public static ModelManager models() { return models; }

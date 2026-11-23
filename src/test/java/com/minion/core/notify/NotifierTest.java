@@ -2,6 +2,7 @@ package com.minion.core.notify;
 
 import com.minion.core.config.Config;
 import org.junit.Rule;
+import org.junit.Assume;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
@@ -47,6 +48,53 @@ public class NotifierTest {
         Notifier n = new Notifier(null);   // null config → 默认 tray
         assertEquals("tray", n.channel());
         n.notify(null, "标题", "完成");
+        n.close();
+    }
+
+    @Test public void closeStopsSenderAndIsIdempotent() {
+        final int[] sent = {0};
+        final int[] closed = {0};
+        class CountingSender implements Notifier.Sender, AutoCloseable {
+            @Override public boolean send(String title, String message) {
+                sent[0]++;
+                return true;
+            }
+            @Override public void close() { closed[0]++; }
+        }
+        CountingSender sender = new CountingSender();
+        Notifier n = new Notifier("tray", sender);
+        n.notify(null, "标题", "一次");
+        assertEquals(1, sent[0]);
+        n.close();
+        n.close();
+        assertEquals(1, closed[0]);
+        n.notify(null, "标题", "退出后不应发送");
+        assertEquals(1, sent[0]);
+    }
+
+    @Test public void realTrayIconIsRemovedOnClose() {
+        Assume.assumeFalse(java.awt.GraphicsEnvironment.isHeadless());
+        Assume.assumeTrue(java.awt.SystemTray.isSupported());
+        int before = minionTrayIconCount();
+        Notifier n = new Notifier(null);
+        try {
+            n.notify(null, "标题", "托盘清理测试");
+            int created = minionTrayIconCount();
+            Assume.assumeTrue("当前桌面会话未能创建 AWT 托盘图标", created > before);
+            assertEquals(before + 1, created);
+            n.close();
+            assertEquals(before, minionTrayIconCount());
+        } finally {
+            n.close();
+        }
+    }
+
+    private static int minionTrayIconCount() {
+        int count = 0;
+        for (java.awt.TrayIcon icon : java.awt.SystemTray.getSystemTray().getTrayIcons()) {
+            if ("Minion".equals(icon.getToolTip())) count++;
+        }
+        return count;
     }
 
     /** Notification hook 先行：hook 收到事件且 message 字段正确（hook 异常也不拦发送） */

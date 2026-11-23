@@ -10,7 +10,7 @@ import com.minion.core.hooks.HookSystem;
  * disabled。<b>通知失败不得影响主任务</b>：全部路径吞异常（AWT headless/无托盘安全降级）。
  * Sender 可注入（headless 测试）。
  */
-public final class Notifier {
+public final class Notifier implements AutoCloseable {
 
     /** 实际发送通道（tray/sound 实现方；返回 false=通道不可用） */
     public interface Sender {
@@ -26,8 +26,9 @@ public final class Notifier {
     };
 
     private final String channel;
-    private Sender sender;      // tray 实现（延迟建 TrayIcon；失败置 null 禁用）
+    private volatile Sender sender; // tray 实现（延迟建 TrayIcon；失败置 null 禁用）
     private final boolean soundAlso;
+    private volatile boolean closed;
 
     public Notifier(Config config) {
         String raw = config == null ? "tray" : config.get("notify.channel", "tray");
@@ -36,8 +37,16 @@ public final class Notifier {
                 && Boolean.parseBoolean(config == null ? "false" : config.get("notify.traySound", "false"));
     }
 
+    /** 测试注入：不创建真实托盘。 */
+    Notifier(String channel, Sender sender) {
+        this.channel = channel == null ? "tray" : channel.trim().toLowerCase();
+        this.soundAlso = false;
+        this.sender = sender;
+    }
+
     /** 通知入口：hook 先行（可带 payload 字段），再按通道发送 */
     public void notify(HookSystem hooks, String title, String message) {
+        if (closed) return;
         try {
             if (hooks != null && hooks.enabled()
                     && hooks.matches(HookSystem.NOTIFICATION, "")) {
@@ -54,8 +63,15 @@ public final class Notifier {
                 SOUND.send(title, message);
                 return;
             }
-            if (sender == null) sender = buildTraySender();   // tray（含默认分支）
-            if (sender == null || !sender.send(title, message)) {
+            Sender current = sender;
+            if (current == null && !closed) {
+                synchronized (this) {
+                    if (!closed && sender == null) sender = buildTraySender();
+                    current = sender;
+                }
+            }
+            if (closed) return;
+            if (current == null || !current.send(title, message)) {
                 SOUND.send(title, message);                   // 无托盘降级为声音
                 return;
             }
@@ -67,8 +83,26 @@ public final class Notifier {
 
     public String channel() { return channel; }
 
+    /** 退出时移除托盘图标并停止继续发送；幂等。 */
+    @Override public void close() {
+        Sender current;
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+            current = sender;
+            sender = null;
+        }
+        if (current instanceof AutoCloseable) {
+            try {
+                ((AutoCloseable) current).close();
+            } catch (Exception failed) {
+                DiagnosticLog.warn("notify", "托盘图标清理失败: " + failed.getMessage());
+            }
+        }
+    }
+
     /** AWT 托盘发送器：TrayIcon 延迟创建一次；headless/不支持托盘返回 null */
-    private static Sender buildTraySender() {
+    private static TraySender buildTraySender() {
         if (java.awt.GraphicsEnvironment.isHeadless()) return null;
         if (!java.awt.SystemTray.isSupported()) return null;
         try {
@@ -86,14 +120,38 @@ public final class Notifier {
             final java.awt.TrayIcon icon = new java.awt.TrayIcon(img, "Minion");
             icon.setImageAutoSize(true);
             tray.add(icon);
-            return new Sender() {
-                @Override public boolean send(String title, String message) {
-                    icon.displayMessage(title, message, java.awt.TrayIcon.MessageType.INFO);
-                    return true;
-                }
-            };
+            return new TraySender(tray, icon);
         } catch (Exception noTray) {
             return null;
+        }
+    }
+
+    private static final class TraySender implements Sender, AutoCloseable {
+        private final java.awt.SystemTray tray;
+        private volatile java.awt.TrayIcon icon;
+        private volatile boolean closed;
+
+        TraySender(java.awt.SystemTray tray, java.awt.TrayIcon icon) {
+            this.tray = tray;
+            this.icon = icon;
+        }
+
+        @Override public boolean send(String title, String message) {
+            java.awt.TrayIcon current = icon;
+            if (closed || current == null) return false;
+            current.displayMessage(title, message, java.awt.TrayIcon.MessageType.INFO);
+            return true;
+        }
+
+        @Override public void close() {
+            java.awt.TrayIcon current;
+            synchronized (this) {
+                if (closed) return;
+                closed = true;
+                current = icon;
+                icon = null;
+            }
+            if (current != null) tray.remove(current);
         }
     }
 }
