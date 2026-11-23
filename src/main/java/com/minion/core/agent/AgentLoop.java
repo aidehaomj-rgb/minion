@@ -2271,9 +2271,14 @@ public class AgentLoop {
                                 break;
                             }
                             if (!hasVisibleText(content)) {
-                                lengthContinuationHint = "[内部状态已保存] 不要再次调用 "
-                                        + controlAction + "。直接给出当前可交付结论；"
-                                        + "普通读取/检查任务不要求额外文件产出。";
+                                boolean planningAction = "AgentControl:plan_steps".equals(controlAction)
+                                        || "AgentControl:step_transition".equals(controlAction);
+                                lengthContinuationHint = planningAction
+                                        ? ("[内部状态操作已暂停] 不要再次调用 " + controlAction
+                                                + "。请直接推进实际业务工具调用，或直接向用户汇报当前可交付结果。")
+                                        : ("[内部状态已保存] 不要再次调用 "
+                                                + controlAction + "。直接给出当前可交付结论；"
+                                                + "普通读取/检查任务不要求额外文件产出。");
                                 nextRequestWithoutThinking = true;
                                 persistSession();
                                 continue;

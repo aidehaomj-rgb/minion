@@ -80,6 +80,13 @@ public final class TaskWorkflow {
         String original=state.latestRequirement();c.userRequirement=clip(original,2000);c.userRequirementHash=StopGate.digest(String.valueOf(original));
         c.note=note;c.time=System.currentTimeMillis();changes.add(c);version++;
     }
+    /** TaskV2 在同任务新修订下创建步骤时同步修订号（保留全部历史步骤与审计日志，不抹除旧记录）。 */
+    public void rebaseRevision(TaskState state, String note) {
+        if (state == null || !Objects.equals(taskId, state.id)) return;
+        if (revision == state.revision()) return;
+        revision = state.revision();
+        change("rebase", "", "", state, note == null || note.isEmpty() ? "TaskV2 同步当前用户修订" : note);
+    }
     public void transition(TaskState state,String stepId,String action,List<String> receipts,List<FileEvidence> files,String note,String replacement) {
         transition(state,stepId,action,receipts,files,note,replacement,p->true);
     }

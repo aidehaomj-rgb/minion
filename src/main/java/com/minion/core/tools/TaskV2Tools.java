@@ -75,7 +75,14 @@ public final class TaskV2Tools {
             session.taskState.id = taskId;
         }
         com.minion.core.agent.TaskWorkflow existing = workflow();
-        if (existing != null && taskId.equals(existing.taskId)) return existing;
+        if (existing != null && taskId.equals(existing.taskId)) {
+            if (existing.revision != session.taskState.revision()) {
+                // 用户在同一任务内追问/补充指令后，TaskCreate 显式登记新步骤：
+                // 同步修订号并保留历史步骤与审计日志，避免新创建的任务在 TaskUpdate 时被判“旧计划已失效”。
+                existing.rebaseRevision(session.taskState, "TaskCreate 绑定当前用户修订");
+            }
+            return existing;
+        }
         com.minion.core.agent.TaskWorkflow wf = new com.minion.core.agent.TaskWorkflow();
         wf.taskId = taskId;
         wf.revision = session.taskState.revision();
@@ -216,9 +223,43 @@ public final class TaskV2Tools {
 
     private static List<String> stringList(JsonObject o, String key) {
         List<String> out = new ArrayList<String>();
-        if (o != null && o.has(key) && o.get(key).isJsonArray())
-            for (JsonElement e : o.getAsJsonArray(key))
-                if (!e.isJsonNull()) out.add(e.getAsString().trim());
+        if (o == null || !o.has(key) || o.get(key).isJsonNull()) return out;
+        JsonElement raw = o.get(key);
+        if (raw.isJsonArray()) {
+            collectReceiptOrString(raw.getAsJsonArray(), out);
+        } else if (raw.isJsonPrimitive() && raw.getAsJsonPrimitive().isString()) {
+            String s = raw.getAsString().trim();
+            if (s.startsWith("[")) {
+                try {
+                    JsonElement parsed = com.google.gson.JsonParser.parseString(s);
+                    if (parsed.isJsonArray()) {
+                        collectReceiptOrString(parsed.getAsJsonArray(), out);
+                        return out;
+                    }
+                } catch (Exception ignored) { }
+            }
+            if (!s.isEmpty()) {
+                for (String part : s.split(",")) {
+                    String t = part.trim();
+                    if (!t.isEmpty()) out.add(t);
+                }
+            }
+        }
         return out;
+    }
+
+    private static void collectReceiptOrString(JsonArray arr, List<String> out) {
+        for (JsonElement e : arr) {
+            if (e == null || e.isJsonNull()) continue;
+            if (e.isJsonPrimitive()) {
+                String t = e.getAsString().trim();
+                if (!t.isEmpty()) out.add(t);
+            } else if (e.isJsonObject()) {
+                JsonObject obj = e.getAsJsonObject();
+                String id = text(obj, "id");
+                if (id.isEmpty()) id = text(obj, "receiptId");
+                if (!id.isEmpty()) out.add(id);
+            }
+        }
     }
 }

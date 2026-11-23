@@ -88,4 +88,42 @@ public class TaskV2ToolsTest {
         assertFalse(r.ok);
         assertTrue(r.output.contains("不存在"));
     }
+
+    /** 同任务追问导致 revision 递增后，TaskCreate 必须同步修订号，避免紧接着的 TaskUpdate 报“旧计划已失效” */
+    @Test public void createAfterRevisionBumpRebasesWorkflowSoUpdateWorks() throws Exception {
+        Session s = session();
+        s.taskState.begin("第一轮需求", false);
+        TaskV2Tools tools = new TaskV2Tools(s);
+        ToolResult first = tools.dispatch("create", args("{\"subject\":\"步骤1\"}"));
+        assertTrue(first.ok);
+        long rev1 = s.taskState.revision();
+
+        // 模拟用户在同任务内追问/补充指令 → revision 递增
+        s.taskState.begin("补充要求：直接输出分工表", false);
+        assertTrue(s.taskState.revision() > rev1);
+
+        ToolResult second = tools.dispatch("create", args("{\"subject\":\"筛选+分工生成中间表\"}"));
+        assertTrue(second.ok);
+        String id2 = second.output.split(" ")[1].replace(":", "");
+
+        // 同步修订号后，TaskUpdate 不得再报“旧计划已失效”
+        ToolResult started = tools.dispatch("update", args(
+                "{\"task_id\":\"" + id2 + "\",\"status\":\"in_progress\"}"));
+        assertTrue("新修订下创建的任务应可正常 start: " + started.output, started.ok);
+    }
+
+    /** receipts 传入字符串化 JSON 数组时应能解析而非静默为空 */
+    @Test public void stringifiedReceiptsArrayIsParsed() throws Exception {
+        Session s = session();
+        s.taskState.begin("执行脚本", false);
+        TaskV2Tools tools = new TaskV2Tools(s);
+        String id = tools.dispatch("create", args("{\"subject\":\"跑脚本\"}")).output.split(" ")[1].replace(":", "");
+        assertTrue(tools.dispatch("update", args("{\"task_id\":\"" + id + "\",\"status\":\"in_progress\"}")).ok);
+        s.taskState.recordEvidence("root", "Bash", true, "echo ok", null);
+        String evId = s.taskState.evidence.get(s.taskState.evidence.size() - 1).id;
+
+        ToolResult done = tools.dispatch("update", args(
+                "{\"task_id\":\"" + id + "\",\"status\":\"completed\",\"note\":\"脚本执行成功\",\"receipts\":\"[\\\"" + evId + "\\\"]\"}"));
+        assertTrue("字符串化 receipts 应可完成验收: " + done.output, done.ok);
+    }
 }
