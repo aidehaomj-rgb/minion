@@ -295,4 +295,42 @@ public class UnifiedStopLoopTest {
         assertEquals(4,llm.requests.size());assertEquals(2,llm.stopReviewRequests.size());assertTrue(loop.lastTurnSucceeded());
         assertTrue(loop.session().taskState.checkpointFilesValid());
     }
+
+    @Test public void distinctControlArgsAndChildWaitNeverTriggerControlLoop() {
+        ToolCall w1 = new ToolCall(); w1.name = "AgentControl"; w1.arguments = "{\"action\":\"child_wait\",\"timeoutMillis\":1000}";
+        assertNull("child_wait 不应计入重复控制循环", AgentLoop.repeatedControlAction(w1));
+
+        ToolCall r1 = new ToolCall(); r1.name = "AgentControl"; r1.arguments = "{\"action\":\"child_review\",\"stepId\":\"s1\"}";
+        ToolCall r2 = new ToolCall(); r2.name = "AgentControl"; r2.arguments = "{\"action\":\"child_review\",\"stepId\":\"s2\"}";
+        ToolCall r1SameKeyOrder = new ToolCall(); r1SameKeyOrder.name = "AgentControl"; r1SameKeyOrder.arguments = "{\"stepId\":\"s1\",\"action\":\"child_review\"}";
+        assertNotEquals("不同 stepId 的 child_review 不能算重复操作",
+                AgentLoop.repeatedControlAction(r1), AgentLoop.repeatedControlAction(r2));
+        assertEquals("相同语义参数（键序不同）仍识别为重复",
+                AgentLoop.repeatedControlAction(r1), AgentLoop.repeatedControlAction(r1SameKeyOrder));
+
+        ToolCall p1 = new ToolCall(); p1.name = "AgentControl"; p1.arguments = "{\"action\":\"plan_steps\",\"revision\":1}";
+        ToolCall p2 = new ToolCall(); p2.name = "AgentControl"; p2.arguments = "{\"action\":\"plan_steps\",\"revision\":2}";
+        assertNotEquals("修正参数后的 plan_steps 不能与失败调用混同",
+                AgentLoop.repeatedControlAction(p1), AgentLoop.repeatedControlAction(p2));
+    }
+
+    @Test public void realWorkResetsSuppressedControlLoopsInsteadOfStoppingLater() {
+        llm.stopKind = "task";
+        // 前半段：重复 status 4 次（触发 2 次抑制，尚未达到 3 次停机）
+        for (int i = 0; i < 4; i++) {
+            ToolCall status = new ToolCall(); status.id = "st-a-" + i; status.name = "AgentControl"; status.arguments = "{\"action\":\"status\"}";
+            llm.addTurnWithTools(Collections.singletonList(status), null);
+        }
+        // 中间执行真实业务工具（必须清零 suppressedControlLoops）
+        tool("real-progress");
+        // 后半段：再重复 status 3 次（仅 1 次抑制，绝不能累加前半段的 2 次导致提前停机）
+        for (int i = 0; i < 3; i++) {
+            ToolCall status = new ToolCall(); status.id = "st-b-" + i; status.name = "AgentControl"; status.arguments = "{\"action\":\"status\"}";
+            llm.addTurnWithTools(Collections.singletonList(status), null);
+        }
+        llm.addTurn("已完成最终交付。");
+        loop.runUserTurn("完成多阶段交付");
+        assertTrue("有真实业务工具进展后，历史控制抑制计数必须清零", loop.lastTurnSucceeded());
+        assertNotEquals("control_loop", loop.session().taskState.pauseCode);
+    }
 }

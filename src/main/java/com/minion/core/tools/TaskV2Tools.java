@@ -144,6 +144,13 @@ public final class TaskV2Tools {
                 "status 只支持 pending/in_progress/completed/deleted: " + status);
         List<String> receipts = stringList(args, "receipts");
         String note = text(args, "note");
+        // TaskV2 轻量任务（scope="taskv2:..."）或显式取消（deleted）在同任务追问修订递增后允许自动同步修订号，
+        // 避免模型卡死在“旧计划已失效，需重新 plan_steps 绑定”循环；所有 V68 验收门禁（start/回执/note/依赖）仍严格执行。
+        if (wf.revision != session.taskState.revision()
+                && java.util.Objects.equals(wf.taskId, session.taskState.id)
+                && ("cancel".equals(action) || (s.scope != null && s.scope.startsWith("taskv2:")))) {
+            wf.rebaseRevision(session.taskState, "TaskUpdate 同步当前用户修订");
+        }
         try {
             wf.transition(session.taskState, id, action, receipts, new ArrayList<>(), note, null);
         } catch (Exception denied) {

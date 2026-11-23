@@ -2240,49 +2240,58 @@ public class AgentLoop {
                     ui.onWarning("已丢弃 " + malformedToolCallCount
                             + " 个损坏的工具调用，其余合法调用将继续执行");
                 }
-                if (toolCalls[0] != null && toolCalls[0].size() == 1) {
-                    String controlAction = repeatedControlAction(toolCalls[0].get(0));
-                    if (controlAction == null) {
+                if (toolCalls[0] != null && !toolCalls[0].isEmpty()) {
+                    String controlAction = toolCalls[0].size() == 1
+                            ? repeatedControlAction(toolCalls[0].get(0)) : null;
+                    boolean hasRealWorkTool = false;
+                    for (ToolCall tc : toolCalls[0]) {
+                        if (repeatedControlAction(tc) == null) {
+                            hasRealWorkTool = true;
+                            break;
+                        }
+                    }
+                    if (hasRealWorkTool || controlAction == null) {
                         lastControlAction = null;
                         controlActionRepeats = 0;
+                        if (hasRealWorkTool) suppressedControlLoops = 0;
                     } else if (controlAction.equals(lastControlAction)) {
                         controlActionRepeats++;
                     } else {
                         lastControlAction = controlAction;
                         controlActionRepeats = 1;
                     }
-                    if (controlActionRepeats >= 3) {
+                    if (controlAction != null && controlActionRepeats >= 3) {
                         toolCalls[0] = null;
                         suppressedControlLoops++;
                         DiagnosticLog.info("agent-control-loop",
                                 "task=" + session.taskState.id + " action=" + controlAction
                                         + " repeat=" + controlActionRepeats);
-                        String checkpointReply=("AgentControl:checkpoint".equals(controlAction)
-                                ||"AgentControl:refresh_checkpoint".equals(controlAction))
-                                ?checkpointLoopDeliveryReply():null;
-                        if(checkpointReply!=null){
-                            content.setLength(0);content.append(checkpointReply);
-                            thinking.setLength(0);finish[0]="stop";
+                        String checkpointReply = ("AgentControl:checkpoint".equals(controlAction)
+                                || "AgentControl:refresh_checkpoint".equals(controlAction))
+                                ? checkpointLoopDeliveryReply() : null;
+                        if (checkpointReply != null) {
+                            content.setLength(0);
+                            content.append(checkpointReply);
+                            thinking.setLength(0);
+                            finish[0] = "stop";
                         } else {
-                            if (suppressedControlLoops >= 3 && !hasVisibleText(content)) {
+                            if (suppressedControlLoops >= 3) {
                                 exitReason = "同一内部状态操作连续重复，已停止自动续跑";
                                 exitCode = "control_loop";
                                 ui.onError(exitReason);
                                 break;
                             }
-                            if (!hasVisibleText(content)) {
-                                boolean planningAction = "AgentControl:plan_steps".equals(controlAction)
-                                        || "AgentControl:step_transition".equals(controlAction);
-                                lengthContinuationHint = planningAction
-                                        ? ("[内部状态操作已暂停] 不要再次调用 " + controlAction
-                                                + "。请直接推进实际业务工具调用，或直接向用户汇报当前可交付结果。")
-                                        : ("[内部状态已保存] 不要再次调用 "
-                                                + controlAction + "。直接给出当前可交付结论；"
-                                                + "普通读取/检查任务不要求额外文件产出。");
-                                nextRequestWithoutThinking = true;
-                                persistSession();
-                                continue;
-                            }
+                            boolean planningAction = controlAction.startsWith("AgentControl:plan_steps")
+                                    || controlAction.startsWith("AgentControl:step_change");
+                            lengthContinuationHint = planningAction
+                                    ? ("[内部状态操作已暂停] 不要再次重复相同参数的 " + controlAction
+                                            + "。请直接推进实际业务工具调用，或直接向用户汇报当前可交付结果。")
+                                    : ("[内部状态已保存] 不要再次调用 "
+                                            + controlAction + "。直接给出当前可交付结论；"
+                                            + "普通读取/检查任务不要求额外文件产出。");
+                            nextRequestWithoutThinking = true;
+                            persistSession();
+                            continue;
                         }
                     }
                 }
@@ -3127,22 +3136,67 @@ public class AgentLoop {
         return TurnSemantics.visible(text);
     }
 
-    private static String repeatedControlAction(ToolCall call) {
+    static String repeatedControlAction(ToolCall call) {
         if (call == null || call.name == null) return null;
         String name = call.name.toLowerCase(java.util.Locale.ROOT);
         if (!java.util.Arrays.asList("agentcontrol", "todowrite", "discovertools", "context", "skill")
                 .contains(name)) return null;
+        String rawArgs = call.arguments == null ? "{}" : call.arguments.trim();
         if ("agentcontrol".equals(name)) {
             try {
-                JsonObject args = JsonParser.parseString(call.arguments == null ? "{}" : call.arguments)
-                        .getAsJsonObject();
-                String action = args.has("action") ? args.get("action").getAsString() : "unknown";
-                return "AgentControl:" + action;
+                JsonObject args = JsonParser.parseString(rawArgs).getAsJsonObject();
+                String action = args.has("action") && !args.get("action").isJsonNull()
+                        ? args.get("action").getAsString().trim() : "unknown";
+                // child_wait 单次最多等待 30s，多子代理并行期间合法重复等待不应被当成死循环
+                if ("child_wait".equals(action)) return null;
+                // 纯轮询/重复打点类操作按动作名合并拦截（保留无进展保护与 checkpoint 自动交付）
+                if (java.util.Arrays.asList("status", "verify", "checkpoint", "refresh_checkpoint", "hooks_status")
+                        .contains(action)) {
+                    return "AgentControl:" + action;
+                }
+                // 多步骤推进 / 分页查看 / 逐个复核子代理 / 修正参数重提 plan_steps：
+                // 仅当参数完全一致时才算“同一内部状态操作重复”，避免合法推进被误杀
+                return "AgentControl:" + action + "#" + normalizedArgsDigest(args);
             } catch (RuntimeException malformed) {
                 return "AgentControl:malformed";
             }
         }
-        return call.name;
+        // TodoWrite / DiscoverTools / Context / Skill 仅在参数完全相同时视为重复调用
+        try {
+            com.google.gson.JsonElement parsed = JsonParser.parseString(rawArgs);
+            return call.name + "#" + normalizedArgsDigest(parsed);
+        } catch (RuntimeException malformed) {
+            return call.name + "#" + rawArgs;
+        }
+    }
+
+    private static String normalizedArgsDigest(com.google.gson.JsonElement el) {
+        String canonical = canonicalJson(el);
+        return StopGate.digest(canonical);
+    }
+
+    private static String canonicalJson(com.google.gson.JsonElement el) {
+        if (el == null || el.isJsonNull()) return "null";
+        if (el.isJsonPrimitive()) return el.toString();
+        if (el.isJsonArray()) {
+            StringBuilder sb = new StringBuilder("[");
+            com.google.gson.JsonArray arr = el.getAsJsonArray();
+            for (int i = 0; i < arr.size(); i++) {
+                if (i > 0) sb.append(',');
+                sb.append(canonicalJson(arr.get(i)));
+            }
+            return sb.append(']').toString();
+        }
+        JsonObject obj = el.getAsJsonObject();
+        java.util.TreeSet<String> keys = new java.util.TreeSet<String>(obj.keySet());
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        for (String k : keys) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append('"').append(k).append("\":").append(canonicalJson(obj.get(k)));
+        }
+        return sb.append('}').toString();
     }
 
     /** Converts a repeated terminal checkpoint into a deterministic delivery once files are verified. */

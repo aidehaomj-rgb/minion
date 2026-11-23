@@ -96,10 +96,12 @@ public class TaskV2ToolsTest {
         TaskV2Tools tools = new TaskV2Tools(s);
         ToolResult first = tools.dispatch("create", args("{\"subject\":\"步骤1\"}"));
         assertTrue(first.ok);
+        String taskId1 = s.taskState.id;
         long rev1 = s.taskState.revision();
 
-        // 模拟用户在同任务内追问/补充指令 → revision 递增
-        s.taskState.begin("补充要求：直接输出分工表", false);
+        // 模拟用户在同任务内追问/补充指令（addGuidance）→ 同一 taskId 下 revision 递增
+        s.taskState.addGuidance("补充要求：直接输出分工表");
+        assertEquals(taskId1, s.taskState.id);
         assertTrue(s.taskState.revision() > rev1);
 
         ToolResult second = tools.dispatch("create", args("{\"subject\":\"筛选+分工生成中间表\"}"));
@@ -125,5 +127,26 @@ public class TaskV2ToolsTest {
         ToolResult done = tools.dispatch("update", args(
                 "{\"task_id\":\"" + id + "\",\"status\":\"completed\",\"note\":\"脚本执行成功\",\"receipts\":\"[\\\"" + evId + "\\\"]\"}"));
         assertTrue("字符串化 receipts 应可完成验收: " + done.output, done.ok);
+    }
+
+    /** 先 create 再由用户追问导致 revision 递增后，TaskUpdate 轻量任务应自动同步 revision，不卡死在旧计划失效 */
+    @Test public void updateExistingTaskV2StepAfterRevisionBumpRebasesCleanly() throws Exception {
+        Session s = session();
+        s.taskState.begin("筛选+分工并派发子agent", false);
+        TaskV2Tools tools = new TaskV2Tools(s);
+        String id = tools.dispatch("create", args("{\"subject\":\"筛选+分工生成中间表\"}")).output.split(" ")[1].replace(":", "");
+        assertTrue(tools.dispatch("update", args("{\"task_id\":\"" + id + "\",\"status\":\"in_progress\"}")).ok);
+        s.taskState.recordEvidence("root", "Bash", true, "生成中间表 200 行", null);
+        String evId = s.taskState.evidence.get(s.taskState.evidence.size() - 1).id;
+
+        // 用户中途追问（同任务 addGuidance）：“直接把分工表给我，不用做后面处理了” → revision 递增
+        String taskIdBefore = s.taskState.id;
+        long revBefore = s.taskState.revision();
+        s.taskState.addGuidance("直接把分工表给我，不用做后面处理了");
+        assertEquals(taskIdBefore, s.taskState.id);
+        assertTrue(s.taskState.revision() > revBefore);
+        ToolResult done = tools.dispatch("update", args(
+                "{\"task_id\":\"" + id + "\",\"status\":\"completed\",\"note\":\"中间表已生成\",\"receipts\":[\"" + evId + "\"]}"));
+        assertTrue("同任务追问后 TaskUpdate 轻量任务不应报旧计划失效: " + done.output, done.ok);
     }
 }

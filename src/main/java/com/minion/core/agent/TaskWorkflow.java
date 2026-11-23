@@ -61,8 +61,13 @@ public final class TaskWorkflow {
             }
             next.steps.add(s);
         }
-        if (previous != null && state.id.equals(previous.taskId)) for (Step old : previous.steps)
-            if (!ids.contains(old.id)) throw new IllegalArgumentException("不能从计划中抹去旧步骤，取消/替代记录须保留: "+old.id);
+        if (previous != null && state.id.equals(previous.taskId)) {
+            List<String> missing = new ArrayList<String>();
+            for (Step old : previous.steps) if (!ids.contains(old.id)) missing.add(old.id);
+            if (!missing.isEmpty())
+                throw new IllegalArgumentException("不能从计划中抹去旧步骤，取消/替代记录须保留: " + missing
+                        + "（可先用 AgentControl(action=workflow) 查看原步骤完整定义）");
+        }
         Map<String,Integer> colors = new HashMap<String,Integer>();
         for (Step s : next.steps) next.visit(s, colors);
         next.change("rebase", "", "", state, "绑定当前用户修订，旧完成记录仅是证据，不替代新要求");

@@ -73,7 +73,7 @@ public final class AgentControlTool implements Tool {
                     out.add("steps",new com.google.gson.Gson().toJsonTree(state.workflow.steps.subList(Math.min(offset,end),end)));
                     out.addProperty("nextOffset",end);return ToolResult.success(out.toString());
                 }
-                if(!args.has("revision")||args.get("revision").getAsLong()!=state.revision())return ToolResult.errorWithoutSideEffects("任务修订已改变或未提供revision，请先status");
+                if(!args.has("revision")||args.get("revision").getAsLong()!=state.revision())return ToolResult.errorWithoutSideEffects("任务修订已改变或未提供revision（当前 revision="+state.revision()+"），请传 revision="+state.revision()+" 重试");
                 if("plan_steps".equals(action)) {
                     com.google.gson.JsonElement definitions=args.get("steps");
                     if(definitions==null)return ToolResult.errorWithoutSideEffects("缺少steps");
