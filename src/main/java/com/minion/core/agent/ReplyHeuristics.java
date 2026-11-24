@@ -83,6 +83,40 @@ final class ReplyHeuristics {
                 + "(?:[。.!！][ ]*(?:执行工具调用|现在|执行|good|execute)[。.!！]*)*[。.!！]*$");
     }
 
+    /**
+     * 识别明确的中途过渡播报（如“文档已生成。现在登记复核并完成任务。”、“中间表已生成。现在派发子 agent。”、
+     * 或明确口头声明调用某个工具却漏发 tool_calls）：即使本轮已有前置工具回执，也不能把这种纯过渡短句当成最终交付。
+     * 长篇实质交付报告不命中此规则，避免把报告结尾的总结或建议误拦成死循环。
+     */
+    static boolean hasExplicitImmediateHandoff(String text) {
+        if (text == null) return false;
+        String s = text.trim().replace('\r', ' ').replace('\n', ' ');
+        if (s.isEmpty() || hasTaskCompleteMarker(s)) return false;
+        if (hasToolActionPromise(s)) return true;
+        if (s.length() > 120 || looksLikeUserBlock(s) || hasConcreteHumanDependency(s, "")) return false;
+        if (s.matches("(?s).*(?:建议|如需|可以|可供|后续可)[^。！？!?]{0,30}(?:下一步|接下来|继续).*")) return false;
+        return s.matches("(?s)^(?:[^。！？!?]{1,50}[。！!\\s]+)?(?:现在|接下来|下一步|下面)(?:我)?(?:将|会|要|先|立即|马上|开始|继续)?(?:登记|派发|调用|执行|编写|生成|运行|制作|构建|写入|汇总|复核)[^。！？!?]{1,60}[。！!：:]*$");
+    }
+
+    /**
+     * 识别明确的整项任务最终交付确认（如“交付完成”、“任务已完成”、“报告文件...已生成完毕并保存”），
+     * 同时排除“第一块/第1批/首轮已完成”等局部阶段汇报——供有子任务复核记录但未输出内部暗暗号的真实交付放行。
+     */
+    static boolean hasExplicitDeliveryConfirmation(String text) {
+        if (text == null) return false;
+        String s = text.trim();
+        if (s.isEmpty()) return false;
+        if (hasTaskCompleteMarker(s)) return true;
+        if (looksLikeInterimAnswer(s) || hasExplicitImmediateHandoff(s) || looksLikeUnconfirmedOutcome(s)) return false;
+        // 排除“第一块核对完毕 / 第1批已完成 / 部分完成”这类分片阶段汇报
+        if (s.length() < 80 && s.matches("(?s).*第[一二三四五六七八九十百0-9]+(?:块|批|个|项|步|部分|轮|阶段).*(?:完成|完毕).*")) {
+            return false;
+        }
+        return s.matches("(?s)^(?:交付完成|任务已完成|全部任务已完成|已全部完成)\\b.*")
+                || s.matches("(?s)^(?:交付完成|任务已完成|全部任务已完成|已全部完成)[\\s：:。！!\\n].*")
+                || s.matches("(?s).*(?:报告文件|结果文件|最终报告|目标文件|文档|表格|PPT)[^。！？!?\\n]{0,80}(?:已生成完毕|已生成并保存|已完成交付).*");
+    }
+
     /** Explicit uncertainty is not a completion signal, even when phrased as a normal answer. */
     static boolean looksLikeUnconfirmedOutcome(String text) {
         if (text == null) return false;

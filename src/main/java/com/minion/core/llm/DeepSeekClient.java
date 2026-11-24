@@ -593,7 +593,10 @@ public class DeepSeekClient implements LlmClient {
                         break;
                     }
                     if (choice.has("finish_reason") && !choice.get("finish_reason").isJsonNull()) {
-                        finish = deltaText(choice, "finish_reason");
+                        String rawFinish = deltaText(choice, "finish_reason").trim();
+                        if (!rawFinish.isEmpty()) {
+                            finish = normalizeFinishReason(rawFinish);
+                        }
                     }
                 }
                 if (chunk.has("usage") && chunk.get("usage").isJsonObject()
@@ -645,6 +648,17 @@ public class DeepSeekClient implements LlmClient {
         }
         handler.onUsage(usage);
         handler.onFinish(finish, usage, acc);
+    }
+
+    private static String normalizeFinishReason(String raw) {
+        String lower = raw.toLowerCase(java.util.Locale.ROOT);
+        if ("end_turn".equals(lower) || "eos".equals(lower) || "stop_sequence".equals(lower)) {
+            return "stop";
+        }
+        if ("max_tokens".equals(lower) || "model_context_window_exceeded".equals(lower)) {
+            return "length";
+        }
+        return raw;
     }
 
     private static String deltaText(JsonObject object, String name) throws LlmException {

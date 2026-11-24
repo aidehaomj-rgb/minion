@@ -38,8 +38,10 @@ final class CompletionContract {
         if (source.isEmpty()) return new CompletionContract(false, false);
         String lower = source.toLowerCase(Locale.ROOT);
         // Questions about how to do work are not permission to perform it.
-        boolean chainedWork=lower.matches("(?s).*(?:然后|再|并|同时|之后).*(?:开发|修改|修复|完善|生成|创建|实现|build|fix|implement).*" );
-        if (!chainedWork && (QUESTION.matcher(lower).matches() || lower.matches("(?s).*(?:需要|有哪些|是什么|是什么样的)(?:什么)?(?:步骤|方法|方式|条件|差距|风险).*")))
+        boolean chainedWork=lower.matches("(?s).*(?:然后|再|并|同时|之后).*(?:开发|修改|修复|完善|生成|创建|实现|撰写|编写|制作|导出|build|fix|implement).*" );
+        boolean explicitDeliverable = !QUESTION.matcher(lower).matches()
+                && lower.matches("(?s).*(?:生成|制作|撰写|编写|导出|写入|保存为|输出为)[^。！？!?]{0,24}(?:word|docx|ppt|pptx|excel|xlsx|pdf|markdown|报告|文档|表格|方案|幻灯片).*");
+        if (!chainedWork && !explicitDeliverable && (QUESTION.matcher(lower).matches() || lower.matches("(?s).*(?:需要|有哪些|是什么|是什么样的)(?:什么)?(?:步骤|方法|方式|条件|差距|风险).*")))
             return new CompletionContract(false, false);
         if (lower.startsWith("只解释") || lower.startsWith("只回答")) return new CompletionContract(false, false);
         String operative=withoutProhibitions(lower);
