@@ -14,6 +14,10 @@ final class CompletionContract {
 
     private CompletionContract(boolean action, boolean mutation) { this.action = action; this.mutation = mutation; }
 
+    CompletionContract withoutMutation() {
+        return mutation ? new CompletionContract(action, false) : this;
+    }
+
     static CompletionContract from(String goal, List<String> guidance) {
         CompletionContract current = single(goal);
         if (guidance != null) for (String item : guidance) {

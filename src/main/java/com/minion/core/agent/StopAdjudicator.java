@@ -77,7 +77,9 @@ final class StopAdjudicator {
             com.google.gson.JsonArray children=new com.google.gson.JsonArray();
             int childCount=0,reviewedCount=0;
             for(TaskState.Child child:session.taskState.childSnapshot()) {
-                childCount++;if("reviewed".equals(child.status)||"validated".equals(child.status)){reviewedCount++;continue;}
+                childCount++;
+                if("reviewed".equals(child.status)||"validated".equals(child.status)){reviewedCount++;continue;}
+                if("cancelled".equals(child.status))continue;
                 JsonObject c=new JsonObject();c.addProperty("id",child.id);c.addProperty("status",child.status);
                 c.addProperty("assignment",child.assignment==null?"":child.assignment.substring(0,Math.min(300,child.assignment.length())));children.add(c);
             }
@@ -183,10 +185,11 @@ final class StopAdjudicator {
         }
         for (TaskState.Child child : session.taskState.childSnapshot()) {
             if(child.coordinatedStep!=null&&"superseded".equals(child.status))continue;
-            if (!"reviewed".equals(child.status)&&!"validated".equals(child.status)) {
+            if (!"reviewed".equals(child.status)&&!"validated".equals(child.status)&&!"cancelled".equals(child.status)) {
                 reasons.add("merged_needs_validation".equals(child.status)
                         ?"子Agent合并后尚未联合验证；实际Build验证通过后调用AgentControl validate_merge(childId="+child.id+",receiptIds=实际回执ID,note=核对依据)"
-                        :"子Agent尚未核对或仍在运行/失败（" + child.id + "，" + child.status + "）");
+                        :"子Agent尚未核对或仍在运行/失败（" + child.id + "，" + child.status
+                                + "）：运行中请调 AgentControl child_wait，已返回或已由主Agent接管失败项请调 AgentControl review(childId,note)，放弃停滞子任务请调 AgentControl child_cancel(childId,note)");
                 break;
             }
         }

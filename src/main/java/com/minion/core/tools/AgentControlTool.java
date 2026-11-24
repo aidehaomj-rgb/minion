@@ -11,7 +11,7 @@ public final class AgentControlTool implements Tool {
     private final Workspace workspace;
     public AgentControlTool(AgentLoop loop,Workspace workspace) { this.loop=loop; this.workspace=workspace; }
     public String name() { return "AgentControl"; }
-    public String description() { return "任务控制：hooks_status/status/checkpoint/verify/review/refresh_checkpoint；verify_step(stepId,note)用实际核对说明解除结果不确定的历史工具步骤（核对文件/进程/输出后调用，禁止编造）；plan_steps(revision,steps数组：id/title/scope/acceptance/dependsOn/validationKind)；step_change(revision,stepId,stepAction=start/complete/block/cancel/supersede/reopen)，complete需启动后真实receiptIds/note；workflow/evidence分页；review_changes(paths)独立只读审查；validate_merge(childId,receiptIds,note,validationKind默认test)核对合并后真实Build报告。异步子任务：child_status(offset/limit)、child_wait(timeoutMillis≤30000)、child_review(stepId,attempt,receiptIds,note)需返回后实际Read证据、child_reject/child_cancel、child_retry另需sideEffectsChecked=true、child_capacity(capacity=0..2)、child_resume_queue需旧执行退出依据note。子控制动作不是业务完成证据，修订变化停止旧分工"; }
+    public String description() { return "任务控制：hooks_status/status/checkpoint/verify/review/refresh_checkpoint；verify_step(stepId,note)用实际核对说明解除结果不确定的历史工具步骤（核对文件/进程/输出后调用，禁止编造）；plan_steps(revision,steps数组：id/title/scope/acceptance/dependsOn/validationKind)；step_change(revision,stepId,stepAction=start/complete/block/cancel/supersede/reopen)，complete需启动后真实receiptIds/note；workflow/evidence分页；review_changes(paths)独立只读审查；validate_merge(childId,receiptIds,note,validationKind默认test)核对合并后真实Build报告。异步子任务：child_status(offset/limit)、child_wait(timeoutMillis≤30000)、child_review(stepId,attempt,receiptIds,note)需返回后实际Read证据、child_reject/child_cancel(支持childId或stepId+note取消停滞子任务)、child_retry另需sideEffectsChecked=true、child_capacity(capacity=0..2)、child_resume_queue需旧执行退出依据note。子控制动作不是业务完成证据，修订变化停止旧分工"; }
     public JsonObject schema() {
         JsonObject schema=SchemaGenerator.objectSchema(description(),new String[]{"action","nextStep","processedRange","files","childId","note","revision","steps","stepId","stepAction","receiptIds","replacement","offset","limit","paths","validationKind"},new String[]{"action"});
         JsonObject props=schema.getAsJsonObject("properties");
@@ -36,6 +36,7 @@ public final class AgentControlTool implements Tool {
                 return ToolResult.success("步骤 "+stepId+" 已核对并解除不确定状态；完成门禁将不再因它阻断");
             } catch(Exception invalid){return ToolResult.error("核对失败: "+invalid.getMessage());}
         }
+        if("cancel_child".equals(action)){args=args.deepCopy();args.addProperty("action","child_cancel");action="child_cancel";}
         if(action.startsWith("child_"))return loop.controlChildren(args);
         if("review_changes".equals(action))return loop.reviewChanges(args);
         if("validate_merge".equals(action)) {
@@ -127,8 +128,8 @@ public final class AgentControlTool implements Tool {
         }
         if("review".equals(action)) {
             if(text(args,"note").trim().isEmpty()) return ToolResult.error("review需note说明实际核对的证据");
-            if(!state.reviewChild(text(args,"childId"))) return ToolResult.error("只能核对当前任务已返回的子Agent");
-            state.recordEvidence("root","child-review",true,text(args,"note"),null); return ToolResult.success("子Agent已登记核对");
+            if(!state.reviewChild(text(args,"childId"))) return ToolResult.error("只能核对当前任务已返回或已失败的子Agent；若子Agent仍在运行且需放弃，请调用 AgentControl(action=\"child_cancel\",childId=...,note=...)");
+            state.recordEvidence("root","child-review",true,text(args,"note"),null); loop.persistSession(); return ToolResult.success("子Agent已登记核对");
         }
         return ToolResult.error("action支持status/checkpoint/verify/review/refresh_checkpoint/plan_steps/step_change/workflow/evidence/review_changes/validate_merge");
     }

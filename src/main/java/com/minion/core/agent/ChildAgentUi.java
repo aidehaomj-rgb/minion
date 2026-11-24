@@ -7,10 +7,18 @@ import com.minion.core.tools.ToolResult;
 public final class ChildAgentUi implements AgentUi {
     private final AgentUi parent;
     private final String id;
+    private boolean started;
     private boolean ended;
-    public ChildAgentUi(AgentUi parent, String id) { this.parent=parent;this.id=id; }
+    public ChildAgentUi(AgentUi parent, String id) { this(parent, id, false); }
+    public ChildAgentUi(AgentUi parent, String id, boolean alreadyStarted) {
+        this.parent=parent;this.id=id;this.started=alreadyStarted;
+    }
     private void emit(String kind,String text,Object data) { parent.onChildEvent(id,kind,text,data); }
-    @Override public void onSubAgentStart(String text) { emit("START",text,null); }
+    @Override public synchronized void onSubAgentStart(String text) {
+        if (started) return;
+        started = true;
+        emit("START",text,null);
+    }
     @Override public void onThinking(String text) { emit("THINKING",text,null); }
     @Override public void onSubAgentDelta(String text) { emit("CONTENT",text,null); }
     @Override public void onContent(String text) { emit("CONTENT",text,null); }

@@ -373,7 +373,7 @@ public class SubAgentLoop {
                             + lengthContinuationAttempts + " 次）");
                     continue;
                 }
-                if ("stop".equalsIgnoreCase(finish[0])
+                if (isNormalStopFinish(finish[0])
                         && (toolCalls[0] == null || toolCalls[0].isEmpty()) && !hasVisibleText(content)) {
                     if (lengthContinuationAttempts >= 12) {
                         ui.onError("子 agent 连续 12 次只生成思考或空响应，已停止自动恢复");
@@ -471,7 +471,11 @@ public class SubAgentLoop {
                 java.util.List<Message> imageContexts = new java.util.ArrayList<Message>();
                 for (ToolCall call : toolCalls[0]) {
                     ToolResult result = runOneTool(call);
-                    StopGate.Receipt receipt=new StopGate.Receipt("tool:"+call.id+"@"+stopReceipts.size(),call.name,call.arguments,result);
+                    JsonObject receiptArgs = new JsonObject();
+                    try { receiptArgs = JsonParser.parseString(call.arguments == null ? "{}" : call.arguments).getAsJsonObject(); }
+                    catch (RuntimeException ignored) { }
+                    StopGate.Receipt receipt=new StopGate.Receipt("tool:"+call.id+"@"+stopReceipts.size(),
+                            call.name,call.arguments,result,StopGate.mutationEvidence(call.name,receiptArgs));
                     stopReceipts.add(receipt);stopProgress.observe(receipt);
                     messages.add(Message.toolResult(call.id, call.name,
                             outputs.forContext(ToolResult.outputForApi(result.output, emptyOutputPlaceholder),call)));
@@ -602,7 +606,7 @@ public class SubAgentLoop {
     }
 
     private StopGate.Snapshot childStopSnapshot(String candidate,List<StopGate.Receipt> receipts) {
-        JsonObject facts=new JsonObject();facts.addProperty("child",true);facts.addProperty("todos",localTodos.render());
+        JsonObject facts=new JsonObject();facts.addProperty("child",true);facts.addProperty("readOnly",policy.readOnly());facts.addProperty("todos",localTodos.render());
         facts.addProperty("toolsUsed",!receipts.isEmpty());facts.addProperty("structured",!localTodos.items.isEmpty());
         com.google.gson.JsonArray priorReplies=new com.google.gson.JsonArray();
         for(int i=messages.size()-1;i>=0&&priorReplies.size()<4;i--) {
@@ -642,6 +646,13 @@ public class SubAgentLoop {
 
     private static boolean hasVisibleText(CharSequence text) {
         return TurnSemantics.visible(text);
+    }
+
+    private static boolean isNormalStopFinish(String finish) {
+        if (finish == null) return false;
+        String lower = finish.trim().toLowerCase(java.util.Locale.ROOT);
+        return "stop".equals(lower) || "end_turn".equals(lower)
+                || "eos".equals(lower) || "stop_sequence".equals(lower);
     }
 
     private static String buildNoActionRecoveryHint(int attempt, boolean hadThinking) {

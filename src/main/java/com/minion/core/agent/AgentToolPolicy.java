@@ -24,12 +24,13 @@ public final class AgentToolPolicy {
     public boolean visible(String name) {
         String n=name.toLowerCase(Locale.ROOT);
         if(BLOCKED.contains(n)) return false;
-        if(isolatedOutput!=null&&!Arrays.asList("read","viewimage","glob","grep","codeindex","write","edit","document","excel","artwork","knowledge","todowrite","artifactverification").contains(n))return false;
+        if(isolatedOutput!=null&&!Arrays.asList("read","viewimage","glob","grep","codeindex","files","structuredoutput","write","edit","document","excel","artwork","knowledge","todowrite","artifactverification").contains(n))return false;
         if(!allowed.isEmpty()&&!allowed.contains(n)) return false;
-        return !readOnly || Arrays.asList("read","viewimage","glob","grep","codeindex","knowledge","todowrite","document","excel","artwork","git","artifactverification").contains(n);
+        return !readOnly || Arrays.asList("read","viewimage","glob","grep","codeindex","files","structuredoutput","knowledge","todowrite","document","excel","artwork","git","artifactverification").contains(n);
     }
     public boolean permits(String name, JsonObject args) {
         if(!visible(name)) return false;
+        if("Files".equalsIgnoreCase(name)&&(readOnly||isolatedOutput!=null))return ToolExecutionGuard.readOnly("Files",args);
         if("ArtifactVerification".equalsIgnoreCase(name)&&(readOnly||isolatedOutput!=null))return ToolExecutionGuard.readOnly("ArtifactVerification",args);
         if("Git".equalsIgnoreCase(name)&&readOnly)return ToolExecutionGuard.readOnly("Git",args);
         // A child can cite/read the shared knowledge base, but cannot promote its working notes to shared facts.

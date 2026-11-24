@@ -413,7 +413,8 @@ public class ChatView extends VBox {
                 break;
             case SUB_AGENT_START:
                 appendCollapsible("【工具】", "log-tool",
-                        statusSummary(IconFactory.play(), "子任务: " + e.text), null, StreamKind.NONE);
+                        statusSummary(IconFactory.play(), subAgentStartSummary(e.text)),
+                        subAgentStartBody(e.text), StreamKind.NONE);
                 break;
             case SUB_AGENT_DELTA:
                 // 原始子任务增量没有身份字段，不能把交错输出误标成某个子 Agent。
@@ -462,7 +463,9 @@ public class ChatView extends VBox {
         child.buffer.onRoundBoundary();child.reply=null;
         switch(e.kind) {
             case SUB_AGENT_START:
-                appendCollapsible(tag,"log-tool",statusSummary(IconFactory.play(),"子任务: "+e.text),null);break;
+                appendCollapsible(tag,"log-tool",
+                        statusSummary(IconFactory.play(),subAgentStartSummary(e.text)),
+                        subAgentStartBody(e.text));break;
             case SUB_AGENT_DONE:
                 appendCollapsible(tag,"log-tool",statusSummary(IconFactory.check(),"子任务已返回"),e.text);
                 childStreams.remove(e.subAgentId);break;
@@ -745,6 +748,23 @@ public class ChatView extends VBox {
         } catch (Exception e) {
             return json;
         }
+    }
+
+    /** 子任务启动行摘要：单行精简展示，多行或长分工放入可折叠正文（package-private 供单测） */
+    static String subAgentStartSummary(String text) {
+        if (text == null || text.trim().isEmpty()) return "子任务已启动";
+        String cleaned = text.trim();
+        if (cleaned.startsWith("任务: ")) cleaned = cleaned.substring(4).trim();
+        else if (cleaned.startsWith("任务:")) cleaned = cleaned.substring(3).trim();
+        String singleLine = cleaned.replaceAll("\\s+", " ").trim();
+        String brief = singleLine.length() > 72 ? singleLine.substring(0, 72) + "…" : singleLine;
+        return cleaned.startsWith("后台子任务") ? brief : "子任务: " + brief;
+    }
+
+    static String subAgentStartBody(String text) {
+        if (text == null) return null;
+        String trimmed = text.trim();
+        return (trimmed.indexOf('\n') >= 0 || trimmed.length() > 76) ? trimmed : null;
     }
 
     /** 工具调用摘要行：Edit/Write 附带路径，其余仅名称（package-private 供单测）；

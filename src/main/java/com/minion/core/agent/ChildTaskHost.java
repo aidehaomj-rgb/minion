@@ -85,8 +85,12 @@ public final class ChildTaskHost implements AutoCloseable {
         if(!matches())return null;if(recovered)return "子任务协调记录重启后等待人工核对，不自动重放";
         if(coordinator.controlError()!=null)return "子任务协调器故障: "+coordinator.controlError();
         for(ChildTaskCoordinator.Record r:coordinator.snapshot().records){
-            if(!Arrays.asList("reviewed","validated").contains(r.status))return "子任务 "+r.assignment.stepId+" ["+r.status+"]；使用AgentControl child_status/child_review/child_wait核对";
-            if(r.assignment.requiresMerge&&!"validated".equals(r.status))return "子任务 "+r.assignment.stepId+" 尚未合并和联合验证";
+            boolean explicitlyCancelled="cancelled".equals(r.status)
+                    && r.error!=null && !r.error.startsWith("依赖未通过:") && !"协调器关闭".equals(r.error);
+            if(!Arrays.asList("reviewed","validated").contains(r.status)&&!explicitlyCancelled)
+                return "子任务 "+r.assignment.stepId+" ["+r.status+"]；使用AgentControl child_status/child_review/child_cancel/child_wait核对";
+            if(!explicitlyCancelled&&r.assignment.requiresMerge&&!"validated".equals(r.status))
+                return "子任务 "+r.assignment.stepId+" 尚未合并和联合验证";
         }return null;
     }
     /** Parent sleeps without billing model calls when all available work is physically executing.

@@ -120,4 +120,15 @@ public class ChatViewToolBodyTest {
         assertTrue(ChatView.defaultExpanded(null));
         assertTrue(ChatView.defaultExpanded(""));
     }
+
+    @Test
+    public void subAgentStartSummary_compactsLongMultiLinePromptIntoExpandableCard() {
+        String prompt = "后台子任务（explore，执行中）: 提取第1块数据\n补充要求/返回格式: 逐行输出JSON并核对全部92条记录字段完整性与编码规范";
+        String summary = ChatView.subAgentStartSummary(prompt);
+        assertFalse("摘要行不得含换行", summary.contains("\n"));
+        assertTrue(summary.startsWith("后台子任务（explore，执行中）"));
+        assertEquals(prompt, ChatView.subAgentStartBody(prompt));
+        assertNull("短单行子任务无需重复展开正文", ChatView.subAgentStartBody("任务: 调研目录结构"));
+        assertEquals("子任务: 调研目录结构", ChatView.subAgentStartSummary("任务: 调研目录结构"));
+    }
 }

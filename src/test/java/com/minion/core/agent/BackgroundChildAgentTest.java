@@ -145,6 +145,10 @@ public class BackgroundChildAgentTest {
         @Override public String completeChat(List<Message> messages, String systemPrompt) throws LlmException {
             return script.completeChat(messages, systemPrompt);
         }
+
+        @Override public StopReviewResponse reviewStop(String input, String systemPrompt) throws LlmException {
+            return script.reviewStop(input, systemPrompt);
+        }
     }
 
     private static final class Rig {
@@ -154,10 +158,14 @@ public class BackgroundChildAgentTest {
         BiConsumer<String, FakeLlmClient> childScript = (id, script) -> { };
         final AgentLoop loop;
 
+        final List<String> childUiEvents = Collections.synchronizedList(new ArrayList<String>());
+
         Rig(TemporaryFolder tmp) {
             ToolRegistry registry = new ToolRegistry();
             registry.register(new com.minion.core.tools.example.ExampleTool());
             Workspace ws = new Workspace(tmp.getRoot().getPath());
+            registry.register(new com.minion.core.tools.ReadTool(ws));
+            registry.register(new com.minion.core.tools.StructuredOutputTool());
             registry.register(new com.minion.core.tools.WriteTool(ws));
             loop = new AgentLoop(main, registry, new SystemPromptBuilder(null),
                     new ConfirmGate(Config.load(tmp.getRoot().toPath()), new FakeConfirmUi(ConfirmUi.Decision.APPROVE)),
@@ -165,6 +173,9 @@ public class BackgroundChildAgentTest {
                         public void onContent(String s) { }
                         public void onWarning(String s) { }
                         public void onError(String s) { }
+                        public void onChildEvent(String id, String kind, String text, Object data) {
+                            childUiEvents.add(id + ":" + kind + ":" + (text == null ? "" : text));
+                        }
                     }, null, ws, Session.create(tmp.getRoot().getPath(), "test-model"));
             main.loop = loop;
             main.peer.stopKind = "task";
@@ -452,5 +463,96 @@ public class BackgroundChildAgentTest {
         assertEquals("read 应归一为 explore", "explore", child.mode);
         assertTrue(child.assignment.contains("调研并返回要点"));
         assertNotNull(r.firstToolResultContaining("子Agent ID:"));
+    }
+
+    /** 实时可视性：后台子任务派发即推送 START（且不与 SubAgentLoop 重复），过程与 DONE 完整送达 AgentUi */
+    @Test public void backgroundChildEmitsLiveUiEventsWithoutDuplicateStart() throws Exception {
+        Rig r = newRig();
+        r.childReplies((id, script) -> script.addTurn("实时提取完毕：23条命中。" + AgentLoop.TASK_COMPLETE_MARKER));
+        r.dispatch("提取第1块分类结果", ",\"mode\":\"explore\"");
+        r.main.text("等待子任务完成");
+        r.reviewAllPending();
+        r.main.text("全部交付完成。" + AgentLoop.TASK_COMPLETE_MARKER);
+        r.loop.runUserTurn("提取全表");
+
+        TaskState.Child child = r.children().get(0);
+        int startCount = 0, contentCount = 0, doneCount = 0;
+        synchronized (r.childUiEvents) {
+            for (String ev : r.childUiEvents) {
+                if (ev.startsWith(child.id + ":START:")) startCount++;
+                if (ev.startsWith(child.id + ":CONTENT:")) contentCount++;
+                if (ev.startsWith(child.id + ":DONE:")) doneCount++;
+            }
+        }
+        assertEquals("每个后台子Agent应恰好发出 1 次 START 事件: " + r.childUiEvents, 1, startCount);
+        assertTrue("后台子Agent流式输出应实时送达 CONTENT 事件: " + r.childUiEvents, contentCount >= 1);
+        assertEquals("后台子Agent结束应发出 1 次 DONE 事件: " + r.childUiEvents, 1, doneCount);
+        assertTrue(r.loop.lastTurnSucceeded());
+    }
+
+    /** 只读子Agent分工文案包含“生成/写入/整理结果”等字样时，不得被完成合同误判为必须写文件而卡死失败 */
+    @Test public void exploreChildWithDeliverableWordingCompletesWithoutFileMutation() throws Exception {
+        Rig r = newRig();
+        java.nio.file.Files.write(tmp.getRoot().toPath().resolve("chunk_0.json"),
+                "[{\"id\":0,\"name\":\"货物A\"}]".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        r.childReplies((id, script) -> {
+            script.stopKind = "task";
+            script.stopStatuses.add("completed");
+            ToolCall read = new ToolCall();
+            read.id = "read-1";
+            read.name = "Read";
+            read.arguments = "{\"path\":\"chunk_0.json\"}";
+            script.addTurnWithTools(Collections.singletonList(read), null);
+            // 故意不带 [[MINION_TASK_COMPLETE]]，验证 StopGate 核验只读子Agent不会因“生成结果文件”字样强求写入收据
+            script.addTurn("已提取23条分类JSON数据，供主Agent合并生成结果文件。");
+        });
+        r.dispatch("读取 chunk_0.json 并生成 23 条分类结果用于写入最终汇总表", ",\"mode\":\"explore\"");
+        r.main.text("等待子任务");
+        r.reviewAllPending();
+        r.main.fixed(Collections.singletonList(r.write("summary.json")));
+        r.main.text("汇总核验完成。");
+        r.loop.runUserTurn("分类汇总生成结果文件");
+
+        TaskState.Child child = r.children().get(0);
+        assertEquals("只读子任务不应因分工含‘生成/写入’而被门禁打回重跑: " + r.diagnose(), 2, r.child.requests.get());
+        assertEquals("reviewed", child.status);
+        assertTrue("主任务无需特殊完成暗号也应正常交付" + r.diagnose(), r.loop.lastTurnSucceeded());
+    }
+
+    /** 实机截图回归：后台子Agent停滞时，主Agent调用 child_cancel 放弃并自行产出结果后，不再死锁或误停 */
+    @Test public void stalledBackgroundChildCanBeCancelledAndTakenOverByMainAgent() throws Exception {
+        Rig r = newRig();
+        r.child.blockUntil = new CountDownLatch(1);
+        r.childReplies((id, script) -> script.addTurn("停滞不返回"));
+        r.dispatch("提取分块数据", ",\"mode\":\"explore\"");
+        r.main.dynamic(l -> {
+            TaskState.Child stalled = l.session().taskState.children.get(0);
+            List<ToolCall> calls = new ArrayList<ToolCall>();
+            calls.add(r.call("AgentControl",
+                    "{\"action\":\"child_cancel\",\"childId\":\"" + stalled.id
+                            + "\",\"note\":\"子agent停滞，放弃子任务改由主Agent直接逐票提取\"}"));
+            calls.add(r.write("result_sheet1.json"));
+            return calls;
+        });
+        r.main.text("子agent停滞已解决：改由主Agent直接逐票提取，result_sheet1.json 已全部产出并核验完成。");
+        r.loop.runUserTurn("生成分类结果文件");
+
+        r.awaitChildrenSettled(5000);
+        TaskState.Child child = r.children().get(0);
+        assertEquals("被取消的子任务状态应记为 cancelled" + r.diagnose(), "cancelled", child.status);
+        assertTrue("主Agent自行写入的结果文件应存在", new File(tmp.getRoot(), "result_sheet1.json").exists());
+        assertTrue("取消停滞子Agent并由主Agent完成交付后，本轮应直接通过完成门禁" + r.diagnose(),
+                r.loop.lastTurnSucceeded());
+    }
+
+    /** 只读探索模式白名单：允许 StructuredOutput 与只读 Files，严禁可写 Files 与 Bash */
+    @Test public void explorePolicyAllowsStructuredOutputAndReadOnlyFilesOnly() {
+        AgentToolPolicy policy = new AgentToolPolicy(true, "");
+        JsonObject structuredArgs = JsonParser.parseString("{\"data\":{\"rows\":23}}").getAsJsonObject();
+        assertTrue(policy.permits("StructuredOutput", structuredArgs));
+        assertTrue(policy.permits("Files", JsonParser.parseString("{\"action\":\"read\",\"path\":\"a.txt\"}").getAsJsonObject()));
+        assertTrue(policy.permits("Files", JsonParser.parseString("{\"action\":\"read_chunk\",\"path\":\"a.txt\"}").getAsJsonObject()));
+        assertFalse(policy.permits("Files", JsonParser.parseString("{\"action\":\"write\",\"path\":\"a.txt\"}").getAsJsonObject()));
+        assertFalse(policy.permits("Bash", JsonParser.parseString("{\"command\":\"echo hi\"}").getAsJsonObject()));
     }
 }
