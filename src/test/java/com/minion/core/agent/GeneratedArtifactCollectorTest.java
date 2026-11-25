@@ -124,4 +124,75 @@ public class GeneratedArtifactCollectorTest {
             assertEquals(GeneratedArtifact.DELIVERABLE, found.get(0).kind);
         }
     }
+
+    // ---- F1 措辞容错 + 路径兜底（additive，旧用例上方逐字保留） ----
+
+    /** 行中中文回执（SAVED_RECEIPT 行首锚定漏掉）：用 .txt 隔离 EXTENDED（兜底不含 .txt） */
+    @Test public void extendedMidLineChineseReceipt() throws Exception {
+        Path root = temp.newFolder().toPath(); Path p = file(root, "笔记.txt");
+        String abs = p.toAbsolutePath().normalize().toString();
+        GeneratedArtifactCollector c = collector(root);
+        for (String out : new String[]{"脚本完成，已生成 " + abs, "文件：" + abs, "产物: " + abs}) {
+            List<GeneratedArtifact> a = collect(c, root, "Bash", "{}", ToolResult.success(out));
+            assertEquals("行中措辞应识别: " + out, 1, a.size());
+            assertEquals(p.toRealPath().toString(), a.get(0).path);
+        }
+    }
+
+    /** 兜底扫描：无回执措辞的裸相对路径 / 引号含空格路径 / 后缀形式，存在即登记 */
+    @Test public void fallbackScanRegistersExistingDeliverables() throws Exception {
+        Path root = temp.newFolder().toPath();
+        Path bare = file(root, "report.docx");
+        Path spaced = file(root, "my report v2.docx");
+        String spacedAbs = spaced.toAbsolutePath().normalize().toString();
+        GeneratedArtifactCollector c = collector(root);
+        assertEquals("裸相对路径", 1, collect(c, root, "Python", "{}", ToolResult.success("report.docx")).size());
+        assertEquals("引号含空格绝对路径", 1,
+                collect(c, root, "Bash", "{}", ToolResult.success("\"" + spacedAbs + "\"")).size());
+        List<GeneratedArtifact> suffix = collect(c, root, "Shell", "{}",
+                ToolResult.success(bare.toAbsolutePath().normalize() + "（已生成）"));
+        assertEquals("后缀形式", 1, suffix.size());
+        assertEquals(bare.toRealPath().toString(), suffix.get(0).path);
+    }
+
+    /** 兜底只认盘上真实存在文件：不存在 / 白名单外一律不登记（误报=0） */
+    @Test public void fallbackRejectsMissingAndOutside() throws Exception {
+        Path root = temp.newFolder("root").toPath(), outside = temp.newFolder("outside").toPath();
+        Path out = file(outside, "secret.docx");
+        GeneratedArtifactCollector c = collector(root);
+        assertTrue("不存在文件不登记", collect(c, root, "Bash", "{}", ToolResult.success("ghost.docx")).isEmpty());
+        assertTrue("白名单外不登记",
+                collect(c, root, "Bash", "{}", ToolResult.success(out.toAbsolutePath().normalize().toString())).isEmpty());
+    }
+
+    /** 兜底每次工具结果 ≤10 条（防 stdout 刷路径轰炸） */
+    @Test public void fallbackCappedAtTen() throws Exception {
+        Path root = temp.newFolder().toPath();
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 15; i++) { file(root, "f" + i + ".docx"); sb.append("f").append(i).append(".docx "); }
+        GeneratedArtifactCollector c = collector(root);
+        assertEquals(10, collect(c, root, "Python", "{}", ToolResult.success(sb.toString())).size());
+    }
+
+    /** ok==false 零登记（特征化：兜底/扩展均不改失败语义） */
+    @Test public void failedResultNeverCollects() throws Exception {
+        Path root = temp.newFolder().toPath(); file(root, "report.docx");
+        GeneratedArtifactCollector c = collector(root);
+        assertTrue(collect(c, root, "Bash", "{}", ToolResult.error("report.docx 已生成")).isEmpty());
+    }
+
+    /** F6 诊断：accept/drop 落 artifact-collect 标签（未初始化时安全 no-op，不影响上方用例） */
+    @Test public void diagnosticsCaptureAcceptAndDrop() throws Exception {
+        Path logDir = temp.newFolder("log").toPath();
+        com.minion.core.diagnostics.DiagnosticLog.initialize(logDir);
+        Path root = temp.newFolder("root").toPath(), outside = temp.newFolder("outside").toPath();
+        file(root, "ok.docx"); Path out = file(outside, "no.docx");
+        GeneratedArtifactCollector c = collector(root);
+        collect(c, root, "Bash", "{}", ToolResult.success("ok.docx"));
+        collect(c, root, "Bash", "{}", ToolResult.success(out.toAbsolutePath().normalize().toString()));
+        List<String> tail = com.minion.core.diagnostics.DiagnosticLog.tail(100);
+        assertTrue("应有 accept 记录", tail.stream().anyMatch(l -> l.contains("artifact-collect") && l.contains("accept=")));
+        assertTrue("应有 not-allowed drop 记录", tail.stream().anyMatch(l -> l.contains("artifact-collect") && l.contains("drop=not-allowed")));
+        com.minion.core.diagnostics.DiagnosticLog.clear();
+    }
 }
