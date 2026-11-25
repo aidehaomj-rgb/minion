@@ -125,6 +125,8 @@ public class Config {
     public boolean skillsExtendedEnabled() { return Boolean.parseBoolean(get("skills.enabled", "true")); }
     /** 所有工作空间共用的只读 Markdown 知识库目录；留空则只使用项目知识库。 */
     public String sharedKnowledgeDir() { return get("knowledge.shared.dir", ""); }
+    /** 三批 B1：知识库 search 走 BM25 索引（默认 true；任何异常自动回退旧全量扫描）。 */
+    public boolean knowledgeSearchIndexEnabled() { return Boolean.parseBoolean(get("knowledge.search.index.enabled", "true")); }
     /** Python/Anaconda 解释器；留空时自动探测 MINION_PYTHON、Conda 和常见安装目录。 */
     public String pythonPath()   { return get("python.path", ""); }
     public String ocrPath() { return get("ocr.path", "tesseract"); }

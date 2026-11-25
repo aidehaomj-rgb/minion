@@ -36,7 +36,7 @@ public class KnowledgeTool implements Tool {
     public KnowledgeTool(Workspace workspace) { this(workspace, null); }
     public KnowledgeTool(Workspace workspace, Config config) { this.workspace=workspace; this.config=config; }
     @Override public String name(){return "Knowledge";}
-    @Override public String description(){return "查询知识库用search。import/sync可批量导入工作区文件/目录（含OFD、PDF及可读GD；原生GD需本地转换配置或提供导出副本）。connect连接外部Markdown供所有项目只读共用，disconnect取消；search/list同时查询项目和共享目录；read使用shared/相对路径读取共享条目；增删只修改项目知识库";}
+    @Override public String description(){return "查询知识库用search（默认BM25索引检索，异常自动回退全量扫描）。import/sync可批量导入工作区文件/目录（含OFD、PDF及可读GD；原生GD需本地转换配置或提供导出副本）。connect连接外部Markdown供所有项目只读共用，disconnect取消；search/list同时查询项目和共享目录；read使用shared/相对路径读取共享条目；增删只修改项目知识库";}
     @Override public JsonObject schema(){return SchemaGenerator.objectSchema("本地知识库工具",
             new String[]{"action","title","content","source","query","name","limit","path","recursive"},new String[]{"action"});}
     @Override public boolean isHighRisk(JsonObject args){String action=text(args,"action");return "delete".equalsIgnoreCase(action)||"connect".equalsIgnoreCase(action);}
@@ -112,6 +112,43 @@ public class KnowledgeTool implements Tool {
     }
     private ToolResult search(Path root,String query,int limit)throws Exception{
         if(query==null||query.trim().isEmpty())return ToolResult.error("search 需要 query");
+        limit=Math.max(1,Math.min(limit,30));
+        if(config==null||config.knowledgeSearchIndexEnabled()){
+            try{return searchIndexed(root,query,limit);}
+            catch(Exception e){com.minion.core.diagnostics.DiagnosticLog.warn("knowledge","BM25 索引检索失败，回退全量扫描: "+e.getMessage());}
+        }
+        return searchFullScan(root,query,limit);
+    }
+    /** B1 索引化检索：BM25 基础分 + 整串命中 +20（保留旧语义），输出结构与旧路径一致（score 两位小数）。
+     *  索引文件只写工作区 .session/，共享目录只读；任何异常由 search 捕获回退旧扫描。 */
+    private ToolResult searchIndexed(Path root,String query,int limit)throws Exception{
+        Path indexFile=Paths.get(workspace.workDir()).toAbsolutePath().normalize().resolve(".session").resolve("kb-index.json");
+        if(cachedIndex==null||!indexFile.equals(cachedIndexFile)){cachedIndex=KnowledgeIndex.load(indexFile);cachedIndexFile=indexFile;}
+        List<Path> all=files(root); all.addAll(sharedFiles());
+        cachedIndex.sync(all);
+        Set<String> queryTerms=terms(query);
+        List<KnowledgeIndex.Hit> ranked=cachedIndex.rank(queryTerms);
+        Path sharedRoot=sharedRoot(); String lowerQuery=query.toLowerCase(Locale.ROOT);
+        List<IndexedHit> hits=new ArrayList<IndexedHit>();
+        for(KnowledgeIndex.Hit h:ranked){
+            String content=TextFiles.decode(Files.readAllBytes(h.path)).text, lower=content.toLowerCase(Locale.ROOT);
+            double score=h.score; int first=-1;
+            for(String term:queryTerms){int at=lower.indexOf(term);if(at>=0&&(first<0||at<first))first=at;}
+            if(lower.contains(lowerQuery)){score+=20;first=lower.indexOf(lowerQuery);}
+            hits.add(new IndexedHit(h.path,score,snippet(content,first),sourceOf(content)));
+        }
+        Collections.sort(hits,new Comparator<IndexedHit>(){@Override public int compare(IndexedHit a,IndexedHit b){return Double.compare(b.score,a.score);}});
+        if(hits.isEmpty())return ToolResult.success("未找到相关知识"+sharedNotice());
+        StringBuilder out=new StringBuilder();
+        for(int i=0;i<Math.min(limit,hits.size());i++){IndexedHit h=hits.get(i);if(out.length()>0)out.append("\n\n");
+            String name=sharedRoot!=null&&h.path.startsWith(sharedRoot)?"shared/"+sharedRoot.relativize(h.path).toString().replace('\\','/'):h.path.getFileName().toString();
+            out.append("[").append(name).append("] score=").append(String.format(Locale.ROOT,"%.2f",h.score));if(!h.source.isEmpty())out.append(" | 来源: ").append(h.source);out.append('\n').append(h.snippet);}
+        out.append(sharedNotice());
+        return ToolResult.success(out.toString());
+    }
+    /** 旧全量扫描路径（逐字保留，索引关闭/异常时的回退出口） */
+    private ToolResult searchFullScan(Path root,String query,int limit)throws Exception{
+        if(query==null||query.trim().isEmpty())return ToolResult.error("search 需要 query");
         limit=Math.max(1,Math.min(limit,30)); Set<String> terms=terms(query); List<Hit> hits=new ArrayList<Hit>();
         List<Path> all=files(root); all.addAll(sharedFiles()); Path sharedRoot=sharedRoot();
         for(Path p:all){
@@ -181,7 +218,7 @@ public class KnowledgeTool implements Tool {
     private static List<Path> files(Path root)throws Exception{List<Path> out=new ArrayList<Path>();if(!Files.isDirectory(root))return out;try(DirectoryStream<Path>d=Files.newDirectoryStream(root,"*.md")){for(Path p:d)if(Files.isRegularFile(p))out.add(p);}Collections.sort(out);return out;}
     private static Path safeResolve(Path root,String name){if(name==null||name.trim().isEmpty())return null;Path p=root.resolve(name).normalize();return p.startsWith(root)&&p.getParent().equals(root)?p:null;}
     private static String safeName(String s){String n=s.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]","_").trim();if(n.length()>60)n=n.substring(0,60);return n.isEmpty()?"knowledge":n;}
-    private static Set<String> terms(String q){String s=q.toLowerCase(Locale.ROOT).trim();Set<String> out=new LinkedHashSet<String>();for(String x:s.split("[^\\p{L}\\p{N}_]+"))if(!x.isEmpty())out.add(x);for(int i=0;i+1<s.length();i++){char a=s.charAt(i),b=s.charAt(i+1);if(isCjk(a)&&isCjk(b))out.add(s.substring(i,i+2));}return out;}
+    static Set<String> terms(String q){String s=q.toLowerCase(Locale.ROOT).trim();Set<String> out=new LinkedHashSet<String>();for(String x:s.split("[^\\p{L}\\p{N}_]+"))if(!x.isEmpty())out.add(x);for(int i=0;i+1<s.length();i++){char a=s.charAt(i),b=s.charAt(i+1);if(isCjk(a)&&isCjk(b))out.add(s.substring(i,i+2));}return out;}
     private static boolean isCjk(char c){return c>=0x3400&&c<=0x9fff;}
     private static String snippet(String s,int at){if(at<0)at=0;int from=Math.max(0,at-120),to=Math.min(s.length(),at+380);return(from>0?"…":"")+s.substring(from,to).replace('\r',' ').replace('\n',' ')+(to<s.length()?"…":"");}
     private static String sourceOf(String content){for(String line:content.split("\\r?\\n")){if(line.startsWith("来源: "))return line.substring(4).trim();}return "";}
@@ -189,4 +226,6 @@ public class KnowledgeTool implements Tool {
     private static String text(JsonObject o,String k){return o.has(k)&&!o.get(k).isJsonNull()?o.get(k).getAsString():"";}
     private static int integer(JsonObject o,String k,int d){return ToolArguments.integer(o,k,d);}
     private static final class Hit{final Path path;final int score;final String snippet;final String source;Hit(Path p,int s,String n,String source){path=p;score=s;snippet=n;this.source=source;}}
+    private static final class IndexedHit{final Path path;final double score;final String snippet;final String source;IndexedHit(Path p,double s,String n,String source){path=p;score=s;snippet=n;this.source=source;}}
+    private KnowledgeIndex cachedIndex; private Path cachedIndexFile;
 }
