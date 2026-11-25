@@ -456,6 +456,7 @@ public final class TaskState {
             r.assignment=clip(c.assignment,1000);r.result=clip(c.result,4096);r.status=c.status;r.mode=c.mode;
             r.allowedTools=c.allowedTools;r.model=c.model;r.isolatedOutput=c.isolatedOutput;r.outputDir=c.outputDir;
             r.transcript=c.transcript;r.coordinatedStep=c.coordinatedStep;r.coordinatedAttempt=c.coordinatedAttempt;
+            r.stopDecision=c.stopDecision;
             r.contextTokens=c.contextTokens;r.maxContextTokens=c.maxContextTokens;r.inputTokens=c.inputTokens;
             r.outputTokens=c.outputTokens;r.reasoningTokens=c.reasoningTokens;r.usageEstimated=c.usageEstimated;
             out.add(r);

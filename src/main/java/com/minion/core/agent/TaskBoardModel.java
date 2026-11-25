@@ -83,6 +83,48 @@ public final class TaskBoardModel {
         return rows;
     }
 
+    /** 当前化快照（I1，任务条专用）：todos 全量 + 可见子任务（running 排前）+ 未结束后台。
+     *  历史修订已结束子agent与已结束后台不入条；全量账本仍走 snapshot()（面板//tasks 共用）。 */
+    public static List<BoardRow> currentSnapshot(Session session, RuntimeJobRegistry jobs) {
+        List<BoardRow> rows = new ArrayList<BoardRow>();
+        if (session == null) return rows;
+        synchronized (session.todos) {
+            int index = 1;
+            for (TodoList.TodoItem item : session.todos.items)
+                rows.add(new BoardRow(KIND_TODO, "todo-" + (index++),
+                        item.text, "", item.done ? "完成" : "待办", "", "", null));
+        }
+        TaskState state = session.taskState;
+        if (state != null) {
+            List<TaskState.Child> visible = state.childRows(64);
+            List<TaskState.Child> ordered = new ArrayList<TaskState.Child>();
+            for (TaskState.Child c : visible) if ("running".equals(c.status)) ordered.add(c);
+            for (TaskState.Child c : visible) if (!"running".equals(c.status)) ordered.add(c);
+            for (TaskState.Child child : ordered) {
+                String acceptance = child.result == null || child.result.isEmpty()
+                        ? (child.stopDecision == null ? "" : child.stopDecision.reason)
+                        : child.result;
+                rows.add(new BoardRow(KIND_TASK, child.id,
+                        child.assignment == null ? "" : child.assignment,
+                        child.mode == null ? "" : child.mode,
+                        child.status == null ? "" : child.status,
+                        clip(acceptance, 120), "", null));
+            }
+        }
+        if (jobs != null) {
+            for (RuntimeJobRegistry.JobRecord job : jobs.list()) {
+                if (job.status != null && job.status.settled()) continue;
+                String tail = outputTail(job.resultPath);
+                rows.add(new BoardRow(KIND_BACKGROUND, job.jobId,
+                        job.description == null ? job.kind : job.description,
+                        job.kind == null ? "" : job.kind,
+                        String.valueOf(job.status), "",
+                        tail, job.exitCode));
+            }
+        }
+        return rows;
+    }
+
     /** /tasks 文本渲染（GUI 面板与命令共用口径） */
     public static String render(List<BoardRow> rows) {
         StringBuilder sb = new StringBuilder("任务面板（待办/子任务/后台）");
