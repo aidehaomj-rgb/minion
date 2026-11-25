@@ -57,6 +57,20 @@ public final class Win32Gui {
 
     public static boolean available() { return U != null; }
 
+    /** C5 审计：前台窗口标题；非 Windows/无前台/异常返回空串（绝不抛出，审计不得致败） */
+    public static String foregroundTitle() {
+        if (U == null) return "";
+        try {
+            Pointer fg = U.GetForegroundWindow();
+            if (fg == null) return "";
+            char[] buf = new char[512];
+            int n = U.GetWindowTextW(fg, buf, buf.length);
+            return n > 0 ? new String(buf, 0, n) : "";
+        } catch (Throwable unavailable) {
+            return "";
+        }
+    }
+
     public static final class WindowInfo {
         public final Pointer hwnd;
         public final String title;

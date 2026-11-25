@@ -42,11 +42,13 @@ public final class ComputerUsePlugin implements ToolPlugin {
     @Override public void onConfigChanged() { /* 配置仅影响执行参数，无需重建实例 */ }
 
     @Override public List<Tool> createTools(com.minion.core.tools.plugin.ToolContext ctx) {
+        // C5：全部 computeruse 工具经审计包装（分类元数据原样委托，门禁行为不变）
         return Arrays.<Tool>asList(
-                new ScreenTool(config),
-                new MouseTool(config),
-                new KeyboardTool(new com.minion.core.tools.computeruse.AwtClipboard(), config.clipboardRestoreDelayMsSafe()),
-                new com.minion.core.tools.computeruse.ClipboardTool(),
-                new WindowTool());
+                new com.minion.core.tools.computeruse.ComputerUseAuditor(new ScreenTool(config), config),
+                new com.minion.core.tools.computeruse.ComputerUseAuditor(new MouseTool(config), config),
+                new com.minion.core.tools.computeruse.ComputerUseAuditor(
+                        new KeyboardTool(new com.minion.core.tools.computeruse.AwtClipboard(), config.clipboardRestoreDelayMsSafe()), config),
+                new com.minion.core.tools.computeruse.ComputerUseAuditor(new com.minion.core.tools.computeruse.ClipboardTool(), config),
+                new com.minion.core.tools.computeruse.ComputerUseAuditor(new WindowTool(), config));
     }
 }

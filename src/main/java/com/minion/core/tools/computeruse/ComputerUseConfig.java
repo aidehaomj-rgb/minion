@@ -10,9 +10,19 @@ public class ComputerUseConfig {
     public int clickDelayMs = 150;
     /** 三批 C2：粘贴后恢复剪贴板前的缓冲毫秒（Robot Ctrl+V 异步投递，立即写回会让目标读到旧值） */
     public int clipboardRestoreDelayMs = 120;
+    /** 三批 C5：computeruse 动作上限（全部工具共享计数）；默认 0=不限（旧行为不变） */
+    public int maxActionsPerSession = 0;
+    /** 共享计数器；transient 不落盘，Gson 反序列化后为 null → actionCounter() 惰性重建 */
+    public transient java.util.concurrent.atomic.AtomicInteger actionCount;
 
     public int maxScreenshotEdgeSafe() { return maxScreenshotEdge >= 400 && maxScreenshotEdge <= 4000 ? maxScreenshotEdge : 1280; }
     public int clickDelayMsSafe() { return clickDelayMs >= 0 && clickDelayMs <= 2000 ? clickDelayMs : 150; }
     /** 合法区间 80–150ms，越界回退默认 120 */
     public int clipboardRestoreDelayMsSafe() { return clipboardRestoreDelayMs >= 80 && clipboardRestoreDelayMs <= 150 ? clipboardRestoreDelayMs : 120; }
+    /** 负数按 0（不限）处理 */
+    public int maxActionsPerSessionSafe() { return Math.max(0, maxActionsPerSession); }
+    public synchronized java.util.concurrent.atomic.AtomicInteger actionCounter() {
+        if (actionCount == null) actionCount = new java.util.concurrent.atomic.AtomicInteger();
+        return actionCount;
+    }
 }
