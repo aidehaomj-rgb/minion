@@ -806,6 +806,9 @@ public class SessionManager {
         registry.register(new TextProcessTool(workspace, checkpoints));
         registry.register(new KnowledgeTool(workspace, config));
         registry.register(new MemoryTool(workspace, checkpoints, ctx.store, session.id, session, jarDir));
+        // 三批 B3：会话历史主动召回（只读，session.recall.enabled 默认 true，仅当前项目）
+        if (config.sessionRecallEnabled())
+            registry.register(new com.minion.core.tools.context.SessionRecallTool(ctx.store, workspace.workDir()));
         ModelConfig contextModel = modelForSession(session);
         registry.register(new ContextTool(session, safeContextLimit(contextModel, session), config));
         registry.register(new PermissionTool(config));

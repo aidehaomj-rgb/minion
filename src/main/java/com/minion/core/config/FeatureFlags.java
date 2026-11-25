@@ -87,6 +87,7 @@ public final class FeatureFlags {
             {"permissions.managedOnly", "false", "4.1", "新会话", false},
             {"notify.channel", "tray", "10.8", "立即", false},
             {"knowledge.search.index.enabled", "true", "三批B1", "立即", false},
+            {"session.recall.enabled", "true", "三批B3", "新会话", false},
         };
         for (Object[] r : rows)
             m.put((String) r[0], new Flag((String) r[0], (String) r[1], (String) r[2], (String) r[3], (Boolean) r[4]));

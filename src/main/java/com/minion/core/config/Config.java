@@ -127,6 +127,8 @@ public class Config {
     public String sharedKnowledgeDir() { return get("knowledge.shared.dir", ""); }
     /** 三批 B1：知识库 search 走 BM25 索引（默认 true；任何异常自动回退旧全量扫描）。 */
     public boolean knowledgeSearchIndexEnabled() { return Boolean.parseBoolean(get("knowledge.search.index.enabled", "true")); }
+    /** 三批 B3：会话历史主动召回工具 SessionRecall（默认 true；纯只读本地，仅当前项目）。 */
+    public boolean sessionRecallEnabled() { return Boolean.parseBoolean(get("session.recall.enabled", "true")); }
     /** Python/Anaconda 解释器；留空时自动探测 MINION_PYTHON、Conda 和常见安装目录。 */
     public String pythonPath()   { return get("python.path", ""); }
     public String ocrPath() { return get("ocr.path", "tesseract"); }
