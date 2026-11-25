@@ -104,4 +104,14 @@ public class SystemPromptBuilderTest {
         assertTrue(p.contains("=== 项目介绍 ==="));
         assertTrue(p.contains("中文注释约定"));
     }
+
+    /** J3：派发引导把批量并行放在最前，弱模型不再逐个派发逐个等 */
+    @Test
+    public void build_dispatchGuidanceTeachesBatchParallel() {
+        String p = new SystemPromptBuilder(null, "C:/work").build(Collections.<com.minion.core.skills.Skill>emptyList());
+        assertTrue(p.contains("task(assignments="));
+        assertTrue(p.contains("一次登记，依赖就绪即并行执行"));
+        assertTrue(p.contains("不要逐个派发逐个等"));
+        assertTrue(p.contains("assignments 数组一次登记、依赖就绪即并行"));
+    }
 }
