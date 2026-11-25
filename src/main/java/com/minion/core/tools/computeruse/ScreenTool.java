@@ -22,6 +22,9 @@ import javax.imageio.ImageIO;
  *  Mouse 操作按截图坐标换算屏幕坐标（scale 见 ScreenTool 输出，Mouse 传同值）。 */
 public final class ScreenTool implements Tool {
     private final ComputerUseConfig config;
+    /** 三批 C4：最近一次全屏截图基线（软引用 1 张，缩 ≤640 边）；实例随会话注册，会话结束可回收 */
+    private volatile java.lang.ref.SoftReference<BufferedImage> lastFullShot;
+
     public ScreenTool(ComputerUseConfig config) { this.config = config; }
 
     @Override public String name() { return "Screen"; }
@@ -30,6 +33,7 @@ public final class ScreenTool implements Tool {
         return "计算机使用-屏幕（只读）。action=screenshot：全屏或区域截图，图像自动附入你的视觉上下文；"
                 + "返回屏幕实际尺寸、截图尺寸与 scale（Mouse 坐标换算用，操作时把该 scale 传给 Mouse）。"
                 + "action=windows：列出当前可见顶层窗口（标题/PID/位置，按前台到后台排序）。"
+                + "action=diff：与上次全屏截图逐像素对比，输出变化占比与区域，验证操作是否生效（需先有一次全屏 screenshot）。"
                 + "截图坐标规范：左上角为原点，x 向右 y 向下，单位像素。";
     }
 
@@ -54,7 +58,20 @@ public final class ScreenTool implements Tool {
             }
             return ToolResult.success(sb.toString());
         }
-        if (!"screenshot".equals(action)) return ToolResult.error("action 必须是 screenshot 或 windows");
+        if ("diff".equals(action)) {
+            if (lastFullShot == null || lastFullShot.get() == null) {
+                return ToolResult.error("没有上次全屏截图基线：先调用 Screen(action=screenshot) 全屏截图，操作后再用 diff 验证");
+            }
+            try {
+                Robot robot = new Robot();
+                Rectangle screen = new Rectangle(java.awt.Toolkit.getDefaultToolkit().getScreenSize());
+                return diffAgainst(robot.createScreenCapture(screen));
+            } catch (Exception e) {
+                return ToolResult.error("diff 截图失败: " + e.getClass().getSimpleName() + ": " + e.getMessage()
+                        + "（无头/无桌面会话或远程场景不可用）");
+            }
+        }
+        if (!"screenshot".equals(action)) return ToolResult.error("action 必须是 screenshot 或 windows（亦支持 diff）");
         try {
             Robot robot = new Robot();
             Rectangle screen = new Rectangle(java.awt.Toolkit.getDefaultToolkit().getScreenSize());
@@ -71,6 +88,7 @@ public final class ScreenTool implements Tool {
                 scale = Math.max(image.getWidth(), image.getHeight()) / (double) maxEdge;
                 image = scale(image, (int) Math.round(image.getWidth() / scale), (int) Math.round(image.getHeight() / scale));
             }
+            if (region.equals(screen)) rememberBaseline(image); // C4：仅全屏截图建立/刷新 diff 基线
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             ImageIO.write(image, "png", out);
             ImagePart part = new ImagePart();
@@ -85,6 +103,23 @@ public final class ScreenTool implements Tool {
             return ToolResult.error("截图失败: " + e.getClass().getSimpleName() + ": " + e.getMessage()
                     + "（无头/无桌面会话或远程场景不可用）");
         }
+    }
+
+    /** C4：记录全屏基线（缩 ≤640 边，软引用内存护栏） */
+    void rememberBaseline(BufferedImage fullShot) {
+        lastFullShot = new java.lang.ref.SoftReference<BufferedImage>(ScreenDiff.baseline(fullShot));
+    }
+
+    /** C4：当前全屏截图对比基线；对比后基线刷新为当前帧（连续 diff 对比相邻状态） */
+    ToolResult diffAgainst(BufferedImage currentFullShot) {
+        BufferedImage prev = lastFullShot == null ? null : lastFullShot.get();
+        if (prev == null) {
+            return ToolResult.error("没有上次全屏截图基线：先调用 Screen(action=screenshot) 全屏截图，操作后再用 diff 验证");
+        }
+        BufferedImage cur = ScreenDiff.baseline(currentFullShot);
+        ScreenDiff.Result r = ScreenDiff.compare(prev, cur);
+        lastFullShot = new java.lang.ref.SoftReference<BufferedImage>(cur);
+        return ToolResult.success(ScreenDiff.describe(r));
     }
 
     static BufferedImage scale(BufferedImage src, int w, int h) {
