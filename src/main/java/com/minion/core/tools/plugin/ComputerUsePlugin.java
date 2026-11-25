@@ -45,7 +45,8 @@ public final class ComputerUsePlugin implements ToolPlugin {
         return Arrays.<Tool>asList(
                 new ScreenTool(config),
                 new MouseTool(config),
-                new KeyboardTool(),
+                new KeyboardTool(new com.minion.core.tools.computeruse.AwtClipboard(), config.clipboardRestoreDelayMsSafe()),
+                new com.minion.core.tools.computeruse.ClipboardTool(),
                 new WindowTool());
     }
 }

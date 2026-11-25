@@ -5,8 +5,6 @@ import com.minion.core.tools.Tool;
 import com.minion.core.tools.ToolResult;
 
 import java.awt.Robot;
-import java.awt.datatransfer.Clipboard;
-import java.awt.datatransfer.StringSelection;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -19,12 +17,20 @@ import java.util.Map;
  *  ——type 对纯可打印 ASCII 逐键输入（不占用剪贴板），含非 ASCII 文本先写剪贴板再粘贴（会覆盖剪贴板内容）。
  *  输入类动作一律高危确认。 */
 public final class KeyboardTool implements Tool {
-    public KeyboardTool() {}
+    private final ClipboardAccess clipboard;
+    private final int restoreDelayMs;
+
+    public KeyboardTool() { this(new AwtClipboard(), 120); }
+    /** 三批 C2：剪贴板访问可注入（headless 测试 fake）；restoreDelayMs=粘贴后恢复前缓冲 */
+    public KeyboardTool(ClipboardAccess clipboard, int restoreDelayMs) {
+        this.clipboard = clipboard;
+        this.restoreDelayMs = restoreDelayMs;
+    }
 
     @Override public String name() { return "Keyboard"; }
 
     @Override public String description() {
-        return "计算机使用-键盘。action=type：输入文本（纯英文逐键；含中文自动走剪贴板+Ctrl+V，会覆盖系统剪贴板）；"
+        return "计算机使用-键盘。action=type：输入文本（纯英文逐键；含中文自动走剪贴板+Ctrl+V，粘贴后延迟缓冲并恢复原剪贴板内容）；"
                 + "action=pressKey：组合键，如 enter / esc / tab / ctrl+a / ctrl+shift+s / alt+f4 / win+r / ctrl+v。"
                 + "输入前建议先点击目标输入框，输入后 Screen 截图验证。";
     }
@@ -47,14 +53,19 @@ public final class KeyboardTool implements Tool {
                     typeAscii(robot, text);
                     return ToolResult.success("已逐键输入 " + text.length() + " 个 ASCII 字符（未占用剪贴板）");
                 }
-                setClipboard(text);
-                robot.delay(120);
-                robot.keyPress(KeyEvent.VK_CONTROL);
-                robot.keyPress(KeyEvent.VK_V);
-                robot.delay(60);
-                robot.keyRelease(KeyEvent.VK_V);
-                robot.keyRelease(KeyEvent.VK_CONTROL);
-                return ToolResult.success("文本含非 ASCII 字符，已通过剪贴板+Ctrl+V 粘贴 " + text.length() + " 字（剪贴板已被覆盖）");
+                ClipboardPaste.pastePreserving(clipboard, text, new Runnable() {
+                    @Override public void run() {
+                        robot.delay(120);
+                        robot.keyPress(KeyEvent.VK_CONTROL);
+                        robot.keyPress(KeyEvent.VK_V);
+                        robot.delay(60);
+                        robot.keyRelease(KeyEvent.VK_V);
+                        robot.keyRelease(KeyEvent.VK_CONTROL);
+                    }
+                }, new ClipboardPaste.Delay() {
+                    @Override public void ms(int millis) { robot.delay(millis); }
+                }, restoreDelayMs);
+                return ToolResult.success("文本含非 ASCII 字符，已通过剪贴板+Ctrl+V 粘贴 " + text.length() + " 字（原剪贴板内容已尝试恢复）");
             }
             if ("pressKey".equals(action)) {
                 String key = str(args, "key").toLowerCase(Locale.ROOT);
@@ -128,11 +139,6 @@ public final class KeyboardTool implements Tool {
         int[] a = new int[list.size()];
         for (int i = 0; i < a.length; i++) a[i] = list.get(i);
         return a;
-    }
-
-    static void setClipboard(String text) {
-        Clipboard clipboard = java.awt.Toolkit.getDefaultToolkit().getSystemClipboard();
-        clipboard.setContents(new StringSelection(text), null);
     }
 
     /** 这些字符需 Shift+基础键（JDK8 KeyEvent 缺 VK_PIPE/VK_TILDE 等常量，统一走基础键+Shift） */
