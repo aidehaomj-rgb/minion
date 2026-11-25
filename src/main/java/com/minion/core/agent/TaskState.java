@@ -3,6 +3,7 @@ package com.minion.core.agent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import com.minion.core.diagnostics.DiagnosticLog;
 
 /** Durable control-plane state. Summaries and child results must never rewrite this record. */
 public final class TaskState {
@@ -235,6 +236,11 @@ public final class TaskState {
         guidance = next;
         instructionRevision = nextRevision;
         latestUserRequirement = text;
+        // G1 诊断：修订推进时仍在跑的子agent保持可见（一次性事件日志，不在每秒轮询路径刷日志）
+        StringBuilder keptRunning = new StringBuilder();
+        for (Child c : children) if ("running".equals(c.status) && id != null && id.equals(c.taskId)) keptRunning.append(c.id).append(' ');
+        if (keptRunning.length() > 0) DiagnosticLog.info("child-visibility",
+                "revision " + (nextRevision - 1) + "->" + nextRevision + " running kept visible: " + keptRunning.toString().trim());
         recordInstruction(CompletionContract.explicitScopeReplacement(text)?"replace":"add",text);
         stopDecision = null;
     }
@@ -431,9 +437,12 @@ public final class TaskState {
         java.util.Map<String,Integer> latest=new java.util.HashMap<String,Integer>();
         for(Child c:children)if(id!=null&&id.equals(c.taskId)&&c.coordinatedStep!=null&&(c.revision==null||c.revision==revision()))
             latest.put(c.coordinatedStep,Math.max(latest.getOrDefault(c.coordinatedStep,0),c.coordinatedAttempt==null?1:c.coordinatedAttempt));
+        // G1：running 子agent无条件可见——用户补充推进修订后，仍在执行的子agent不得从数量/面板/上下文隐身；
+        // 已结束态（returned_needs_review/failed/reviewed/cancelled 等）维持原修订过滤+最新attempt去重
         List<Child> result=new ArrayList<Child>(); for(Child c:children) if(id!=null&&id.equals(c.taskId)
-                &&(c.coordinatedStep==null||(c.revision==null||c.revision==revision())
-                &&latest.get(c.coordinatedStep)==(c.coordinatedAttempt==null?1:c.coordinatedAttempt))) result.add(c); return result;
+                &&("running".equals(c.status)
+                ||(c.coordinatedStep==null||(c.revision==null||c.revision==revision())
+                &&latest.get(c.coordinatedStep)==(c.coordinatedAttempt==null?1:c.coordinatedAttempt)))) result.add(c); return result;
     }
     public synchronized List<Child> childSnapshot() {
         List<Child> out=new ArrayList<Child>();for(Child c:currentChildRefs())out.add(copy(c));return out;
