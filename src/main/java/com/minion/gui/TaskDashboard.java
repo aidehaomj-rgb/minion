@@ -33,6 +33,9 @@ public final class TaskDashboard {
 
     public TaskDashboard(Stage owner,SessionManager manager,SessionHandle handle) {
         this.manager=manager; this.handle=handle;
+        agents.getStyleClass().add("agents-table");
+        board.getStyleClass().add("board-ledger");
+        feedback.getStyleClass().add("dashboard-feedback");
         stage.initOwner(owner); stage.setTitle("任务面板 — "+(handle.title==null?handle.id:handle.title));
         TabPane tabs=new TabPane(tab("主任务与断点",taskPane()),tab("子 Agent",agentsPane()),
                 tab("任务/后台 §10.6/§10.7",boardPane()),
@@ -103,7 +106,23 @@ public final class TaskDashboard {
         final String[] mergeChild=new String[1];
         final long[] previewRequest={0}, previewRevision={0};
         column("ID",c -> c.id.substring(0,Math.min(8,c.id.length())),75);
-        column("分工",c -> c.assignment,200); column("状态",c -> c.status,160);
+        column("分工",c -> c.assignment,200);
+        TableColumn<TaskState.Child,String> status=new TableColumn<TaskState.Child,String>("状态");
+        status.setCellValueFactory(v -> new ReadOnlyStringWrapper(v.getValue().status));
+        status.setPrefWidth(160);
+        status.setCellFactory(col -> new TableCell<TaskState.Child,String>() {
+            private final Label chip=new Label();
+            { chip.getStyleClass().add("agent-status-chip"); }
+            @Override protected void updateItem(String s,boolean empty) {
+                super.updateItem(s,empty);
+                if(empty||s==null) { setGraphic(null); return; }
+                chip.setText(TaskStrip.zhStatus(s));
+                chip.getStyleClass().removeAll("agent-status-running","agent-status-done","agent-status-failed","agent-status-other");
+                chip.getStyleClass().add(statusClass(s));
+                setGraphic(chip);
+            }
+        });
+        agents.getColumns().add(status);
         column("模式 / 模型",c -> c.mode+" / "+c.model,155);
         column("上下文",c -> c.contextTokens+" / "+c.maxContextTokens,115);
         column("累计 in / out",c -> c.inputTokens+" / "+c.outputTokens+(c.usageEstimated?" (估算)":""),150);
@@ -219,10 +238,24 @@ public final class TaskDashboard {
                 + "\n\n最近一次模型请求快照（可能早于上方实时设置）：\n";
         setIfChanged(budget,live+handle.loop.contextBudget());
         String selected=agents.getSelectionModel().getSelectedItem()==null?null:agents.getSelectionModel().getSelectedItem().id;
-        agents.setItems(FXCollections.observableArrayList(handle.session.taskState.childRows(64)));
+        agents.setItems(FXCollections.observableArrayList(runningFirst(handle.session.taskState.childRows(64))));
         if(selected!=null) for(TaskState.Child c:agents.getItems()) if(selected.equals(c.id)) agents.getSelectionModel().select(c);
         List<SessionHandle.QueuedMessage> latest=handle.queuedSnapshot();
         if(!sameQueue(latest,queued)) { queued=latest; List<String> lines=new ArrayList<String>(); for(SessionHandle.QueuedMessage q:queued) lines.add((q.guidance?"[待引导/新任务] ":"")+q.text); queue.setItems(FXCollections.observableArrayList(lines)); }
+    }
+    /** I3：运行中子Agent置顶；稳定排序，同秩内保持台账顺序 */
+    static List<TaskState.Child> runningFirst(List<TaskState.Child> rows) {
+        List<TaskState.Child> out=new ArrayList<TaskState.Child>(rows);
+        out.sort((a,b) -> Integer.compare(statusRank(a),statusRank(b)));
+        return out;
+    }
+    static int statusRank(TaskState.Child c) { return "running".equals(c.status)||"RUNNING".equals(c.status)?0:1; }
+    /** I3：状态徽标配色类；中文文案复用 TaskStrip.zhStatus，避免两处漂移 */
+    static String statusClass(String s) {
+        if ("running".equals(s)||"RUNNING".equals(s)) return "agent-status-running";
+        if ("completed".equals(s)||"COMPLETED".equals(s)||"reviewed".equals(s)||"validated".equals(s)) return "agent-status-done";
+        if ("failed_or_interrupted".equals(s)||"FAILED".equals(s)||"merge_failed_needs_review".equals(s)) return "agent-status-failed";
+        return "agent-status-other";
     }
     private static boolean sameQueue(List<SessionHandle.QueuedMessage> a,List<SessionHandle.QueuedMessage> b) {
         if(a.size()!=b.size()) return false; for(int i=0;i<a.size();i++) if(!a.get(i).id.equals(b.get(i).id)||a.get(i).revision!=b.get(i).revision) return false; return true;

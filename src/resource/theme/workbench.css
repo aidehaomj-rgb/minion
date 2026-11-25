@@ -598,6 +598,34 @@
 .minion-workbench .task-strip-chip-active { -fx-background-color: -wb-highlight; -fx-text-fill: -wb-accent-strong; }
 .minion-workbench .task-strip-more { -fx-text-fill: -wb-link; -fx-font-size: 11px; -fx-cursor: hand; -fx-padding: 2 8 0 8; }
 
+/* I3 任务面板美化：子Agent表格卡片化、状态中文徽标、台账等宽字、底部反馈弱化 */
+.minion-workbench .agents-table {
+    -fx-background-color: -wb-surface; -fx-border-color: -wb-border-subtle;
+    -fx-background-radius: 8; -fx-border-radius: 8;
+}
+.minion-workbench .agents-table .column-header-background { -fx-background-color: -wb-elevated; }
+.minion-workbench .agents-table .column-header .label { -fx-text-fill: -wb-secondary; -fx-font-size: 12px; }
+.minion-workbench .agents-table .table-row-cell {
+    -fx-background-color: -wb-surface; -fx-border-color: transparent transparent -wb-border-subtle transparent;
+}
+.minion-workbench .agents-table .table-row-cell:odd { -fx-background-color: -wb-reader; }
+.minion-workbench .agents-table .table-row-cell:selected { -fx-background-color: -wb-select; }
+.minion-workbench .agents-table .table-cell { -fx-text-fill: -wb-secondary; -fx-font-size: 12px; }
+.minion-workbench .agent-status-chip {
+    -fx-font-size: 11px; -fx-padding: 1 8 1 8; -fx-background-radius: 8;
+    -fx-background-color: -wb-elevated; -fx-text-fill: -wb-muted;
+}
+.minion-workbench .agent-status-running { -fx-background-color: -wb-highlight; -fx-text-fill: -wb-accent-strong; }
+.minion-workbench .agent-status-done { -fx-background-color: -wb-badge-bg; -fx-text-fill: -wb-dot-done; }
+.minion-workbench .agent-status-failed { -fx-background-color: -wb-danger-bg; -fx-text-fill: -wb-danger; }
+.minion-workbench .board-ledger {
+    -fx-font-family: "Consolas", "Monospaced"; -fx-font-size: 12px;
+    -fx-background-color: -wb-reader; -fx-text-fill: -wb-secondary;
+    -fx-background-radius: 8; -fx-border-color: -wb-border-subtle; -fx-border-radius: 8;
+}
+.minion-workbench .board-ledger .content { -fx-background-color: -wb-reader; }
+.minion-workbench .dashboard-feedback { -fx-text-fill: -wb-muted; -fx-font-size: 12px; -fx-padding: 2 4 0 4; }
+
 /* File workspace: quiet chrome, slightly lighter reading surface, accessible actions */
 .minion-workbench .artifact-workspace { -fx-background-color: -wb-reader; -fx-border-width: 0; }
 .minion-workbench .artifact-workspace-bar {

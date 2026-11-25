@@ -192,7 +192,8 @@ public final class TaskStrip extends VBox {
         return zhStatus(r.status);
     }
 
-    private static String zhStatus(String s) {
+    /** 状态中文文案；任务条与任务面板共用，避免两处漂移 */
+    public static String zhStatus(String s) {
         if (s == null) return "";
         if ("running".equals(s) || "RUNNING".equals(s)) return "运行中";
         if ("returned_needs_review".equals(s)) return "待复核";
