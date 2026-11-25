@@ -12,6 +12,8 @@ public class GeneratedArtifact {
     public String path, title, kind, taskId, sourceTool;
     public Long revision;
     public long updatedAt, size;
+    /** F2 迟到展示登记（owner 失效但会话未变）：仅展示面，不进停止门禁证据。旧快照缺省 false。 */
+    public boolean late;
     /** Immutable copy of the just-registered revision, used only for internal version history. */
     public String snapshotPath;
     public List<Version> history = new ArrayList<Version>();
@@ -33,6 +35,7 @@ public class GeneratedArtifact {
         GeneratedArtifact a = new GeneratedArtifact();
         a.path = path; a.title = title; a.kind = kind; a.taskId = taskId;
         a.sourceTool = sourceTool; a.revision = revision; a.updatedAt = updatedAt; a.size = size;
+        a.late = late;
         a.snapshotPath = snapshotPath;
         if (history != null) for (Version version : history) if (version != null) a.history.add(version.copy());
         return a;

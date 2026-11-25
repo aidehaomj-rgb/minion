@@ -85,14 +85,18 @@ public class AgentLoop {
     private final ThreadLocal<ToolOwner> toolOwners=new ThreadLocal<ToolOwner>();
     private static final class ToolOwner {
         final String sessionId,taskId;final long revision,generation;
+        /** F2：会话身份引用。AgentLoop.session 为 final（/new、restore 均新建 loop），
+         *  此判定是防御性护栏——会话对象一旦可替换，迟到登记不得污染新会话登记表。 */
+        final Session session;
         final java.util.concurrent.ConcurrentMap<ToolCall,java.nio.file.Path> toolCwds=
                 new java.util.concurrent.ConcurrentHashMap<ToolCall,java.nio.file.Path>();
         ToolOwner(AgentLoop loop){sessionId=loop.session.id;taskId=loop.session.taskState.id;
-            revision=loop.session.taskState.revision();generation=loop.executionGeneration.get();}
+            revision=loop.session.taskState.revision();generation=loop.executionGeneration.get();session=loop.session;}
         boolean matches(AgentLoop loop){return generation==loop.executionGeneration.get()
                 &&java.util.Objects.equals(sessionId,loop.session.id)&&java.util.Objects.equals(taskId,loop.session.taskState.id)
                 &&revision==loop.session.taskState.revision();}
         boolean current(AgentLoop loop){return !loop.interrupted&&matches(loop);}
+        boolean sessionChanged(AgentLoop loop){return session!=loop.session;}
     }
     public ReliabilityService reliability(){return reliability;}
     private volatile java.util.function.BiFunction<String,String,AgentRuntime> runtimeFactory;
@@ -3251,7 +3255,7 @@ public class AgentLoop {
         DiagnosticLog.info("agent-exit","task="+session.taskState.id+" state="+session.taskState.status
                 +" pauseCode="+(session.taskState.pauseCode==null?"none":session.taskState.pauseCode)
                 +" toolRounds="+rounds+" autoContinuations="+session.taskState.automaticContinuations);
-        if(finalReferenceOwner!=null && finalReferenceOwner.current(this)) {
+        if(finalReferenceOwner!=null && !finalReferenceOwner.sessionChanged(this)) {
             adoptArtifacts(finalReferenceOwner, new GeneratedArtifactCollector(this::evidencePathAllowed).references(
                     finalReferenceText,finalReferenceCwd,finalReferenceOwner.taskId,finalReferenceOwner.revision));
         }
@@ -3994,9 +3998,13 @@ public class AgentLoop {
         }
     }
 
-    /** Only the ordered consumer adopts files, using ownership captured at batch dispatch. */
+    /** Only the ordered consumer adopts files, using ownership captured at batch dispatch.
+     *  F2：owner 失效但会话未变 → 降级为迟到展示登记（late=true），不再整体丢弃；
+     *  证据通道（stopReceipts :3120 的 owner.current 守卫）完全独立、逐字保留。 */
     private void adoptToolArtifacts(ToolCall call,ToolResult result,ToolOwner owner) {
-        if(!owner.current(this))return;
+        if(owner.sessionChanged(this)){
+            DiagnosticLog.info("artifact-late-adopt","drop=session-changed tool="+call.name);return;
+        }
         java.nio.file.Path cwd=owner.toolCwds.get(call);
         if(cwd==null)return; // A tool that never started cannot have generated a file.
         adoptArtifacts(owner,new GeneratedArtifactCollector(this::evidencePathAllowed)
@@ -4004,23 +4012,28 @@ public class AgentLoop {
     }
 
     private void adoptArtifacts(ToolOwner owner,List<GeneratedArtifact> artifacts) {
+        if(owner.sessionChanged(this)){
+            DiagnosticLog.info("artifact-late-adopt","drop=session-changed count="+artifacts.size());return;
+        }
+        boolean stale=!owner.current(this);
         List<GeneratedArtifact> registered=new ArrayList<GeneratedArtifact>();
         synchronized(session.taskState) {
             synchronized(artifactFence) {
                 for(GeneratedArtifact artifact:artifacts) {
-                    if(!owner.current(this))break;
+                    if(stale)artifact.late=true;
                     GeneratedArtifact receipt=session.registerArtifact(artifact);
                     if(receipt!=null)registered.add(receipt);
                 }
             }
         }
         if(registered.isEmpty())return;
+        if(stale)DiagnosticLog.info("artifact-late-adopt","adopted="+registered.size()
+                +" generation="+owner.generation+" task="+owner.taskId);
         // Persist outside the task monitor (SessionStore has its own lock order), before UI events.
         persistSession();
         synchronized(session.taskState) {
             synchronized(artifactFence) {
                 for(GeneratedArtifact receipt:registered) {
-                    if(!owner.current(this))return;
                     ui.onArtifactCreated(receipt.path);
                 }
             }

@@ -134,7 +134,10 @@ public class AgentLoopArtifactsTest {
         } finally {loop.shutdown();}
     }
 
-    @Test public void lateSuccessfulWriteCannotRegisterInReplacedTaskOrNewRevision() throws Exception {
+    /** F2 语义翻转（原 lateSuccessfulWriteCannotRegisterInReplacedTaskOrNewRevision 特征化的是 R2/R3 根因）：
+     *  同会话内任务替换/插话推进 generation → 迟到产物照常展示登记（late=true）+ UI 事件照发；
+     *  门禁证据通道（stopReceipts 的 owner.current 守卫）不受影响，由门禁套件 A/B 特征化保证。 */
+    @Test public void lateSuccessfulWriteRegistersAsLateDisplayInSameSession() throws Exception {
         for(boolean replaceTask:new boolean[]{true,false}) {
             Path root=temp.newFolder().toPath();Workspace ws=new Workspace(root.toString());
             Session s=Session.create(root.toString(),"fixture");ArtifactUi ui=new ArtifactUi(s);FakeLlmClient model=new FakeLlmClient();
@@ -144,8 +147,8 @@ public class AgentLoopArtifactsTest {
                 public JsonObject schema(){return new JsonObject();}
                 public ToolResult execute(JsonObject args)throws Exception {
                     Files.write(root.resolve("late.txt"),new byte[]{1});
-                    if(replaceTask)s.taskState.begin("新任务，不接收旧产物",true);
-                    else holder[0].offerSupplement("补充：新要求已入队，旧工具回执不能采纳");
+                    if(replaceTask)s.taskState.begin("新任务，同会话迟到展示登记",true);
+                    else holder[0].offerSupplement("补充：插话推进 generation，旧工具产物仍应展示");
                     return ToolResult.success("written");
                 }
             });
@@ -153,9 +156,13 @@ public class AgentLoopArtifactsTest {
             AgentLoop loop=holder[0]=loop(root,ws,s,registry,model,ui);loop.roundLimit=1;
             try {
                 loop.runUserTurn("旧任务生成文件");assertTrue(Files.isRegularFile(root.resolve("late.txt")));
-                assertTrue(s.artifactsSnapshot().stream().noneMatch(a->GeneratedArtifact.DELIVERABLE.equals(a.kind)));
-                assertFalse(ui.paths.contains(root.resolve("late.txt").toString()));
-                if(replaceTask)assertTrue(s.artifactsSnapshot().isEmpty());
+                String real=root.resolve("late.txt").toRealPath().toString();
+                GeneratedArtifact late=s.artifactsSnapshot().stream()
+                        .filter(a->GeneratedArtifact.DELIVERABLE.equals(a.kind)).findFirst().orElse(null);
+                assertNotNull("同会话迟到产物应展示登记",late);
+                assertEquals(real,late.path);assertTrue("迟到打标",late.late);
+                assertTrue("UI 事件照发",ui.paths.contains(real));
+                if(replaceTask)assertEquals("任务替换后执行记录不跨任务",1,s.artifactsSnapshot().size());
             } finally {loop.shutdown();}
         }
     }
