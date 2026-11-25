@@ -34,6 +34,7 @@ public class ConfirmGate {
     private final Config config;
     private final ConfirmUi ui;
     private boolean sessionBypass = false;          // legacy 全局放行 + v2 BYPASS 提升
+    private volatile boolean sessionAutoApprove = false;   // H2 对话级"自动审批/完全授权"：ask 一律自动 APPROVE（会话内存态，不落盘）
     private volatile PermissionContext.Mode sessionModeOverride; // §12.2 会话级模式覆盖（不写盘、不影响其他会话）
     private volatile RuleStore ruleStore;           // v2 惰性构建
     private volatile Path projectSettings, localSettings;
@@ -60,6 +61,10 @@ public class ConfirmGate {
     public static boolean isNonInteractive() { return Boolean.TRUE.equals(NON_INTERACTIVE.get()); }
 
     private ConfirmUi.Decision askUser(String prompt) {
+        if (sessionAutoApprove) {
+            DiagnosticLog.info("permission", "ALLOW session-auto " + prompt);
+            return ConfirmUi.Decision.APPROVE;
+        }
         if (isNonInteractive()) {
             DiagnosticLog.info("permission", "DENY non-interactive " + prompt);
             return ConfirmUi.Decision.REJECT;
@@ -68,6 +73,10 @@ public class ConfirmGate {
     }
 
     private ConfirmUi.Decision askUserDetailed(PermissionExplainer.Explanation ex, String prompt) {
+        if (sessionAutoApprove) {
+            DiagnosticLog.info("permission", "ALLOW session-auto " + prompt);
+            return ConfirmUi.Decision.APPROVE;
+        }
         if (isNonInteractive()) {
             DiagnosticLog.info("permission", "DENY non-interactive " + prompt);
             return ConfirmUi.Decision.REJECT;
@@ -83,6 +92,22 @@ public class ConfirmGate {
         this.sessionBypass = (parsed == PermissionContext.Mode.BYPASS);
         return true;
     }
+
+    /** H2：清除会话模式覆盖，回到全局 config 默认（选择器"默认"项） */
+    public synchronized void clearSessionPermissionMode() {
+        this.sessionModeOverride = null;
+        this.sessionBypass = false;
+        DiagnosticLog.info("permission", "SESSION mode-override cleared");
+    }
+
+    /** H2：对话级自动审批——凡裁决为 ask 的一律自动 APPROVE（主/子agent、前台/后台都不弹卡）；
+     *  deny 裁决与 plan 只读拦截不受影响。会话内存态，不落盘。 */
+    public synchronized void setSessionAutoApprove(boolean on) {
+        this.sessionAutoApprove = on;
+        DiagnosticLog.info("permission", "SESSION auto-approve " + (on ? "ON" : "OFF"));
+    }
+
+    public boolean sessionAutoApprove() { return sessionAutoApprove; }
 
     /** 当前生效的权限模式（会话覆盖优先于全局 config） */
     public PermissionContext.Mode effectiveMode() {

@@ -321,6 +321,12 @@ public class InputView extends VBox {
         bottomRow.getChildren().add(bottomRow.getChildren().size() - 1, selector);
     }
 
+    /** H2 对话级权限选择器：与模型选择器同排（发送键左侧），先装配者在左。 */
+    public void setPermissionSelector(Node selector) {
+        if (selector == null) return;
+        bottomRow.getChildren().add(bottomRow.getChildren().size() - 1, selector);
+    }
+
     /** §10.4 两层状态栏：底部 footer Label（权限模式 | 上下文占用% | 压缩剩余% + 自定义 statusLine） */
     private final Label statusLineLabel = new Label();
 

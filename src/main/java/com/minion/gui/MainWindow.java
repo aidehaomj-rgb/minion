@@ -102,6 +102,8 @@ public class MainWindow {
     private boolean workspaceFocused;
     private Button reportButton;
     private MenuButton modelButton;
+    /** H2 对话级权限选择器（默认/自动审批/完全授权；会话内存态，不落盘） */
+    private MenuButton permissionButton;
     private HBox tabsBar; // 右侧顶部页签栏（无会话时整行隐藏）
     /** 已打开会话 id 集合：页签存在性的唯一权威（页签 ⇔ openedIds 含句柄）；切工作空间保留 */
     private final Set<SessionHandle> openedIds = new HashSet<SessionHandle>();
@@ -305,6 +307,15 @@ public class MainWindow {
                 openArtifactPreview(h,h==null?null:h.selectedArtifactPath==null?com.minion.gui.artifact.ArtifactSelection.preferred(h.session):h.selectedArtifactPath);
             else {if(h!=null)h.suppressArtifactAutoOpen=true;closeArtifactPreview();}
         });
+        permissionButton = new MenuButton();
+        permissionButton.getStyleClass().add("btn-ghost");
+        permissionButton.getStyleClass().add("model-picker");
+        permissionButton.setMaxWidth(150);
+        permissionButton.setMinWidth(0);
+        permissionButton.setTextOverrun(javafx.scene.control.OverrunStyle.ELLIPSIS);
+        permissionButton.setTooltip(new Tooltip("对话级权限：仅本对话生效、不落盘、重启恢复默认。\n自动审批/完全授权后本对话主/子Agent不再弹确认；deny 规则仍拒绝。"));
+        refreshPermissionMenu();
+        inputView.setPermissionSelector(permissionButton);
         modelButton = new MenuButton();
         modelButton.getStyleClass().add("btn-ghost");
         modelButton.getStyleClass().add("model-picker");
@@ -634,6 +645,41 @@ public class MainWindow {
             });
             modelButton.getItems().add(item);
         }
+        refreshPermissionMenu();   // 会话切换/模型刷新同点同步权限选择器显示
+    }
+
+    /** H2 对话级权限选择器：默认（逐次确认）/自动审批/完全授权；选择即写入会话态 ConfirmGate，
+     *  主/子agent共用同一门，本对话两者都不再弹确认（deny 规则仍拒绝）。 */
+    private void refreshPermissionMenu() {
+        if (permissionButton == null) return;
+        SessionHandle current = manager.currentSession();
+        String choice = manager.conversationPermission();
+        permissionButton.setDisable(current == null);
+        permissionButton.setText("权限: " + permissionLabel(choice));
+        permissionButton.setAccessibleText("对话权限：" + permissionLabel(choice));
+        permissionButton.getItems().clear();
+        String[][] options = {
+                {"default", "默认（逐次确认）"},
+                {"auto", "自动审批"},
+                {"full", "完全授权"},
+        };
+        for (String[] option : options) {
+            final String value = option[0];
+            MenuItem item = new MenuItem((value.equals(choice) ? "✓  " : "    ") + option[1]);
+            item.setOnAction(e -> {
+                SessionHandle h = manager.currentSession();
+                String feedback = manager.setConversationPermission(value);
+                if (h != null && h.controller != null) h.controller.onSystem(feedback);
+                refreshPermissionMenu();
+            });
+            permissionButton.getItems().add(item);
+        }
+    }
+
+    private static String permissionLabel(String choice) {
+        if ("auto".equals(choice)) return "自动审批";
+        if ("full".equals(choice)) return "完全授权";
+        return "默认";
     }
 
     /** 左侧栏底部设置入口；关闭后刷新输入区模型菜单。 */

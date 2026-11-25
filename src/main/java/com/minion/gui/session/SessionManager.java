@@ -2359,6 +2359,40 @@ public class SessionManager {
         return current + " → " + next;
     }
 
+    /** H2 对话级权限选择（会话内存态，不落盘；作用域=工作空间会话上下文，与"本会话允许"一致）。
+     *  主/子agent共用同一 ConfirmGate，选择后本对话两者都不再弹确认；deny 规则仍拒绝。
+     *  choice: default=逐次确认 / auto=自动审批 / full=完全授权。返回反馈文案。 */
+    public String setConversationPermission(String choice) {
+        SessionHandle h = currentSession;
+        WorkspaceCtx ctx = h == null ? null : ctxByName.get(h.workspaceName);
+        if (ctx == null) return "无活动会话，权限选择未生效";
+        ConfirmGate gate = ctx.confirmGate;
+        if ("auto".equals(choice)) {
+            gate.clearSessionPermissionMode();
+            gate.setSessionAutoApprove(true);
+            return "对话权限：自动审批——本对话主/子Agent不再弹确认（deny 规则仍拒绝；重启后恢复默认）";
+        }
+        if ("full".equals(choice)) {
+            gate.setSessionPermissionMode("full");
+            gate.setSessionAutoApprove(true);
+            return "对话权限：完全授权——本对话主/子Agent高危操作直接放行（deny 规则仍拒绝；重启后恢复默认）";
+        }
+        gate.clearSessionPermissionMode();
+        gate.setSessionAutoApprove(false);
+        return "对话权限：默认——恢复逐次确认";
+    }
+
+    /** H2 当前对话权限选择（由 gate 会话态反推，供 GUI 选择器同步显示） */
+    public String conversationPermission() {
+        SessionHandle h = currentSession;
+        WorkspaceCtx ctx = h == null ? null : ctxByName.get(h.workspaceName);
+        if (ctx == null) return "default";
+        ConfirmGate gate = ctx.confirmGate;
+        if (!gate.sessionAutoApprove()) return "default";
+        return gate.effectiveMode() == com.minion.core.security.permission.PermissionContext.Mode.BYPASS
+                ? "full" : "auto";
+    }
+
     /** §4.7 二期通知：ConfigChange（运行时配置变更；活动会话 hook fire-and-forget） */
     private void notifyConfigChange(String key, String value) {
         SessionHandle h = currentSession;
