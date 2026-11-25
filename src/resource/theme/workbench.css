@@ -568,22 +568,35 @@
 .minion-workbench .btn-guide-now { -fx-background-color: -wb-cta; -fx-text-fill: -wb-on-cta; -fx-background-radius: 6; }
 .minion-workbench .btn-guide-now:hover { -fx-background-color: -wb-cta-hover; }
 
-/* Part E 对话框上方常驻任务条：单行摘要 + 可展开明细，全部 -wb-* 取色（7 主题自适应） */
+/* Part E 对话框上方常驻任务条（I2 卡片化）：摘要+进度条+可展开明细，全部 -wb-* 取色（7 主题自适应） */
 .minion-workbench .task-strip {
-    -fx-background-color: -wb-surface; -fx-border-color: -wb-border-subtle;
-    -fx-border-width: 1 0 0 0; -fx-padding: 4 12 4 12;
+    -fx-background-color: -wb-surface; -fx-background-radius: 10;
+    -fx-border-color: -wb-border-subtle; -fx-border-radius: 10; -fx-border-width: 1;
+    -fx-padding: 6 10 6 10;
 }
 .minion-workbench .task-strip-header { -fx-cursor: hand; }
 .minion-workbench .task-strip-chevron { -fx-text-fill: -wb-muted; -fx-font-size: 11px; }
 .minion-workbench .task-strip-summary { -fx-text-fill: -wb-secondary; -fx-font-size: 12.5px; }
+.minion-workbench .task-strip-progress > .track { -fx-background-color: -wb-border-subtle; -fx-background-radius: 3; }
+.minion-workbench .task-strip-progress > .bar { -fx-background-color: -wb-accent; -fx-background-radius: 3; -fx-padding: 2; }
 .minion-workbench .task-strip-scroll { -fx-background-color: transparent; -fx-background: transparent; }
 .minion-workbench .task-strip-scroll > .viewport { -fx-background-color: transparent; }
-.minion-workbench .task-strip-rows { -fx-padding: 2 0 2 17; }
-.minion-workbench .task-strip-row { -fx-text-fill: -wb-secondary; -fx-font-size: 12px; -fx-cursor: hand; }
-.minion-workbench .task-strip-row:hover { -fx-text-fill: -wb-ink; }
-.minion-workbench .task-strip-row-done { -fx-text-fill: -wb-muted; }
-.minion-workbench .task-strip-row-active { -fx-text-fill: -wb-accent-strong; }
-.minion-workbench .task-strip-more { -fx-text-fill: -wb-muted; -fx-font-size: 11px; -fx-cursor: hand; }
+.minion-workbench .task-strip-rows { -fx-padding: 4 0 2 0; }
+.minion-workbench .task-strip-row { -fx-padding: 2 8 2 8; -fx-background-radius: 6; -fx-cursor: hand; }
+.minion-workbench .task-strip-row:hover { -fx-background-color: -wb-hover; }
+.minion-workbench .task-strip-icon { -fx-font-size: 11px; }
+.minion-workbench .task-strip-icon-done { -fx-text-fill: -wb-muted; }
+.minion-workbench .task-strip-icon-active { -fx-text-fill: -wb-accent-strong; }
+.minion-workbench .task-strip-icon-pending { -fx-text-fill: -wb-secondary; }
+.minion-workbench .task-strip-row-title { -fx-text-fill: -wb-secondary; -fx-font-size: 12px; }
+.minion-workbench .task-strip-row-title-done { -fx-text-fill: -wb-muted; }
+.minion-workbench .task-strip-row-title-active { -fx-text-fill: -wb-accent-strong; }
+.minion-workbench .task-strip-chip {
+    -fx-font-size: 10.5px; -fx-text-fill: -wb-muted;
+    -fx-background-color: -wb-elevated; -fx-background-radius: 4; -fx-padding: 1 6 1 6;
+}
+.minion-workbench .task-strip-chip-active { -fx-background-color: -wb-highlight; -fx-text-fill: -wb-accent-strong; }
+.minion-workbench .task-strip-more { -fx-text-fill: -wb-link; -fx-font-size: 11px; -fx-cursor: hand; -fx-padding: 2 8 0 8; }
 
 /* File workspace: quiet chrome, slightly lighter reading surface, accessible actions */
 .minion-workbench .artifact-workspace { -fx-background-color: -wb-reader; -fx-border-width: 0; }

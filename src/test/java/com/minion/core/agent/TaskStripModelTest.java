@@ -142,4 +142,29 @@ public class TaskStripModelTest {
                 row(TaskBoardModel.KIND_BACKGROUND, "跑脚本", "RUNNING", "shell", null));
         assertFalse("后台 shell 任务不算子Agent徽标", TaskStrip.summaryText(rows).contains("子Agent"));
     }
+
+    // ---- I2：图标取色/进度/状态徽标 ----
+
+    @Test public void iconClassThreeStates() {
+        assertEquals("done", TaskStrip.iconClass(todo("x", true)));
+        assertEquals("pending", TaskStrip.iconClass(todo("x", false)));
+        assertEquals("active", TaskStrip.iconClass(row(TaskBoardModel.KIND_TASK, "t", "running", "worker", null)));
+        assertEquals("done", TaskStrip.iconClass(row(TaskBoardModel.KIND_TASK, "t", "returned_needs_review", "worker", null)));
+        assertEquals("active", TaskStrip.iconClass(row(TaskBoardModel.KIND_BACKGROUND, "b", "RUNNING", "shell", null)));
+    }
+
+    @Test public void progressFraction() {
+        assertEquals(0.0, TaskStrip.progress(new ArrayList<BoardRow>()), 0.0001);
+        assertEquals(0.5, TaskStrip.progress(Arrays.asList(todo("a", true), todo("b", false))), 0.0001);
+        assertEquals(1.0, TaskStrip.progress(Arrays.asList(todo("a", true))), 0.0001);
+    }
+
+    @Test public void chipTextChineseStatusAndExit() {
+        assertEquals("", TaskStrip.chipText(todo("x", false)));
+        assertEquals("运行中", TaskStrip.chipText(row(TaskBoardModel.KIND_TASK, "t", "running", "worker", null)));
+        assertEquals("待复核", TaskStrip.chipText(row(TaskBoardModel.KIND_TASK, "t", "returned_needs_review", "worker", null)));
+        assertEquals("失败/中断", TaskStrip.chipText(row(TaskBoardModel.KIND_TASK, "t", "failed_or_interrupted", "worker", null)));
+        assertEquals("exit=0", TaskStrip.chipText(row(TaskBoardModel.KIND_BACKGROUND, "b", "COMPLETED", "shell", 0)));
+        assertEquals("排队中", TaskStrip.chipText(row(TaskBoardModel.KIND_BACKGROUND, "b", "QUEUED", "shell", null)));
+    }
 }

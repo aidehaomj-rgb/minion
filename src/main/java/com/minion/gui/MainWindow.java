@@ -254,6 +254,7 @@ public class MainWindow {
                 if (h != null) new TaskDashboard(stage, manager, h).show();
             });
             conversationColumn = new VBox(chatHost, taskStrip, inputView);
+            VBox.setMargin(taskStrip, new javafx.geometry.Insets(0, 10, 6, 10));
         } else {
             conversationColumn = new VBox(chatHost, inputView);
         }
