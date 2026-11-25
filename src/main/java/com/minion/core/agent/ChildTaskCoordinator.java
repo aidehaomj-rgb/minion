@@ -105,13 +105,33 @@ public final class ChildTaskCoordinator implements AutoCloseable, TaskTool.Dispa
     @Override public ToolResult submit(JsonObject args){
         try{
             if(args.has("model"))return ToolResult.errorWithoutSideEffects("子Agent继承父模型，不能指定model");
-            Assignment a=new Assignment();a.stepId=string(args,"stepId");a.description=string(args,"description");a.prompt=string(args,"prompt");a.acceptance=string(args,"acceptance");
-            if(args.has("mode"))a.mode=string(args,"mode");a.allowedTools=string(args,"allowedTools");a.scope=list(args,"scope");a.dependsOn=list(args,"dependsOn");
-            if(args.has("isolatedOutput"))a.isolatedOutput=args.get("isolatedOutput").getAsBoolean();if(args.has("requiresMerge"))a.requiresMerge=args.get("requiresMerge").getAsBoolean();
-            if(args.has("timeoutMillis"))a.timeoutMillis=args.get("timeoutMillis").getAsLong();
-            Record record=submitBatch(Collections.singletonList(a)).get(0);
+            Record record=submitBatch(Collections.singletonList(parseAssignment(args))).get(0);
             return ToolResult.success("已登记排队（不是子任务完成），主Agent需复核：\n"+gson.toJson(record));
         }catch(Exception e){return ToolResult.errorWithoutSideEffects("子任务未登记: "+e.getMessage());}
+    }
+    /** 批量登记（task.assignments）：整批校验，任一条非法整批不登记；依赖就绪后按容量并行执行。 */
+    @Override public ToolResult submitBatch(JsonObject args){
+        try{
+            List<JsonObject> items=new ArrayList<JsonObject>();
+            for(JsonElement e:args.getAsJsonArray("assignments"))items.add(e.getAsJsonObject());
+            List<Record> records=submitBatchArgs(items);
+            return ToolResult.success("已批量登记排队 "+records.size()+" 条（不是子任务完成），依赖就绪即并行执行，主Agent需复核：\n"+gson.toJson(records));
+        }catch(Exception e){return ToolResult.errorWithoutSideEffects("子任务批量未登记: "+e.getMessage());}
+    }
+    public synchronized List<Record> submitBatchArgs(List<JsonObject> items)throws Exception{
+        List<Assignment> assignments=new ArrayList<Assignment>();
+        for(JsonObject args:items){
+            if(args.has("model"))throw new IllegalArgumentException("子Agent继承父模型，不能指定model");
+            assignments.add(parseAssignment(args));
+        }
+        return submitBatch(assignments);
+    }
+    private Assignment parseAssignment(JsonObject args){
+        Assignment a=new Assignment();a.stepId=string(args,"stepId");a.description=string(args,"description");a.prompt=string(args,"prompt");a.acceptance=string(args,"acceptance");
+        if(args.has("mode"))a.mode=string(args,"mode");a.allowedTools=string(args,"allowedTools");a.scope=list(args,"scope");a.dependsOn=list(args,"dependsOn");
+        if(args.has("isolatedOutput"))a.isolatedOutput=args.get("isolatedOutput").getAsBoolean();if(args.has("requiresMerge"))a.requiresMerge=args.get("requiresMerge").getAsBoolean();
+        if(args.has("timeoutMillis"))a.timeoutMillis=args.get("timeoutMillis").getAsLong();
+        return a;
     }
     public synchronized List<Record> submitBatch(List<Assignment> assignments)throws Exception{
         ensureOpen();if(assignments==null||assignments.isEmpty()||records.size()+assignments.size()>1024)throw new IllegalArgumentException("批次为空或任务数超过1024");

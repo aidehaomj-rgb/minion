@@ -4118,6 +4118,16 @@ public class AgentLoop {
         catch(InterruptedException e){Thread.currentThread().interrupt();return ToolResult.errorWithoutSideEffects("子任务登记已取消，未派发");}
         catch(Exception e){return ToolResult.errorWithoutSideEffects("子任务协调器未就绪: "+e.getMessage());}
     }
+    public ToolResult submitCoordinatedChildBatch(JsonObject args){
+        java.util.concurrent.locks.Lock lock=ToolExecutionGuard.exclusiveWorkspaceLock();
+        try{lock.lockInterruptibly();try{
+            synchronized(session.taskState){for(TaskState.Child child:session.taskState.childSnapshot())
+                if(child.coordinatedStep==null&&"worker".equals(child.mode)&&"running".equals(child.status))return ToolResult.errorWithoutSideEffects("旧同步worker仍在执行，不能混用并行写入队列；先等其返回");}
+            return coordination().submitBatch(args);
+        }finally{lock.unlock();}}
+        catch(InterruptedException e){Thread.currentThread().interrupt();return ToolResult.errorWithoutSideEffects("子任务登记已取消，未派发");}
+        catch(Exception e){return ToolResult.errorWithoutSideEffects("子任务协调器未就绪: "+e.getMessage());}
+    }
     public ToolResult cancelOrDismissChild(String targetId, String note) {
         if (targetId == null || targetId.trim().isEmpty()) {
             return ToolResult.errorWithoutSideEffects("child_cancel 需要提供 childId（或 stepId，传 \"all\" 取消当前任务全部未完成子Agent）");

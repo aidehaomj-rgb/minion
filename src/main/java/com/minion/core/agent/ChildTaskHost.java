@@ -44,6 +44,27 @@ public final class ChildTaskHost implements AutoCloseable {
                 +"。用户指令已变更，请按最新指令重新派发，不要把旧分工送入新指令");
         ToolResult result=coordinator.submit(args);sync();return result;
     }
+    /** 批量登记：守卫与单条 submit 完全一致；整批原子，任一条非法整批不登记。 */
+    public ToolResult submitBatch(JsonObject args){
+        if(!matches()||closed)return ToolResult.errorWithoutSideEffects("子任务所属修订已失效，请重新读取当前要求");
+        if(recovered)return ToolResult.errorWithoutSideEffects("已恢复协调记录，先child_status核对；child_resume_queue需明确旧执行已退出的依据，不自动重放");
+        if(!args.has("revision")||args.get("revision").isJsonNull())return ToolResult.errorWithoutSideEffects("缺少 revision：当前任务修订号为 "+revision+"（任务状态里“指令修订: "+revision+"”）");
+        if(args.get("revision").getAsLong()!=revision)return ToolResult.errorWithoutSideEffects("revision 已过期：当前任务修订号为 "+revision+"，收到 "+args.get("revision")
+                +"。用户指令已变更，请按最新指令重新派发，不要把旧分工送入新指令");
+        if(!args.has("assignments")||!args.get("assignments").isJsonArray())return ToolResult.errorWithoutSideEffects("批量登记需要 assignments 数组：每个元素是一条子任务分工");
+        JsonArray items=args.getAsJsonArray("assignments");
+        if(items.size()==0||items.size()>64)return ToolResult.errorWithoutSideEffects("assignments 须为 1..64 条分工，收到 "+items.size());
+        List<JsonObject> parsed=new ArrayList<JsonObject>();
+        for(JsonElement e:items){
+            if(!e.isJsonObject())return ToolResult.errorWithoutSideEffects("assignments 元素必须是对象（含 stepId/description/scope/acceptance 等）");
+            parsed.add(e.getAsJsonObject());
+        }
+        try{
+            List<ChildTaskCoordinator.Record> records=coordinator.submitBatchArgs(parsed);
+            sync();
+            return ToolResult.success("已批量登记排队 "+records.size()+" 条（不是子任务完成），依赖就绪即并行执行，主Agent需复核：\n"+gson.toJson(records));
+        }catch(Exception e){return ToolResult.errorWithoutSideEffects("子任务批量未登记: "+e.getMessage());}
+    }
     public void sync(){
         ChildTaskCoordinator.Snapshot snapshot=coordinator.snapshot();
         synchronized(state){

@@ -27,7 +27,9 @@ import java.util.Locale;
 public class TaskTool implements Tool {
 
     /** 仅登记到独立调度器并立即返回；禁止在主工具池同步等待子任务。 */
-    public interface Dispatcher { ToolResult submit(JsonObject args); }
+    public interface Dispatcher { ToolResult submit(JsonObject args);
+        /** 批量登记（assignments 数组）；默认不支持，由协调器覆写。 */
+        default ToolResult submitBatch(JsonObject args){return ToolResult.errorWithoutSideEffects("调度器不支持批量登记");} }
     private final Dispatcher dispatcher;
     private final AgentLoop legacyLoop;
 
@@ -43,6 +45,8 @@ public class TaskTool implements Tool {
                 + "登记后立即返回 childId，可连续派发多个，然后调用 AgentControl 的 child_wait 等待；"
                 + "子 agent 返回后结果会出现在对话和任务状态里，用 AgentControl review(childId,note) 复核。"
                 + "只有需要隔离写范围的分工才用 stepId/scope/dependsOn/acceptance 进入协调队列。"
+                + "要一次派多个独立子任务就用 assignments 数组（每个元素一条分工：stepId/description/mode/scope/dependsOn/acceptance），"
+                + "登记后依赖就绪即并行执行，不必逐个派发逐个等；顶层 revision 省略即当前修订。"
                 + "排队和已登记都不算完成，不能把排队当结果。";
     }
 
@@ -51,7 +55,7 @@ public class TaskTool implements Tool {
         JsonObject schema = SchemaGenerator.objectSchema("派发子 agent",
                 new String[]{"description", "prompt", "mode", "allowedTools", "subagent_type", "run_in_background",
                         "isolatedOutput", "stepId", "scope", "dependsOn", "acceptance", "timeoutMillis",
-                        "requiresMerge", "revision"},
+                        "requiresMerge", "revision", "assignments"},
                 structured
                         ? new String[]{"description", "stepId", "scope", "dependsOn", "acceptance"}
                         : new String[]{"description"});
@@ -74,6 +78,23 @@ public class TaskTool implements Tool {
         typed(props, "timeoutMillis", "integer", "可选。子任务最长执行时间（毫秒），1000 到 86400000，默认 600000。");
         typed(props, "requiresMerge", "boolean", "可选。true=在独立 worktree 执行，返回后需要合并验证。");
         typed(props, "revision", "integer", "仅结构化用法需要。当前任务修订号，即任务状态里“指令修订: N”的 N。");
+        JsonObject batchProp = new JsonObject();
+        batchProp.addProperty("type", "array");
+        batchProp.addProperty("description", "可选。批量派发：一次登记多条分工，依赖就绪即并行执行，不必逐个派发逐个等。"
+                + "每个元素是一条分工对象；用 assignments 时顶层只读 assignments 与 revision（省略即当前修订），"
+                + "顶层 stepId/scope 等单条键可不填。整批原子：任一条非法整批不登记。");
+        JsonObject item = SchemaGenerator.objectSchema("一条子任务分工",
+                new String[]{"stepId", "description", "mode", "scope", "dependsOn", "acceptance"},
+                new String[]{"stepId", "description", "acceptance"});
+        JsonObject itemProps = item.getAsJsonObject("properties");
+        describe(itemProps, "stepId", "本步唯一标识：英文、数字、下划线、点、短横线，如 extract-1；批内不能重复。");
+        describe(itemProps, "description", "交给子 agent 的完整任务说明：目标、相关文件绝对路径、要做什么、返回格式。");
+        describe(itemProps, "mode", "worker=可写（必须给 scope）；explore=只读调查。省略默认 worker。");
+        array(itemProps, "scope", "允许写入的相对路径前缀数组，如 [\"src/\"]；只读任务可填 [\".\"]。");
+        array(itemProps, "dependsOn", "依赖的前置 stepId 数组；没有依赖填 [] 或省略。");
+        describe(itemProps, "acceptance", "验收条件：子 agent 必须交付什么、用什么证据证明。");
+        batchProp.add("items", item);
+        props.add("assignments", batchProp);
         schema.addProperty("additionalProperties", false);
         return schema;
     }
@@ -83,6 +104,33 @@ public class TaskTool implements Tool {
                 "缺少任务参数：至少提供 description（交给子 agent 的完整任务说明）");
         if (args.has("model") && !args.get("model").isJsonNull())
             return ToolResult.error("子Agent模型已锁定为主会话模型，不能单独指定model");
+        if (args.has("assignments") && !args.get("assignments").isJsonNull()) {
+            if (!args.get("assignments").isJsonArray())
+                return ToolResult.errorWithoutSideEffects("assignments 必须是数组：每个元素一条子任务分工对象");
+            JsonArray raw = args.getAsJsonArray("assignments");
+            if (raw.size() == 0 || raw.size() > 64)
+                return ToolResult.errorWithoutSideEffects("assignments 须为 1..64 条分工，收到 " + raw.size());
+            JsonObject call = args.deepCopy();
+            if (dispatcher == null && legacyLoop != null) {
+                // 与单条结构化入口同一套自愈：mode 同义词、scope 字符串包数组、stepId 规范化、可补默认值就补
+                if (text(call, "revision").trim().isEmpty())
+                    call.addProperty("revision", legacyLoop.session().taskState.revision());
+                JsonArray normalized = new JsonArray();
+                for (int i = 0; i < raw.size(); i++) {
+                    if (!raw.get(i).isJsonObject())
+                        return ToolResult.errorWithoutSideEffects("assignments[" + i + "] 必须是对象（含 stepId/description 等分工键）");
+                    JsonObject element = normalize(raw.get(i).getAsJsonObject());
+                    ToolResult problem = prepareStructured(element);
+                    if (problem != null)
+                        return ToolResult.errorWithoutSideEffects("assignments[" + i + "] " + problem.output);
+                    normalized.add(element);
+                }
+                call.add("assignments", normalized);
+                return legacyLoop.submitCoordinatedChildBatch(call);
+            }
+            if (dispatcher != null) return dispatcher.submitBatch(call);
+            return ToolResult.errorWithoutSideEffects("子任务协调器尚未接线：需宿主注入TaskTool(Dispatcher)；本次未派发");
+        }
         if(dispatcher==null&&legacyLoop!=null) {
             JsonObject call = normalize(args);
             String mode = normalizeMode(text(call, "mode"));
@@ -120,7 +168,7 @@ public class TaskTool implements Tool {
 
     /** 是否走了结构化入口（任一结构化参数出现即算） */
     static boolean isStructured(JsonObject args) {
-        return args.has("stepId")||args.has("scope")||args.has("dependsOn")||args.has("revision")||args.has("requiresMerge");
+        return args.has("stepId")||args.has("scope")||args.has("dependsOn")||args.has("revision")||args.has("requiresMerge")||args.has("assignments");
     }
 
     /**
