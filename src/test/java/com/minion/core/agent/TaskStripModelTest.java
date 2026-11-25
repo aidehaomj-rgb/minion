@@ -106,4 +106,40 @@ public class TaskStripModelTest {
         BoardRow c = new BoardRow(TaskBoardModel.KIND_BACKGROUND, "b-1", "跑脚本", "shell", "COMPLETED", "", "输出甲", 0);
         assertNotEquals("状态变化应触发重绘", TaskStrip.signature(Arrays.asList(a)), TaskStrip.signature(Arrays.asList(c)));
     }
+
+    // ---- H1：折叠态运行中子Agent徽标 ----
+
+    @Test public void runningChildBadgeInSummary() {
+        List<BoardRow> rows = Arrays.asList(
+                todo("汇总", false),
+                row(TaskBoardModel.KIND_TASK, "chunk_1 提取", "running", "explore", null));
+        assertEquals("任务清单  [0/2]  当前：汇总 · 子Agent 1运行", TaskStrip.summaryText(rows));
+    }
+
+    @Test public void multipleRunningChildrenBadge() {
+        List<BoardRow> rows = Arrays.asList(
+                row(TaskBoardModel.KIND_TASK, "chunk_1", "running", "worker", null),
+                row(TaskBoardModel.KIND_TASK, "chunk_2", "running", "worker", null));
+        assertTrue(TaskStrip.summaryText(rows).endsWith(" · 子Agent 2运行"));
+    }
+
+    @Test public void finishedChildNoBadge() {
+        List<BoardRow> rows = Arrays.asList(
+                todo("汇总", false),
+                row(TaskBoardModel.KIND_TASK, "chunk_1", "returned_needs_review", "worker", null));
+        assertEquals("任务清单  [1/2]  当前：汇总", TaskStrip.summaryText(rows));
+    }
+
+    @Test public void allDoneTodosWithRunningChildStillBadged() {
+        List<BoardRow> rows = Arrays.asList(
+                todo("甲", true),
+                row(TaskBoardModel.KIND_TASK, "chunk_1", "running", "explore", null));
+        assertEquals("任务清单  [1/2]  当前：chunk_1 · 子Agent 1运行", TaskStrip.summaryText(rows));
+    }
+
+    @Test public void backgroundRunningNotCountedAsChildBadge() {
+        List<BoardRow> rows = Arrays.asList(
+                row(TaskBoardModel.KIND_BACKGROUND, "跑脚本", "RUNNING", "shell", null));
+        assertFalse("后台 shell 任务不算子Agent徽标", TaskStrip.summaryText(rows).contains("子Agent"));
+    }
 }

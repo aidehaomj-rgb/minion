@@ -165,12 +165,18 @@ public final class TaskStrip extends VBox {
         return "";
     }
 
-    /** 折叠态摘要文案（不含 chevron，GUI 按展开态前置 ▸/▾）；空态返回空串 */
+    /** 折叠态摘要文案（不含 chevron，GUI 按展开态前置 ▸/▾）；空态返回空串。
+     *  H1：有 running 子Agent时追加徽标——不展开也能看到子agent在跑。 */
     public static String summaryText(List<BoardRow> rows) {
         if (rows.isEmpty()) return "";
         int[] c = counts(rows);
-        if (c[0] == c[1]) return "✓ 任务清单 " + c[0] + "/" + c[1] + " 已完成";
-        return "任务清单  [" + c[0] + "/" + c[1] + "]  当前：" + currentTitle(rows);
+        String base = c[0] == c[1]
+                ? "✓ 任务清单 " + c[0] + "/" + c[1] + " 已完成"
+                : "任务清单  [" + c[0] + "/" + c[1] + "]  当前：" + currentTitle(rows);
+        int running = 0;
+        for (BoardRow r : rows)
+            if (TaskBoardModel.KIND_TASK.equals(r.kind) && "running".equals(r.status)) running++;
+        return running > 0 ? base + " · 子Agent " + running + "运行" : base;
     }
 
     /** 展开态单行：[✓/▶/○] 标题（task 附 owner·status；background 附 exit=N） */
