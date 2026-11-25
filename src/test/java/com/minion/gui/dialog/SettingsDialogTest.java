@@ -55,4 +55,40 @@ public class SettingsDialogTest {
     public void canActivate_allowsDifferentModel() {
         assertTrue(SettingsDialog.canActivate("qwen3-max", "deepseek-v4-flash"));
     }
+
+    // ===== 三批 B4：备用模型链（纯逻辑 + 配置读写回环，无 JavaFX） =====
+
+    /** 规范化：中英文逗号/空白分隔同口径，去空项，逗号连接；空输入→空串（默认不降级） */
+    @Test
+    public void normalizeFallbackChain_matchesAgentLoopSplit() {
+        assertEquals("", SettingsDialog.normalizeFallbackChain(null));
+        assertEquals("", SettingsDialog.normalizeFallbackChain("   "));
+        assertEquals("a,b,c", SettingsDialog.normalizeFallbackChain(" a , b ， c "));
+        assertEquals("a,b", SettingsDialog.normalizeFallbackChain("a,,，b,"));
+        assertEquals("a,b", SettingsDialog.normalizeFallbackChain("a b"));
+        // 与 AgentLoop.setModelFallback 的分隔正则同口径：规范化结果再split一致
+        String normalized = SettingsDialog.normalizeFallbackChain("模型甲，模型乙 模型丙");
+        assertArrayEquals(new String[]{"模型甲", "模型乙", "模型丙"}, normalized.split("[,，\\s]+"));
+    }
+
+    /** 配置读写回环：set 落盘，重新 load 仍可读回（新会话生效的数据基础） */
+    @Test
+    public void fallbackChainConfigRoundtrip() throws Exception {
+        java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("minion-b4-cfg");
+        try {
+            com.minion.core.config.Config config = com.minion.core.config.Config.load(dir);
+            assertEquals("", config.get("model.fallbackChain", ""));   // 默认空=现状不变
+            String chain = SettingsDialog.normalizeFallbackChain("backup-a，backup-b");
+            config.set("model.fallbackChain", chain);
+            assertEquals("backup-a,backup-b", config.get("model.fallbackChain", ""));
+            com.minion.core.config.Config reloaded = com.minion.core.config.Config.load(dir);
+            assertEquals("backup-a,backup-b", reloaded.get("model.fallbackChain", ""));
+            config.set("model.fallbackChain", "");
+            assertEquals("", com.minion.core.config.Config.load(dir).get("model.fallbackChain", ""));
+        } finally {
+            try (java.util.stream.Stream<java.nio.file.Path> s = java.nio.file.Files.walk(dir)) {
+                s.sorted(java.util.Comparator.reverseOrder()).forEach(p -> { try { java.nio.file.Files.delete(p); } catch (Exception ignored) { } });
+            }
+        }
+    }
 }

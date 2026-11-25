@@ -89,7 +89,7 @@ public class SettingsDialog {
         nav.setId("settings-nav");
         nav.setPrefWidth(136);
         nav.setMinWidth(136);
-        final Node model = modelPane(models, manager);
+        final Node model = modelPane(models, manager, config);
         final Node mcpNode = mcpPane(mcp, owner);
         final Node toolsNode = ToolsPane.build(plugins, owner);
         final Node about = aboutPane();
@@ -114,7 +114,7 @@ public class SettingsDialog {
 
     // ===== 模型页（迁移自 ModelDialog + propagate） =====
 
-    private static VBox modelPane(final ModelManager models, final SessionManager manager) {
+    private static VBox modelPane(final ModelManager models, final SessionManager manager, final Config config) {
         final ComboBox<String> defaultModel = new ComboBox<String>();
         defaultModel.setId("new-session-default-model");
         defaultModel.setMaxWidth(Double.MAX_VALUE);
@@ -213,10 +213,42 @@ public class SettingsDialog {
         });
         actions.getChildren().addAll(activate, add, edit, del);
 
+        // 三批 B4：备用模型链（model.fallbackChain CSV）；机制已有（AgentLoop setModelFallback），此处仅补 GUI 入口。
+        // 失焦/回车即保存；新会话生效（SessionManager 接线不动），留空=不降级（现状不变）。
+        Label fallbackLabel = new Label("备用模型链（过载自动降级）");
+        final TextField fallbackChain = new TextField(config.get("model.fallbackChain", ""));
+        fallbackChain.setId("model-fallback-chain");
+        fallbackChain.setPromptText("留空=不降级；多个模型标识名用逗号分隔，按顺序降级");
+        Tooltip fallbackTip = new Tooltip("连续过载（529/overloaded）3 次触发，按顺序切换备用模型；新会话生效。留空=不降级。");
+        fallbackChain.setTooltip(fallbackTip);
+        fallbackLabel.setTooltip(fallbackTip);
+        Runnable saveChain = () -> {
+            String normalized = normalizeFallbackChain(fallbackChain.getText());
+            fallbackChain.setText(normalized);
+            config.set("model.fallbackChain", normalized);
+        };
+        fallbackChain.focusedProperty().addListener((obs, was, focused) -> { if (!focused) saveChain.run(); });
+        fallbackChain.setOnAction(e -> saveChain.run());
+        Label fallbackHelp = new Label("填写模型标识名（上方列表中的名称），逗号分隔；失焦或回车保存，仅影响新会话。");
+        fallbackHelp.setWrapText(true);
+
         VBox box = new VBox(10);
         box.setPadding(new Insets(10));
-        box.getChildren().addAll(new Label("新会话默认模型"), defaultModel, defaultHelp, list, actions);
+        box.getChildren().addAll(new Label("新会话默认模型"), defaultModel, defaultHelp, list, actions,
+                fallbackLabel, fallbackChain, fallbackHelp);
         return box;
+    }
+
+    /** 备用模型链规范化：与 AgentLoop.setModelFallback 同口径分隔（中英文逗号/空白），去空项后以逗号连接 */
+    static String normalizeFallbackChain(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return "";
+        StringBuilder out = new StringBuilder();
+        for (String part : raw.trim().split("[,，\\s]+")) {
+            if (part.isEmpty()) continue;
+            if (out.length() > 0) out.append(',');
+            out.append(part);
+        }
+        return out.toString();
     }
 
     private static void refreshDefaultModel(ComboBox<String> choice, ModelManager models) {
