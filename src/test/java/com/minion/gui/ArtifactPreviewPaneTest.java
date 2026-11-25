@@ -212,6 +212,171 @@ public class ArtifactPreviewPaneTest {
             }catch(Exception e){throw new RuntimeException(e);}});
         }finally{fx(()->{if(p[0]!=null)p[0].close();if(l[0]!=null)l[0].close();});}
     }
+    // ---- F3 预览健壮性（additive，旧用例上方逐字保留） ----
+
+    private static byte[] docxBytes()throws Exception{
+        java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();
+        try(java.util.zip.ZipOutputStream z=new java.util.zip.ZipOutputStream(out)){
+            z.putNextEntry(new java.util.zip.ZipEntry("word/document.xml"));
+            z.write(("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>完整内容</w:t></w:r></w:p></w:body></w:document>").getBytes("UTF-8"));
+            z.closeEntry();
+        }
+        return out.toByteArray();
+    }
+
+    /** 半写文件：首次 ZipException → 有界重试，写盘完成后预览成功（R4 复现） */
+    @Test public void halfWrittenFileRetriesUntilWriteCompletes()throws Exception{
+        Path root=temp.newFolder().toPath(),file=root.resolve("半写.docx");
+        byte[] full=docxBytes();Files.write(file,Arrays.copyOf(full,full.length/2));
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+        ArtifactPreviewPane[] p={null};LocalFileLinks[] l={null};
+        try{
+            fx(()->{l[0]=new LocalFileLinks(()->root,()->null,f->{},m->{});
+                p[0]=new ArtifactPreviewPane(()->{},l[0],path->{calls.incrementAndGet();return DocumentPreviewLoader.load(path);});
+                p[0].open(file.toString());});
+            Thread.sleep(400);Files.write(file,full);
+            await(()->ready(p[0]));
+            fx(()->{try{
+                assertEquals("docx",((DocumentPreviewLoader.Result)field(p[0],"loaded")).format);
+                assertTrue("应至少重试一次",calls.get()>=2);
+            }catch(Exception e){throw new RuntimeException(e);}});
+        }finally{fx(()->{if(p[0]!=null)p[0].close();if(l[0]!=null)l[0].close();});}
+    }
+
+    /** 3 次仍败 → 错误卡带「重试」「用关联应用打开」；手动重试重置一次性标记后可成功 */
+    @Test public void exhaustedRetriesShowActionableErrorAndManualRetryWorks()throws Exception{
+        Path root=temp.newFolder().toPath(),file=root.resolve("损坏.docx");Files.write(file,docxBytes());
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+        ArtifactPreviewPane[] p={null};LocalFileLinks[] l={null};
+        try{
+            fx(()->{l[0]=new LocalFileLinks(()->root,()->null,f->{},m->{});
+                p[0]=new ArtifactPreviewPane(()->{},l[0],path->{
+                    if(calls.incrementAndGet()<=4)throw new java.util.zip.ZipException("模拟半写损坏");
+                    return DocumentPreviewLoader.load(path);});
+                p[0].open(file.toString());});
+            await(()->{boolean[] err={false};fx(()->{try{err[0]="预览不可用".equals(((Label)field(p[0],"status")).getText());}catch(Exception e){throw new RuntimeException(e);}});return err[0];});
+            assertEquals("初次+3 次重试",4,calls.get());
+            fx(()->{try{
+                VBox body=field(p[0],"body");
+                java.util.List<javafx.scene.control.Button> buttons=new java.util.ArrayList<>();
+                for(javafx.scene.Node n:body.getChildren())if(n instanceof javafx.scene.layout.HBox)
+                    for(javafx.scene.Node c:((javafx.scene.layout.HBox)n).getChildren())
+                        if(c instanceof javafx.scene.control.Button)buttons.add((javafx.scene.control.Button)c);
+                assertTrue(buttons.stream().anyMatch(b->"重试".equals(b.getText())));
+                assertTrue(buttons.stream().anyMatch(b->"用关联应用打开".equals(b.getText())));
+                buttons.stream().filter(b->"重试".equals(b.getText())).findFirst().get().fire();
+            }catch(Exception e){throw new RuntimeException(e);}});
+            await(()->ready(p[0]));
+            assertEquals(5,calls.get());
+        }finally{fx(()->{if(p[0]!=null)p[0].close();if(l[0]!=null)l[0].close();});}
+    }
+
+    /** 权限类失败不重试：一次即出可操作错误 */
+    @Test public void accessDeniedIsNotRetried()throws Exception{
+        Path root=temp.newFolder().toPath(),file=root.resolve("权限.docx");Files.write(file,docxBytes());
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+        ArtifactPreviewPane[] p={null};LocalFileLinks[] l={null};
+        try{
+            fx(()->{l[0]=new LocalFileLinks(()->root,()->null,f->{},m->{});
+                p[0]=new ArtifactPreviewPane(()->{},l[0],path->{calls.incrementAndGet();throw new AccessDeniedException(path.toString());});
+                p[0].open(file.toString());});
+            await(()->{boolean[] err={false};fx(()->{try{err[0]="预览不可用".equals(((Label)field(p[0],"status")).getText());}catch(Exception e){throw new RuntimeException(e);}});return err[0];});
+            assertEquals("权限错误零重试",1,calls.get());
+        }finally{fx(()->{if(p[0]!=null)p[0].close();if(l[0]!=null)l[0].close();});}
+    }
+
+    /** 大小两次采样：稳定文件 true；持续追加中的文件 false（不提前读） */
+    @Test public void sizeStableDetectsGrowingFile()throws Exception{
+        Path f=temp.newFile("grow.bin").toPath();Files.write(f,new byte[]{1});
+        assertTrue(ArtifactPreviewPane.sizeStable(f));
+        Thread writer=new Thread(()->{for(int i=0;i<8;i++){try{Files.write(f,new byte[]{2},StandardOpenOption.APPEND);Thread.sleep(40);}catch(Exception e){return;}}});
+        writer.start();
+        assertFalse("写入中大小不稳定",ArtifactPreviewPane.sizeStable(f));
+        writer.join();
+        assertTrue(ArtifactPreviewPane.sizeStable(f));
+    }
+
+    /** 队列 1→8；同 path 合并：旧 Future 被 cancel，登记表同 key 仅一条 */
+    @Test public void queueCapacityEightAndSamePathMergeCancelsOld()throws Exception{
+        Path root=temp.newFolder().toPath(),a=root.resolve("a.md");Files.write(a,"# A".getBytes("UTF-8"));
+        CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
+        ArtifactPreviewPane[] p={null};LocalFileLinks[] l={null};
+        try{
+            fx(()->{l[0]=new LocalFileLinks(()->root,()->null,f->{},m->{});
+                p[0]=new ArtifactPreviewPane(()->{},l[0],path->{
+                    entered.countDown();boolean waiting=true;
+                    while(waiting)try{release.await();waiting=false;}catch(InterruptedException ignored){}
+                    return DocumentPreviewLoader.load(path);});
+                p[0].open(a.toString());});
+            assertTrue(entered.await(5,TimeUnit.SECONDS));
+            Future<?>[] first={null};
+            fx(()->{try{
+                ThreadPoolExecutor reader=field(p[0],"reader");
+                assertEquals(8,reader.getQueue().remainingCapacity());
+                java.util.Map<String,Future<?>> tasks=field(p[0],"poolTasks");
+                first[0]=tasks.get("reader:"+a);
+                p[0].openUpdated(a.toString());
+            }catch(Exception e){throw new RuntimeException(e);}});
+            fx(()->{try{
+                assertTrue("旧任务应被取消",first[0].isCancelled());
+                java.util.Map<String,Future<?>> tasks=field(p[0],"poolTasks");
+                assertEquals("同 key 仅一条",1,tasks.keySet().stream().filter(k->k.equals("reader:"+a)).count());
+            }catch(Exception e){throw new RuntimeException(e);}});
+            release.countDown();
+            await(()->ready(p[0]));
+        }finally{release.countDown();fx(()->{if(p[0]!=null)p[0].close();if(l[0]!=null)l[0].close();});}
+    }
+
+    /** generation 切走：旧路径失败后不再调度重试（守卫照旧） */
+    @Test public void switchedAwayGenerationAbandonsRetry()throws Exception{
+        Path root=temp.newFolder().toPath(),a=root.resolve("a.md"),b=root.resolve("b.md");
+        Files.write(a,"# A".getBytes("UTF-8"));Files.write(b,"# B".getBytes("UTF-8"));
+        CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger aCalls=new java.util.concurrent.atomic.AtomicInteger();
+        ArtifactPreviewPane[] p={null};LocalFileLinks[] l={null};
+        try{
+            fx(()->{l[0]=new LocalFileLinks(()->root,()->null,f->{},m->{});
+                p[0]=new ArtifactPreviewPane(()->{},l[0],path->{
+                    if(path.equals(a)){aCalls.incrementAndGet();entered.countDown();
+                        boolean waiting=true;while(waiting)try{release.await();waiting=false;}catch(InterruptedException ignored){}
+                        throw new java.util.zip.ZipException("切走后失败");}
+                    return DocumentPreviewLoader.load(path);});
+                p[0].open(a.toString());});
+            assertTrue(entered.await(5,TimeUnit.SECONDS));
+            fx(()->p[0].open(b.toString()));
+            release.countDown();
+            await(()->ready(p[0]));
+            Thread.sleep(1200);
+            assertEquals("切走后零重试",1,aCalls.get());
+            fx(()->{try{assertEquals("# B",((DocumentPreviewLoader.Result)field(p[0],"loaded")).sourceText);}catch(Exception e){throw new RuntimeException(e);}});
+        }finally{release.countDown();fx(()->{if(p[0]!=null)p[0].close();if(l[0]!=null)l[0].close();});}
+    }
+
+    /** 队列满丢弃不再静默：当前卡片出「预览被跳过，点击重试」提示 */
+    @Test public void queueFullDropShowsVisibleNotice()throws Exception{
+        Path root=temp.newFolder().toPath(),file=root.resolve("ok.md");Files.write(file,"# OK".getBytes("UTF-8"));
+        ArtifactPreviewPane[] p={null};LocalFileLinks[] l={null};
+        CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
+        try{
+            fx(()->{l[0]=new LocalFileLinks(()->root,()->null,f->{},m->{});p[0]=new ArtifactPreviewPane(()->{},l[0]);p[0].open(file.toString());});
+            await(()->ready(p[0]));
+            ThreadPoolExecutor[] reader={null};
+            fx(()->{try{reader[0]=field(p[0],"reader");}catch(Exception e){throw new RuntimeException(e);}});
+            await(()->reader[0].getActiveCount()==0&&reader[0].getQueue().isEmpty());
+            // 先确定性占住唯一工作线程，再填满 8 格队列（core=1 时 execute 先入队，直接连发是竞态）
+            reader[0].submit(()->{entered.countDown();try{release.await();}catch(InterruptedException ignored){}});
+            assertTrue(entered.await(5,TimeUnit.SECONDS));
+            for(int i=0;i<8;i++)reader[0].submit(()->{try{Thread.sleep(2000);}catch(InterruptedException ignored){}});
+            assertEquals(0,reader[0].getQueue().remainingCapacity());
+            fx(()->{try{
+                java.lang.reflect.Method submit=ArtifactPreviewPane.class.getDeclaredMethod("submitMerged",ThreadPoolExecutor.class,String.class,Runnable.class);
+                submit.setAccessible(true);
+                submit.invoke(p[0],reader[0],file.toString(),(Runnable)()->{});
+            }catch(Exception e){throw new RuntimeException(e);}});
+            await(()->{boolean[] shown={false};fx(()->{try{shown[0]=((Label)field(p[0],"notice")).getText().contains("预览被跳过");}catch(Exception e){throw new RuntimeException(e);}});return shown[0];});
+        }finally{release.countDown();fx(()->{if(p[0]!=null)p[0].close();if(l[0]!=null)l[0].close();});}
+    }
+
     private static boolean ready(ArtifactPreviewPane pane)throws Exception{
         boolean[] ready={false};fx(()->{try{ready[0]=field(pane,"loaded")!=null;}catch(Exception e){throw new RuntimeException(e);}});return ready[0];
     }

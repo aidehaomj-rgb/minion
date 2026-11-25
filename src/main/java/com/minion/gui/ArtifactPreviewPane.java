@@ -70,12 +70,16 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
             scroll.viewportBoundsProperty(),body.paddingProperty());
     private final LocalFileLinks links;
     private final Loader loader;
-    private final ThreadPoolExecutor reader=new ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,new ArrayBlockingQueue<Runnable>(1),r->{
+    private final ThreadPoolExecutor reader=new ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,new ArrayBlockingQueue<Runnable>(8),r->{
         Thread t=new Thread(r,"minion-document-preview");t.setDaemon(true);return t;
     },new ThreadPoolExecutor.DiscardOldestPolicy());
-    private final ThreadPoolExecutor conversion=new ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,new ArrayBlockingQueue<Runnable>(1),r->{
+    private final ThreadPoolExecutor conversion=new ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,new ArrayBlockingQueue<Runnable>(8),r->{
         Thread t=new Thread(r,"minion-office-conversion");t.setDaemon(true);return t;
     },new ThreadPoolExecutor.DiscardOldestPolicy());
+    /** F3：同 key 待执行任务合并（cancel 旧 Future 再入队），替代盲目 DiscardOldest 静默丢任务 */
+    private final ConcurrentHashMap<String,Future<?>> poolTasks=new ConcurrentHashMap<String,Future<?>>();
+    static final int MAX_LOAD_RETRY=3;
+    private static final long RETRY_DELAY_MS=500;
     private Future<?> pending;
     private long generation;
     private long pagedGeneration;
@@ -438,32 +442,88 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         fileTitle.setTooltip(new Tooltip(path.toString()+"\n右键打开、定位或复制路径"));
         notice.setText("");status.setText("正在读取本地文件…");
         body.getChildren().setAll(hint("正在载入预览…"));
-        pending=reader.submit(()->{
-            try {
-                DocumentPreviewLoader.Result result=loader.load(path);List<MarkdownRenderer.Block> parsed=richFormat(result.format)?MarkdownRenderer.parse(result.markdown):Collections.emptyList();
-                OfficePreviewConverter.Conversion cachedConversion = (result.previewPdf==null&&result.sourcePath!=null
-                        &&officeSource(result.format)) ? OfficePreviewConverter.findCached(path) : null;
-                long size=Files.size(path),modified=Files.getLastModifiedTime(path).toMillis();
-                Platform.runLater(()->{
-                    if(request!=generation||!path.equals(current))return;
-                    loaded=result;blocks=parsed;loadedSize=size;loadedModified=modified;
-                    if(cachedConversion!=null){
-                        convertedPdf=cachedConversion.pdf;
-                        conversionEngine=cachedConversion.engine;
-                        conversionAttempted=true;
-                    }
-                    updateMeta();
-                    notice.setText(shortNotice(result));
-                    render();
-                    ViewState state=viewStates.get(path);
-                    if(state!=null)Platform.runLater(()->{if(request==generation&&path.equals(current)){
-                        scroll.setVvalue(state.scroll);textView.setScrollTop(state.textScroll);
-                    }});
-                    if(result.previewPdf==null&&convertedPdf==null&&result.sourcePath!=null
-                            &&officeSource(result.format))scheduleOfficeConversion(request,path);
-                });
-            }catch(Exception e){Platform.runLater(()->{if(request==generation&&path.equals(current))showError("无法预览："+(e.getMessage()==null?e.toString():e.getMessage())+"。仍可打开原文件或定位文件位置。");});}
+        pending=submitMerged(reader,path.toString(),()->loadAndApply(request,path,0));
+    }
+    /** F3：加载主体（首次 attempt=0；重试递增）。generation 守卫逐字保留。 */
+    private void loadAndApply(long request,Path path,int attempt){
+        try {
+            DocumentPreviewLoader.Result result=loader.load(path);List<MarkdownRenderer.Block> parsed=richFormat(result.format)?MarkdownRenderer.parse(result.markdown):Collections.emptyList();
+            OfficePreviewConverter.Conversion cachedConversion = (result.previewPdf==null&&result.sourcePath!=null
+                    &&officeSource(result.format)) ? OfficePreviewConverter.findCached(path) : null;
+            long size=Files.size(path),modified=Files.getLastModifiedTime(path).toMillis();
+            Platform.runLater(()->{
+                if(request!=generation||!path.equals(current))return;
+                loaded=result;blocks=parsed;loadedSize=size;loadedModified=modified;
+                if(cachedConversion!=null){
+                    convertedPdf=cachedConversion.pdf;
+                    conversionEngine=cachedConversion.engine;
+                    conversionAttempted=true;
+                }
+                updateMeta();
+                notice.setText(shortNotice(result));
+                render();
+                ViewState state=viewStates.get(path);
+                if(state!=null)Platform.runLater(()->{if(request==generation&&path.equals(current)){
+                    scroll.setVvalue(state.scroll);textView.setScrollTop(state.textScroll);
+                }});
+                if(result.previewPdf==null&&convertedPdf==null&&result.sourcePath!=null
+                        &&officeSource(result.format))scheduleOfficeConversion(request,path);
+            });
+        }catch(Exception e){Platform.runLater(()->{
+            if(request!=generation||!path.equals(current))return;
+            if(attempt<MAX_LOAD_RETRY&&retryableFailure(e)){
+                com.minion.core.diagnostics.DiagnosticLog.info("preview-retry",
+                        "path="+path+" attempt="+(attempt+1)+" err="+e.getClass().getSimpleName());
+                notice.setText("文件写入中，正在重试…（"+(attempt+1)+"/"+MAX_LOAD_RETRY+"）");
+                body.getChildren().setAll(hint("文件可能仍在写入，正在自动重试…"));
+                scheduleRetry(request,path,attempt+1);
+            }else showLoadError(path,e);
+        });}
+    }
+    /** F3：reader 池内有界重试；重试前大小两次采样稳定（写盘完成启发式），不稳定则继续等。 */
+    private void scheduleRetry(long request,Path path,int attempt){
+        submitMerged(reader,path.toString(),()->{
+            try{
+                Thread.sleep(RETRY_DELAY_MS);
+                for(int i=0;i<4&&!sizeStable(path);i++)Thread.sleep(RETRY_DELAY_MS);
+            }catch(InterruptedException stop){Thread.currentThread().interrupt();return;}
+            loadAndApply(request,path,attempt);
         });
+    }
+    static boolean sizeStable(Path path)throws InterruptedException{
+        try{long first=Files.size(path);Thread.sleep(200);return first==Files.size(path);}
+        catch(java.io.IOException unreadable){return true;}
+    }
+    /** 权限/安全类失败不重试；其余（ZipException/文件锁/NotFound 竞态）视为可重试。 */
+    static boolean retryableFailure(Throwable e){
+        for(Throwable t=e;t!=null;t=t.getCause())
+            if(t instanceof AccessDeniedException||t instanceof SecurityException)return false;
+        return true;
+    }
+    /** F3：同 key 合并 + 队列满丢弃不再静默（记 preview-drop + 当前卡片可见提示）。 */
+    private Future<?> submitMerged(ThreadPoolExecutor pool,String key,Runnable task){
+        String kind=pool==reader?"reader":"conversion";
+        poolTasks.values().removeIf(Future::isDone);
+        Future<?> old=poolTasks.get(kind+":"+key);
+        if(old!=null)old.cancel(false);
+        if(pool.getQueue().remainingCapacity()==0){
+            com.minion.core.diagnostics.DiagnosticLog.warn("preview-drop","pool="+kind+" key="+key);
+            if(pool==reader)Platform.runLater(()->{
+                if(current!=null&&current.toString().equals(key))notice.setText("预览被跳过，点击重试");
+            });
+        }
+        Future<?> future=pool.submit(task);
+        poolTasks.put(kind+":"+key,future);
+        return future;
+    }
+    /** F3：3 次仍败/不可重试 → 可操作错误卡（重试重置一次性标记 + 用关联应用打开）。 */
+    private void showLoadError(Path path,Exception e){
+        loaded=null;blocks=Collections.emptyList();status.setText("预览不可用");notice.setText("");showSource(false);
+        Label message=hint("无法预览："+(e.getMessage()==null?e.toString():e.getMessage())+"。仍可打开原文件或定位文件位置。");
+        Button retry=new Button("重试");retry.setId("artifact-retry");
+        retry.setOnAction(ev->{conversionAttempted=false;textExtractionAttempted=false;reload();});
+        Button open=new Button("用关联应用打开");open.setOnAction(ev->links.open(path.toUri().toString()));
+        body.getChildren().setAll(message,new HBox(8,retry,open));
     }
     private long loadedSize,loadedModified;
     private static boolean officeSource(String format){
@@ -475,7 +535,7 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         if(loaded!=null&&("pptx".equals(loaded.format)||"ppt".equals(loaded.format))){
             notice.setText("正在后台渲染高保真幻灯片，完成后自动切换…");
         }
-        conversion.submit(()->{
+        submitMerged(conversion,"office:"+path,()->{
             OfficePreviewConverter.Conversion result=OfficePreviewConverter.convert(path);
             Platform.runLater(()->{
                 if(request!=generation||!path.equals(current))return;
@@ -501,7 +561,7 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         if(pdf==null||textExtractionAttempted||textExtractionLoading)return;
         textExtractionAttempted=true;textExtractionLoading=true;
         final long request=generation;final Path path=current;final Path previewPdf=pdf;
-        conversion.submit(()->{
+        submitMerged(conversion,"text:"+previewPdf,()->{
             String text="";
             try(PagedPdfPreview preview=new PagedPdfPreview(previewPdf)){
                 text=preview.fullText(DocumentPreviewLoader.MAX_MARKDOWN_CHARS);
@@ -554,7 +614,7 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         Label loading=hint("正在打开分页预览…");
         loading.getStyleClass().add("artifact-preview-loading");
         showPaged(loading);
-        reader.submit(()->{
+        submitMerged(reader,"paged:"+pdf,()->{
             PagedPdfPreview backend=null;
             try{
                 backend=new PagedPdfPreview(pdf);
