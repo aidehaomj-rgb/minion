@@ -93,6 +93,8 @@ public class MainWindow {
     /** 对话与生成报告共用的右侧工作区。 */
     private SplitPane workspaceSplit;
     private VBox conversationColumn;
+    /** Part E 对话框上方常驻任务条（ui.taskStrip.enabled=false 时为 null，布局与现状一致） */
+    private TaskStrip taskStrip;
     private ArtifactPreviewPane artifactPreview;
     private com.minion.gui.artifact.LocalFileLinks fileLinks;
     private SessionHandle previewOwner;
@@ -243,7 +245,16 @@ public class MainWindow {
         workspaceSplit = new SplitPane();
         workspaceSplit.getStyleClass().add("workspace-split");
         workspaceSplit.setFocusTraversable(false); // 禁止 JavaFX 8 默认焦点环给整个对话区描亮边
-        conversationColumn = new VBox(chatHost, inputView);
+        // Part E：对话框上方常驻任务条（纯展示层；默认开，ui.taskStrip.enabled=false 时不创建，布局与现状逐像素一致）
+        if (Boolean.parseBoolean(MinionApp.config().get("ui.taskStrip.enabled", "true"))) {
+            taskStrip = new TaskStrip(manager, MinionApp.config(), () -> {
+                SessionHandle h = manager.currentSession();
+                if (h != null) new TaskDashboard(stage, manager, h).show();
+            });
+            conversationColumn = new VBox(chatHost, taskStrip, inputView);
+        } else {
+            conversationColumn = new VBox(chatHost, inputView);
+        }
         conversationColumn.getStyleClass().add("conversation-column");
         conversationColumn.setMinWidth(250);
         VBox.setVgrow(chatHost, Priority.ALWAYS);
@@ -256,7 +267,7 @@ public class MainWindow {
         },fileLinks);
         artifactPreview.setSelectionListener(path->{SessionHandle h=previewOwner;if(h!=null&&manager.currentSession()==h&&!h.deleted)h.selectedArtifactPath=path.toString();});
         artifactPreview.setFocusAction(this::focusArtifactWorkspace);
-        stage.addEventHandler(javafx.stage.WindowEvent.WINDOW_HIDDEN,e->{artifactPreview.close();fileLinks.close();});
+        stage.addEventHandler(javafx.stage.WindowEvent.WINDOW_HIDDEN,e->{artifactPreview.close();fileLinks.close();if(taskStrip!=null)taskStrip.stop();});
         VBox.setVgrow(workspaceSplit, Priority.ALWAYS);
         // 页签栏（右侧顶部，下带 1px 分隔线；页签为空时整行隐藏）
         reportButton = new Button("工作区");
