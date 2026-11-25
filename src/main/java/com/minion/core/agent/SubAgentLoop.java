@@ -718,6 +718,9 @@ public class SubAgentLoop {
             }
             if(!policy.permits(call.name,args)) return ToolResult.error("子Agent工具权限拒绝: "+call.name+"；只读模式禁止写入、Shell、Python及未列入白名单的工具");
             if (!confirmGate.check(tool, args)) {
+                if (ConfirmGate.isNonInteractive())
+                    return ToolResult.error("后台子Agent无法交互确认，高危操作已自动拒绝（" + call.name
+                            + "）；请改用只读替代，或把该操作写入报告交主Agent前台执行");
                 return ToolResult.error("用户拒绝了该操作（" + call.name + "）");
             }
             ui.onToolCall(call.name, args);

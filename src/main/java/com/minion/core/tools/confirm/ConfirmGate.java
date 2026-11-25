@@ -43,6 +43,38 @@ public class ConfirmGate {
         this.ui = ui;
     }
 
+    // ==================== G2：后台子 agent 非交互作用域 ====================
+
+    private static final ThreadLocal<Boolean> NON_INTERACTIVE = new ThreadLocal<Boolean>();
+
+    /** 后台子 agent 执行作用域：期间一切交互确认自动拒绝（不弹卡、不持锁等待）；前台路径不包则逐字不变。 */
+    public static <T> T nonInteractive(java.util.function.Supplier<T> body) {
+        Boolean prev = NON_INTERACTIVE.get();
+        NON_INTERACTIVE.set(Boolean.TRUE);
+        try { return body.get(); }
+        finally {
+            if (prev == null) NON_INTERACTIVE.remove(); else NON_INTERACTIVE.set(prev);
+        }
+    }
+
+    public static boolean isNonInteractive() { return Boolean.TRUE.equals(NON_INTERACTIVE.get()); }
+
+    private ConfirmUi.Decision askUser(String prompt) {
+        if (isNonInteractive()) {
+            DiagnosticLog.info("permission", "DENY non-interactive " + prompt);
+            return ConfirmUi.Decision.REJECT;
+        }
+        return ui.ask(prompt);
+    }
+
+    private ConfirmUi.Decision askUserDetailed(PermissionExplainer.Explanation ex, String prompt) {
+        if (isNonInteractive()) {
+            DiagnosticLog.info("permission", "DENY non-interactive " + prompt);
+            return ConfirmUi.Decision.REJECT;
+        }
+        return ui.askDetailed(ex, prompt);
+    }
+
     /** §12.2 设置当前会话权限模式（仅影响本会话，不落盘）；未知模式返回 false */
     public synchronized boolean setSessionPermissionMode(String rawMode) {
         PermissionContext.Mode parsed = PermissionContext.parseMode(rawMode);
@@ -113,7 +145,7 @@ public class ConfirmGate {
 
     /** §4.8 SSH TOFU 首次主机指纹确认：不走规则，直接问用户；APPROVE 系（一次/白名单/会话）均算信任 */
     public boolean askHostKeyTrust(String host, int port, String fingerprint) {
-        ConfirmUi.Decision d = ui.ask("SSH 首次连接未知主机: " + host + ":" + port
+        ConfirmUi.Decision d = askUser("SSH 首次连接未知主机: " + host + ":" + port
                 + "\n主机公钥指纹: " + fingerprint
                 + "\n确认信任并记录到 known_hosts？（拒绝将不发送任何凭据）");
         return d == ConfirmUi.Decision.APPROVE || d == ConfirmUi.Decision.APPROVE_WHITELIST
@@ -126,7 +158,7 @@ public class ConfirmGate {
      */
     public boolean hookAsk(Tool tool, com.google.gson.JsonObject args) {
         String detail = highRiskDetail(tool, args);
-        ConfirmUi.Decision d = ui.ask("! Hook 要求确认 " + detail);
+        ConfirmUi.Decision d = askUser("! Hook 要求确认 " + detail);
         DiagnosticLog.info("permission", (d == ConfirmUi.Decision.APPROVE
                 || d == ConfirmUi.Decision.APPROVE_WHITELIST
                 || d == ConfirmUi.Decision.APPROVE_SESSION ? "ALLOW" : "DENY")
@@ -206,7 +238,7 @@ public class ConfirmGate {
         // §10.3 结构化解释（来源/风险/diff/可编辑规则建议）；默认实现回落纯文本询问
         PermissionExplainer.Explanation ex =
                 PermissionExplainer.explain(v, tool, args, content);
-        ConfirmUi.Decision d = ui.askDetailed(ex, "! 高危操作 " + detail);
+        ConfirmUi.Decision d = askUserDetailed(ex, "! 高危操作 " + detail);
         if (d == ConfirmUi.Decision.APPROVE) {
             DiagnosticLog.info("permission", "ALLOW once(v2) " + detail);
             return true;
@@ -322,7 +354,7 @@ public class ConfirmGate {
 
         String detail = highRiskDetail(tool, args);
         // ⚠ 在 mintty 默认字体链中渲染为 ?，高危确认用 ASCII 的 !
-        ConfirmUi.Decision d = ui.ask("! 高危操作 " + detail);
+        ConfirmUi.Decision d = askUser("! 高危操作 " + detail);
         if (d == ConfirmUi.Decision.APPROVE) { DiagnosticLog.info("permission", "ALLOW once " + detail); return true; }
         if (d == ConfirmUi.Decision.REJECT) { DiagnosticLog.info("permission", "DENY user " + detail); return false; }
         if (d == ConfirmUi.Decision.APPROVE_WHITELIST) {
@@ -357,7 +389,7 @@ public class ConfirmGate {
         if (!config.writeAllowOutside()) return false;
         if (sessionBypass || config.confirmSkip()) return true;
         if (isWhitelisted(tool, args)) return true;
-        ConfirmUi.Decision d = ui.ask("! 越界写入 " + tool.name() + " → " + path);
+        ConfirmUi.Decision d = askUser("! 越界写入 " + tool.name() + " → " + path);
         if (d == ConfirmUi.Decision.APPROVE) return true;
         if (d == ConfirmUi.Decision.REJECT) return false;
         sessionBypass = true;
@@ -368,7 +400,7 @@ public class ConfirmGate {
         if ("full".equals(config.permissionMode()) || config.readAllowOutside() || sessionBypass) return true;
         if ("read-only".equals(config.permissionMode()) && "越界写入".equals(label)) { DiagnosticLog.info("permission", "DENY read-only outside-write " + path); return false; }
         String detail = tool.name() + " → " + path;
-        ConfirmUi.Decision d = ui.ask("! " + label + " " + detail);
+        ConfirmUi.Decision d = askUser("! " + label + " " + detail);
         if (d == ConfirmUi.Decision.APPROVE) return true;
         if (d == ConfirmUi.Decision.REJECT) return false;
         sessionBypass = true;

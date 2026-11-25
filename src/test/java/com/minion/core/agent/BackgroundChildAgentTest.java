@@ -545,6 +545,45 @@ public class BackgroundChildAgentTest {
                 r.loop.lastTurnSucceeded());
     }
 
+    /** G2：后台子 agent 高危确认自动拒绝（不弹卡、不持锁等待），拿到可操作文案后改新文件交付照常完成 */
+    @Test public void backgroundChildHighRiskConfirmAutoRejectedWithActionableMessage() throws Exception {
+        Rig r = newRig();
+        java.nio.file.Files.write(tmp.getRoot().toPath().resolve("existing.txt"),
+                "原始内容".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        r.childReplies((id, script) -> {
+            ToolCall overwrite = new ToolCall();
+            overwrite.id = "child-overwrite";
+            overwrite.name = "Write";
+            overwrite.arguments = "{\"path\":\"existing.txt\",\"content\":\"覆盖\"}";
+            script.addTurnWithTools(Collections.singletonList(overwrite), null);
+            ToolCall fresh = new ToolCall();
+            fresh.id = "child-fresh";
+            fresh.name = "Write";
+            fresh.arguments = "{\"path\":\"fallback-" + id + ".txt\",\"content\":\"替代交付\"}";
+            script.addTurnWithTools(Collections.singletonList(fresh), null);
+            script.addTurn("高危覆盖被自动拒绝，已改为新文件交付。" + AgentLoop.TASK_COMPLETE_MARKER);
+        });
+        r.dispatch("整理已有文件", "");     // worker（可写）
+        r.main.text("等待子任务");
+        r.reviewAllPending();
+        r.main.text("全部完成。" + AgentLoop.TASK_COMPLETE_MARKER);
+        r.loop.runUserTurn("整理");
+
+        r.awaitChildrenSettled(10000);
+        TaskState.Child child = r.children().get(0);
+        assertEquals("worker", child.mode);
+        assertEquals("高危覆盖不得落盘", "原始内容",
+                new String(java.nio.file.Files.readAllBytes(tmp.getRoot().toPath().resolve("existing.txt")),
+                        java.nio.charset.StandardCharsets.UTF_8));
+        assertTrue("子agent应改用新文件完成交付", new File(tmp.getRoot(), "fallback-" + child.id + ".txt").exists());
+        String transcript = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(child.transcript)),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue("子agent应收到可操作的自动拒绝文案: " + r.diagnose(),
+                transcript.contains("后台子Agent无法交互确认") && transcript.contains("交主Agent前台执行"));
+        assertEquals("reviewed", child.status);
+        assertTrue("复核后回合应正常完成", r.loop.lastTurnSucceeded());
+    }
+
     /** 只读探索模式白名单：允许 StructuredOutput 与只读 Files，严禁可写 Files 与 Bash */
     @Test public void explorePolicyAllowsStructuredOutputAndReadOnlyFilesOnly() {
         AgentToolPolicy policy = new AgentToolPolicy(true, "");

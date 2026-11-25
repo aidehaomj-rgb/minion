@@ -786,8 +786,15 @@ public class AgentLoop {
             watchdog.start();
             String result = null;
             TaskState.Child child = session.taskState.child(job.childId);
-            if (child != null && !job.cancelled.get() && !backgroundClosed)   // 登记已被清理则没有可执行的东西
-                result = executeChild(child, false);
+            if (child != null && !job.cancelled.get() && !backgroundClosed) {   // 登记已被清理则没有可执行的东西
+                final TaskState.Child target = child;
+                String assignmentBrief = target.assignment == null ? "" : target.assignment;
+                if (assignmentBrief.length() > 120) assignmentBrief = assignmentBrief.substring(0, 120) + "…";
+                DiagnosticLog.info("child-dispatch", "childId=" + target.id + " mode=" + target.mode
+                        + " revision=" + job.revision + " assignment=" + assignmentBrief);
+                // G2：后台执行期间交互确认自动拒绝——不弹卡、不持 ConfirmGate 锁等待，主 agent 确认链路不被堵
+                result = ConfirmGate.nonInteractive(() -> executeChild(target, false));
+            }
             if (result != null && !job.cancelled.get()) {
                 synchronized (backgroundLock) {   // 当前任务/修订的已返回计数（child_wait 文案用）
                     if (!job.taskId.equals(backgroundCounterTask) || backgroundCounterRevision != job.revision) {
