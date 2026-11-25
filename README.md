@@ -1,5 +1,7 @@
 # minion
 
+2026-11-25 任务条 + Word 交付显示修复（E/F 独立小批，开发完成，未打包）：[设计文档](docs/superpowers/specs/2026-11-25-任务清单对话框展示与Word交付显示-design.md)。E 对话框上方常驻任务条 TaskStrip（与任务面板同源快照、1s 轮询、折叠摘要+进度徽标、点击进任务面板；ui.taskStrip.enabled 默认开，纯展示层零 core 改动）；F1 交付收集器中文措辞容错+stdout 路径兜底扫描（≤10 条，白名单零放宽）；F2 迟到采纳——用户插话推进 generation 后产物不再静默丢弃，late 展示登记与门禁证据分离；F3 预览有界重试 3×500ms+大小稳定采样+池队列 8+同 path 合并+错误卡重试按钮；F4 工作区手动扫描兜底（opt-in，未登记文件一键登记预览）；F5 三天清理豁免登记表引用文件；F6 全链路诊断标签（artifact-collect/artifact-late-adopt/preview-retry/preview-drop/artifact-cleanup-skip）。全量回归 **2933 项 0 失败 0 错误**（40 环境跳过、373 类）。**待人工验收**：任务条 7 主题截图、Word 两条复现脚本（插话期间交付/半写文件预览）、扫描按钮与重试按钮。
+
 2026-11-25 第三批·第一批 9 项内网能力与意图理解增强（开发完成，未打包）：[设计文档](docs/superpowers/specs/2026-11-22-第三批架构模块化与内网能力增强-design.md)。B1 知识库 BM25 索引化检索（mtime+size 增量，损坏/超限无感回退旧扫描）；B3 会话历史主动召回 SessionRecall（只读、仅当前项目）；B4 设置窗模型页备用模型链入口（默认空=不降级）；D1 澄清策略可配（默认 conservative 零行为变化，proactive opt-in）；D2 AskUserQuestion 批量提问（1–4 问，旧容错 4 测试类未经修改全绿）；D4 问题台账防重复问（压缩存活，默认去重可关）；C2 剪贴板粘贴缓冲恢复 + ClipboardTool 双高危；C4 截图 diff 验证操作生效；C5 computeruse 审计日志 + 可选动作上限（默认 0 不限）。全部 additive/默认不变或 opt-in，不触碰 AgentLoop 结构与门禁语义。全量回归 **2895 项 0 失败 0 错误**（40 环境跳过、370 类）。**待人工验收**：B4 降级链输入框、D1 主动澄清复选框、D2 批量提问渲染（深色+浅色主题）。
 
 2026-11-22 v2.4 CC 复刻全量开发（切片 1-40，本机开发完成）：按 `minion开发说明-v2.4.md` 完成 40 个切片——§10.9 ProjectTrustStore 持续信任（第 7 个默认开安全例外）、§13.1 settings.json 六层链+env 显式映射、§2.6 统一结束状态机（Stop Hook 入级联+预算后移）、§7.1 Skills 全 frontmatter/paths 条件激活/内联 shell 三道检查/fork 隔离、§7.2 Plugins 本地市场+版本缓存+信任门控、§3.1 Grep 参数补全、§10.3-10.10 UI 五片（权限富对话框/任务面板/通知+Rewind/状态栏+OutputStyle/键位+Vim+转录）、§12.2 SDK 双向协议（stdin/stdout NDJSON+can_use_tool 完整链路+二期十控制请求）、§4.7 Hook 二期 8 事件、§3.7 MCP 二期（resources/prompts+命名空间命令）、附录 D.3-D.12 提示词全量+回放矩阵、§12.3 IDE 桥路径 B 备档（[豁免记录](docs/ide-bridge-exception.md)）。全量回归 2727 项 0 失败（352 类）；字节码 850+46 依赖 jar 全部 major≤52。**待实机验收**：[Win7 POC 12 项](docs/win7-poc/README.md)（用户执行）+ UI smoke 截图 + IDE 桥签字。安全例外与迁移说明：[SECURITY-EXCEPTIONS.md](docs/SECURITY-EXCEPTIONS.md)。
@@ -153,7 +155,7 @@ jar 同目录 `session/<workSpaceName>/`，每会话一个 JSON 文件（每轮�
 
 ## 内置工具输出上限与落盘
 
-- 命令/搜索输出超限（Bash 30k 字符、Grep 250 条或 30k 字符）时：返回保留头部+尾部（Grep 保留前 250 条），完整结果落盘到 jar 运行目录 `<jarDir>/.session/tmp/<会话id>/`，返回中附绝对路径，可用 Read 查看；启动时自动清理 3 天前的落盘文件。
+- 命令/搜索输出超限（Bash 30k 字符、Grep 250 条或 30k 字符）时：返回保留头部+尾部（Grep 保留前 250 条），完整结果落盘到 jar 运行目录 `<jarDir>/.session/tmp/<会话id>/`，返回中附绝对路径，可用 Read 查看；启动时自动清理 3 天前的落盘文件，被产物登记表引用的文件豁免清理（登记表读取失败时保守保留，宁可不删）。
 - `Grep`/`Glob` 尊重 `.gitignore`（根目录与各级子目录规则就近叠加，支持取反/目录限定/锚定），恒跳过 `.git` 目录，Grep 跳过二进制文件（前 8KB 含 NUL）；显式指定被忽略目录为搜索根时仍直搜。ripgrep 13.0.0（Win7 兼容）作为 `/ripgrep/rg.exe` 打进 JAR，首次使用时按 SHA-256 校验并自解压到安装目录 `.session/tools`；也兼容 jar 同目录 `rg.exe`、`tools/rg.exe` 与 PATH。找不到或执行失败无感回退 Java 遍历；中文模式与 `\b\w\d\s` 类正则仍走 Java 路径以保证 GBK 文件与 ASCII 词边界语义。ripgrep 调用默认 120 秒整体截止，可用 `-Dminion.ripgrep.timeoutMs=<毫秒>` 调整（钳制 0.5 秒至 30 分钟），超时或用户停止会终止进程并清理半截结果。
 
 ## Python、Excel、SQLite 与本地知识库
