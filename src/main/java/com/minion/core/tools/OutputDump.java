@@ -69,6 +69,12 @@ public final class OutputDump {
     /** 删除 tmpRoot（jarDir/.session/tmp）下所有会话子目录中修改时间超过 olderThanMillis 的文件；
      *  子目录本身保留（会话未删除时旧文件允许保留供回溯）。目录不存在静默返回 */
     public static void cleanup(Path tmpRoot, long olderThanMillis) {
+        cleanup(tmpRoot, olderThanMillis, null);
+    }
+
+    /** F5 清理豁免：keep.test(p)==true（被产物登记表引用）→ 跳过删除 + artifact-cleanup-skip；
+     *  判定抛异常（登记表读取失败）→ 保守跳过该文件（宁可不删）。清理周期/范围不变。 */
+    public static void cleanup(Path tmpRoot, long olderThanMillis, java.util.function.Predicate<Path> keep) {
         try {
             if (!Files.isDirectory(tmpRoot)) return;
             long deadline = System.currentTimeMillis() - olderThanMillis;
@@ -78,7 +84,23 @@ public final class OutputDump {
                         stream.forEach(p -> {
                             try {
                                 FileTime t = Files.getLastModifiedTime(p);
-                                if (t.toMillis() < deadline) Files.deleteIfExists(p);
+                                if (t.toMillis() >= deadline) return;
+                                if (keep != null) {
+                                    boolean referenced;
+                                    try {
+                                        referenced = keep.test(p);
+                                    } catch (RuntimeException unreadable) {
+                                        com.minion.core.diagnostics.DiagnosticLog.info(
+                                                "artifact-cleanup-skip", "unreadable-registry " + p);
+                                        return;
+                                    }
+                                    if (referenced) {
+                                        com.minion.core.diagnostics.DiagnosticLog.info(
+                                                "artifact-cleanup-skip", p.toString());
+                                        return;
+                                    }
+                                }
+                                Files.deleteIfExists(p);
                             } catch (IOException ignored) { }
                         });
                     } catch (IOException ignored) { }

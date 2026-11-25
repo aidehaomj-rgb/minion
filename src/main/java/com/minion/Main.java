@@ -21,15 +21,65 @@ import java.util.List;
 /** 入口：装配配置/技能/浏览器/GUI，启动 JavaFX 主窗口（GUI 默认；CLI/SDK 经 Boot 分流为附加入口） */
 public class Main {
 
+    /** F5：枚举各工作空间会话登记表，被引用产物（含历史快照）豁免清理；
+     *  单会话读取失败 → 该会话子目录保守保留；目录级枚举失败 → 全部保守保留（宁可不删）。 */
+    public static java.util.function.Predicate<java.nio.file.Path> artifactCleanupGuard(
+            java.nio.file.Path jarDir, WorkspaceManager workspaces) {
+        java.util.Set<java.nio.file.Path> referenced = new java.util.HashSet<>();
+        java.util.Set<String> unreadable = new java.util.HashSet<>();
+        boolean[] listFailed = {false};
+        for (com.minion.core.config.WorkspaceConfig w : workspaces.list()) {
+            com.minion.core.storage.SessionStore store = new com.minion.core.storage.SessionStore(
+                    WorkspaceManager.sessionDirFor(jarDir, w.workSpaceName));
+            List<com.minion.core.storage.SessionStore.SessionMeta> metas;
+            try {
+                metas = store.list();
+            } catch (Exception e) {
+                listFailed[0] = true;
+                continue;
+            }
+            for (com.minion.core.storage.SessionStore.SessionMeta meta : metas) {
+                try {
+                    com.minion.core.agent.Session s = store.load(meta.id);
+                    if (s == null) continue;
+                    for (com.minion.core.agent.GeneratedArtifact a : s.artifactsSnapshot()) {
+                        addArtifactRef(referenced, a.path);
+                        addArtifactRef(referenced, a.snapshotPath);
+                        if (a.history != null)
+                            for (com.minion.core.agent.GeneratedArtifact.Version v : a.history)
+                                if (v != null) addArtifactRef(referenced, v.snapshotPath);
+                    }
+                } catch (Exception e) {
+                    unreadable.add(meta.id);
+                }
+            }
+        }
+        return p -> {
+            if (listFailed[0]) return true;
+            java.nio.file.Path normalized = p.toAbsolutePath().normalize();
+            java.nio.file.Path parent = normalized.getParent();
+            if (parent != null && unreadable.contains(parent.getFileName().toString())) return true;
+            return referenced.contains(normalized);
+        };
+    }
+
+    private static void addArtifactRef(java.util.Set<java.nio.file.Path> set, String path) {
+        if (path == null || path.trim().isEmpty()) return;
+        try {
+            set.add(java.nio.file.Paths.get(path).toAbsolutePath().normalize());
+        } catch (RuntimeException invalid) { }
+    }
+
     public static void main(String[] args) throws Exception {
         com.minion.core.tools.WindowsAppIdentity.initialize();
         Config config = Config.load();
         java.nio.file.Path jarDir = Config.jarDir();
         WorkspaceManager workspaces = WorkspaceManager.load(jarDir);
 
-        // 过期输出清理不挡在窗口出现前；交给低优先级后台线程。
+        // 过期输出清理不挡在窗口出现前；交给低优先级后台线程。F5：被产物登记表引用的文件豁免。
+        java.util.function.Predicate<java.nio.file.Path> artifactKeep = artifactCleanupGuard(jarDir, workspaces);
         Thread cleanup = new Thread(() -> OutputDump.cleanup(
-                jarDir.resolve(".session").resolve("tmp"), OutputDump.RETENTION_MS), "minion-temp-cleanup");
+                jarDir.resolve(".session").resolve("tmp"), OutputDump.RETENTION_MS, artifactKeep), "minion-temp-cleanup");
         cleanup.setDaemon(true);
         cleanup.setPriority(Thread.MIN_PRIORITY);
         cleanup.start();

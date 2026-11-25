@@ -161,4 +161,46 @@ public class OutputDumpTest {
         OutputDump.cleanup(root, 0); // 全部视为超期
         assertTrue(Files.deleteIfExists(s1));
     }
+
+    // ---------- F5 清理豁免（additive，旧用例上方逐字保留） ----------
+
+    /** 被登记表引用的超期文件豁免；未引用超期文件照常清理 */
+    @Test
+    public void cleanup_exemptReferencedFile_deleteUnreferenced() throws Exception {
+        Path root = tmp.newFolder("jar").toPath().resolve(".session").resolve("tmp");
+        Path s1 = Files.createDirectories(root.resolve("s1"));
+        Path kept = s1.resolve("kept.txt"), gone = s1.resolve("gone.txt");
+        Files.write(kept, "k".getBytes(StandardCharsets.UTF_8));
+        Files.write(gone, "g".getBytes(StandardCharsets.UTF_8));
+        long old = System.currentTimeMillis() - 4L * 24 * 3600 * 1000;
+        Files.setLastModifiedTime(kept, FileTime.fromMillis(old));
+        Files.setLastModifiedTime(gone, FileTime.fromMillis(old));
+        OutputDump.cleanup(root, OutputDump.RETENTION_MS, p -> p.equals(kept));
+        assertTrue("被引用文件豁免", Files.exists(kept));
+        assertFalse("未引用文件照常清理", Files.exists(gone));
+    }
+
+    /** 豁免判定抛异常（登记表读取失败）→ 保守跳过该文件，宁可不删 */
+    @Test
+    public void cleanup_predicateFailureConservativelyKeepsFile() throws Exception {
+        Path root = tmp.newFolder("jar").toPath().resolve(".session").resolve("tmp");
+        Path s1 = Files.createDirectories(root.resolve("s1"));
+        Path f = s1.resolve("unreadable.txt");
+        Files.write(f, "x".getBytes(StandardCharsets.UTF_8));
+        Files.setLastModifiedTime(f, FileTime.fromMillis(System.currentTimeMillis() - 4L * 24 * 3600 * 1000));
+        OutputDump.cleanup(root, OutputDump.RETENTION_MS, p -> { throw new IllegalStateException("登记表损坏"); });
+        assertTrue("读取失败保守保留", Files.exists(f));
+    }
+
+    /** null 豁免判定 = 旧行为（超期即删） */
+    @Test
+    public void cleanup_nullKeepLegacyBehavior() throws Exception {
+        Path root = tmp.newFolder("jar").toPath().resolve(".session").resolve("tmp");
+        Path s1 = Files.createDirectories(root.resolve("s1"));
+        Path f = s1.resolve("legacy.txt");
+        Files.write(f, "x".getBytes(StandardCharsets.UTF_8));
+        Files.setLastModifiedTime(f, FileTime.fromMillis(System.currentTimeMillis() - 4L * 24 * 3600 * 1000));
+        OutputDump.cleanup(root, OutputDump.RETENTION_MS, null);
+        assertFalse(Files.exists(f));
+    }
 }
