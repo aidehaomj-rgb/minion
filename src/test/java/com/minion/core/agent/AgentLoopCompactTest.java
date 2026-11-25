@@ -323,6 +323,9 @@ public class AgentLoopCompactTest {
             session.messages.add(Message.assistant("旧回复"+i+oldText));
         }
         ContextManager cm=new ContextManager(900000,0.95,12,llm,0);
+        // 请求估算含构造自动注册的工具 schema；软阈值必须高于夹具估算，
+        // 否则软阈值压缩先触发、历史降到 131072 以下，本测试要验的 stall 路径就走不到
+        cm.setStableContextTokens(300000);
         assertTrue(cm.estimate(session.messages)>=131072);
         llm.stopStatuses.add("continue");llm.stopStatuses.add("continue");llm.stopStatuses.add("completed");
         llm.addTurn("我先检查，再处理。");llm.addTurn("我先核对，然后生成说明。");llm.addTurn("这是完整说明。");
