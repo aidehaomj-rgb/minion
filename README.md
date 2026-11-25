@@ -1,5 +1,7 @@
 # minion
 
+2026-11-25 第三批·第一批 9 项内网能力与意图理解增强（开发完成，未打包）：[设计文档](docs/superpowers/specs/2026-11-22-第三批架构模块化与内网能力增强-design.md)。B1 知识库 BM25 索引化检索（mtime+size 增量，损坏/超限无感回退旧扫描）；B3 会话历史主动召回 SessionRecall（只读、仅当前项目）；B4 设置窗模型页备用模型链入口（默认空=不降级）；D1 澄清策略可配（默认 conservative 零行为变化，proactive opt-in）；D2 AskUserQuestion 批量提问（1–4 问，旧容错 4 测试类未经修改全绿）；D4 问题台账防重复问（压缩存活，默认去重可关）；C2 剪贴板粘贴缓冲恢复 + ClipboardTool 双高危；C4 截图 diff 验证操作生效；C5 computeruse 审计日志 + 可选动作上限（默认 0 不限）。全部 additive/默认不变或 opt-in，不触碰 AgentLoop 结构与门禁语义。全量回归 **2895 项 0 失败 0 错误**（40 环境跳过、370 类）。**待人工验收**：B4 降级链输入框、D1 主动澄清复选框、D2 批量提问渲染（深色+浅色主题）。
+
 2026-11-22 v2.4 CC 复刻全量开发（切片 1-40，本机开发完成）：按 `minion开发说明-v2.4.md` 完成 40 个切片——§10.9 ProjectTrustStore 持续信任（第 7 个默认开安全例外）、§13.1 settings.json 六层链+env 显式映射、§2.6 统一结束状态机（Stop Hook 入级联+预算后移）、§7.1 Skills 全 frontmatter/paths 条件激活/内联 shell 三道检查/fork 隔离、§7.2 Plugins 本地市场+版本缓存+信任门控、§3.1 Grep 参数补全、§10.3-10.10 UI 五片（权限富对话框/任务面板/通知+Rewind/状态栏+OutputStyle/键位+Vim+转录）、§12.2 SDK 双向协议（stdin/stdout NDJSON+can_use_tool 完整链路+二期十控制请求）、§4.7 Hook 二期 8 事件、§3.7 MCP 二期（resources/prompts+命名空间命令）、附录 D.3-D.12 提示词全量+回放矩阵、§12.3 IDE 桥路径 B 备档（[豁免记录](docs/ide-bridge-exception.md)）。全量回归 2727 项 0 失败（352 类）；字节码 850+46 依赖 jar 全部 major≤52。**待实机验收**：[Win7 POC 12 项](docs/win7-poc/README.md)（用户执行）+ UI smoke 截图 + IDE 桥签字。安全例外与迁移说明：[SECURITY-EXCEPTIONS.md](docs/SECURITY-EXCEPTIONS.md)。
 
 2026-11-16 第二批主流对齐优化与四主题质感增强（V68 小更新）：[设计文档](docs/superpowers/specs/2026-11-16-第二批主流对齐优化-design.md)。Grep/Glob 尊重 .gitignore、恒跳 .git 与二进制；ripgrep 13.0.0（Win7 兼容）作为受 SHA-256 校验的 JAR 资源随程序分发，首次使用自解压到 `.session/tools`，不可用时无感回退 Java 遍历；ripgrep 搜索默认 120 秒整体截止，用户停止会强杀进程，不再因超大目录/网络盘无限等待。token 校准向上立即/向下平滑并按模型指纹持久化，图片按真实尺寸粗估；高危命令白名单支持前缀规则（如 `del /q`）窄化确认粒度，旧条目不收紧；完成裁决抽出 StopAdjudicator（纯机械搬移，特征化 A/B 验证）。全量回归 2339 项通过（0 失败、38 环境跳过）。
@@ -114,7 +116,7 @@ jar 自举行为（启动器内置，双击 / 命令行同样生效）：
 - 启动懒加载：不自动打开任何会话，右侧空白占位；点击左侧会话（或新建/发送）才加载并出现页签；页签与工作空间无关，切换工作空间页签保持不变，点击旧空间页签自动切回该空间
 - 关闭窗口时若有会话仍在运行会弹确认
 - 运行中补充：模型运行时输入框有内容 → 发送按钮变为补充箭头，点击即把内容注入正在进行的对话（不中断流程），消息带「⤒ 运行中补充」标识
-- AskUserQuestion 提问：模型需要用户信息时会调用 AskUserQuestion 工具提问，消息区显示问题与选项列表；畸形参数会自动容错，连续失败会停止重试并提示用户
+- AskUserQuestion 提问：模型需要用户信息时会调用 AskUserQuestion 工具提问，消息区显示问题与选项列表；支持一次提 1–4 个批量问题（questions 数组，按 Q1/Q2… 编号回答）；畸形参数会自动容错，连续失败会停止重试并提示用户；本会话已回答过的问题记入台账，默认直接复用回答不再重复提问（`intent.ledger.dedupe` 可关）
 - 附件上传：回形针可选图片及文档/表格/代码/压缩包等文件，也可把资源管理器文件拖入窗口或从剪贴板粘贴文件/截图；图片随视觉协议发送，普通文件以工作区路径交给 Document/Files/Excel 等工具读取
 
 ## 2026-08-28 全功能完善
