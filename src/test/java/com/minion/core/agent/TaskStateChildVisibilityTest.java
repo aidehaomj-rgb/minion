@@ -101,4 +101,17 @@ public class TaskStateChildVisibilityTest {
         assertTrue(contains(ts.childSnapshot(), c2.id));
         assertTrue(ts.render(new TodoList()).contains("当前任务子Agent数量: 2"));
     }
+
+    @Test public void runningOldAttemptStillDedupedByNewerRunningAttempt() {
+        TaskState ts = new TaskState();
+        ts.begin("任务", true);
+        TaskState.Child c1 = ts.startChild("旧尝试");
+        ts.coordinateChild(c1.id, "step_1", 1);
+        TaskState.Child c2 = ts.startChild("新尝试");
+        ts.coordinateChild(c2.id, "step_1", 2);
+        ts.addGuidance("新要求");
+        assertEquals(2L, ts.revision());
+        assertTrue("最新attempt的running修订推进后仍可见", contains(ts.childSnapshot(), c2.id));
+        assertFalse("最新attempt去重语义保留：旧attempt让位新attempt", contains(ts.childSnapshot(), c1.id));
+    }
 }

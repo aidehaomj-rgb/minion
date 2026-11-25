@@ -435,14 +435,15 @@ public final class TaskState {
     private static Child copy(Child c) { com.google.gson.Gson g=new com.google.gson.Gson(); return g.fromJson(g.toJson(c),Child.class); }
     private List<Child> currentChildRefs() {
         java.util.Map<String,Integer> latest=new java.util.HashMap<String,Integer>();
-        for(Child c:children)if(id!=null&&id.equals(c.taskId)&&c.coordinatedStep!=null&&(c.revision==null||c.revision==revision()))
+        for(Child c:children)if(id!=null&&id.equals(c.taskId)&&c.coordinatedStep!=null
+                &&("running".equals(c.status)||c.revision==null||c.revision==revision()))
             latest.put(c.coordinatedStep,Math.max(latest.getOrDefault(c.coordinatedStep,0),c.coordinatedAttempt==null?1:c.coordinatedAttempt));
-        // G1：running 子agent无条件可见——用户补充推进修订后，仍在执行的子agent不得从数量/面板/上下文隐身；
-        // 已结束态（returned_needs_review/failed/reviewed/cancelled 等）维持原修订过滤+最新attempt去重
+        // G1：running 子agent豁免修订过滤——用户补充推进修订后，仍在执行的子agent不得从数量/面板/上下文隐身；
+        // 最新attempt去重与非协调恒可见语义逐字保留；已结束态维持原修订过滤
         List<Child> result=new ArrayList<Child>(); for(Child c:children) if(id!=null&&id.equals(c.taskId)
-                &&("running".equals(c.status)
-                ||(c.coordinatedStep==null||(c.revision==null||c.revision==revision())
-                &&latest.get(c.coordinatedStep)==(c.coordinatedAttempt==null?1:c.coordinatedAttempt)))) result.add(c); return result;
+                &&(c.coordinatedStep==null
+                ||(latest.getOrDefault(c.coordinatedStep,0)==(c.coordinatedAttempt==null?1:c.coordinatedAttempt)
+                &&("running".equals(c.status)||c.revision==null||c.revision==revision())))) result.add(c); return result;
     }
     public synchronized List<Child> childSnapshot() {
         List<Child> out=new ArrayList<Child>();for(Child c:currentChildRefs())out.add(copy(c));return out;
