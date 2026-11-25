@@ -507,6 +507,7 @@ public class SessionManager {
                         .setToolUsageSection(config.instructionsEnabled()),  // D.4 工具总则（replica）
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
+        loop.configureQaLedger(config.intentLedgerDedupe()); // 三批 D4 问题台账（默认去重）
         loop.configureTaskBudget(config.taskContinuationWindows(), 0 /* no cumulative token cap, including restored tasks */);
         loop.setAllSkills(sk.skills); // 会话级快照：本会话独享、不可变
         applySkillEnhancements(loop, ctx); // §7.1：paths 条件激活拆分 + 内联 shell 三道检查通道 + fork/扩展开关
@@ -929,6 +930,7 @@ public class SessionManager {
                         .setToolUsageSection(config.instructionsEnabled()),  // D.4 工具总则（replica）
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
+        loop.configureQaLedger(config.intentLedgerDedupe()); // 三批 D4 问题台账（默认去重）
         loop.setAllSkills(sk.skills);   // 会话级快照：本会话独享、不可变
         applySkillEnhancements(loop, ctx); // §7.1：paths 条件激活拆分 + 内联 shell 三道检查通道 + fork/扩展开关
         loop.configureTaskBudget(config.taskContinuationWindows(), 0 /* no cumulative token cap, including restored tasks */);

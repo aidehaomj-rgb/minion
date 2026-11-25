@@ -1514,6 +1514,19 @@ public class AgentLoop {
 
     public String pendingAskUserId() { return askUserTool.pendingQuestionId(); }
 
+    /** D4 问题台账：接到 TaskState.qaLedger（会话级持久化、随 render 进压缩摘要）；dedupe=false 仅记录 */
+    public void configureQaLedger(boolean dedupe) {
+        askUserTool.setQaLedger(new com.minion.core.tools.AskUserQuestionTool.QaLedger() {
+            @Override public String answered(String question) {
+                TaskState.QaEntry e = session.taskState.findAnswered(question);
+                return e == null ? null : e.answer;
+            }
+            @Override public void record(String question, String answer, String questionId) {
+                session.taskState.recordQa(question, answer, questionId);
+            }
+        }, dedupe);
+    }
+
     public boolean answerAskUser(String answer, List<ImagePart> images, String expectedQuestionId) {
         return askUserTool.complete(answer, images, expectedQuestionId);
     }

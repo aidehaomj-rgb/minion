@@ -51,6 +51,22 @@ public class AskUserQuestionTool implements Tool {
     /** 畸形提问挂起阈值：第 1 次回传失败让模型自纠，累计到此次数的畸形提问改为挂起交回用户 */
     static final int MAX_INVALID_STRIKES = 2;
 
+    /** 三批 D4 问题台账钩子（null=未接线，行为与旧版完全一致）；由 AgentLoop 接到 TaskState.qaLedger */
+    public interface QaLedger {
+        /** 同规范化问题已答 → 缓存回答；未答返回 null */
+        String answered(String question);
+        /** answerAskUser 成功后写入台账 */
+        void record(String question, String answer, String questionId);
+    }
+    private volatile QaLedger ledger;
+    /** false 时仅记录不去重（intent.ledger.dedupe） */
+    private volatile boolean ledgerDedupe = true;
+
+    public void setQaLedger(QaLedger ledger, boolean dedupe) {
+        this.ledger = ledger;
+        this.ledgerDedupe = dedupe;
+    }
+
     public AskUserQuestionTool(AgentUi ui) { this.ui = ui; }
 
     @Override
@@ -147,10 +163,20 @@ public class AskUserQuestionTool implements Tool {
             return ToolResult.error(INVALID_PREFIX + "必须提供非空 question（options 可选），"
                     + "无法向用户展示提问内容，请重新发起提问");
         }
+        // D4 去重：同规范化问题本会话已答 → 直接复用缓存回答，不再挂起打扰用户
+        if (!malformed && ledger != null && ledgerDedupe) {
+            String cached = null;
+            try { cached = ledger.answered(ledgerQuestion(ask)); }
+            catch (RuntimeException e) {
+                com.minion.core.diagnostics.DiagnosticLog.warn("ask", "问题台账读取失败，按未答处理: " + e.getMessage());
+            }
+            if (cached != null && !cached.trim().isEmpty()) return ToolResult.success(withLedgerNote(cached));
+        }
         String question = ask.placeholder(); // 软兜底挂起时即「参数格式异常」提示文案
         CompletableFuture<Answer> fut;
         final boolean owner;
         final Ask displayedAsk;
+        final String askedId;
         synchronized (this) {
             fut = this.pending; // 同轮多次调用共享同一 future：重入链到已有挂起而非新建
             if (fut == null) {
@@ -163,6 +189,7 @@ public class AskUserQuestionTool implements Tool {
                 owner = false;
             }
             displayedAsk = this.pendingAsk;
+            askedId = this.pendingQuestionId;
         }
         if (owner) ui.onAskUserStart(question);
         try {
@@ -172,6 +199,13 @@ public class AskUserQuestionTool implements Tool {
             ToolResult result = ToolResult.success(answerForModel(displayedAsk, answer));
             // 同轮重复提问共用回答，但像素只传一次，避免重复占用上下文。
             if (owner && !answer.images.isEmpty()) result.images = answer.images;
+            // D4 记录：仅 owner 写一次；dedupe=false 也记录（仅记录模式）
+            if (owner && ledger != null) {
+                try { ledger.record(ledgerQuestion(displayedAsk), result.output, askedId); }
+                catch (RuntimeException e) {
+                    com.minion.core.diagnostics.DiagnosticLog.warn("ask", "问题台账写入失败，不影响回答: " + e.getMessage());
+                }
+            }
             return result;
         } finally {
             // 仅清自己占据的槽位：跟随者先结束时不得误清新一轮的 pending
@@ -392,6 +426,31 @@ public class AskUserQuestionTool implements Tool {
             }
         } catch (RuntimeException ignored) { }
         return output;
+    }
+
+    /** D4 台账键源：单问=问题文本；批量=全部子问拼接（选项变化不算新问题） */
+    private static String ledgerQuestion(Ask ask) {
+        if (ask.batch != null && ask.batch.size() > 1) {
+            StringBuilder sb = new StringBuilder();
+            for (Ask sub : ask.batch) {
+                if (sb.length() > 0) sb.append('\n');
+                sb.append(sub.question);
+            }
+            return sb.toString();
+        }
+        return ask.question;
+    }
+
+    /** 缓存回答注明复用来源；结构化包装保持 JSON 形态（显示层仍回用户原文） */
+    private static String withLedgerNote(String cached) {
+        try {
+            JsonObject o = JsonParser.parseString(cached).getAsJsonObject();
+            if (o.has("type") && ANSWER_TYPE.equals(o.get("type").getAsString())) {
+                o.addProperty("ledgerNote", "本会话已回答过该问题，此为复用上次回答，不是新的用户答复。");
+                return o.toString();
+            }
+        } catch (RuntimeException ignored) { }
+        return "[本会话已回答过，复用上次回答] " + cached;
     }
 
     // ==================== 参数规范化（单一真源：工具挂起文案、消息区渲染、输入框占位共用） ====================

@@ -131,6 +131,8 @@ public class Config {
     public boolean sessionRecallEnabled() { return Boolean.parseBoolean(get("session.recall.enabled", "true")); }
     /** 三批 D1：澄清策略 conservative（默认，零行为变化）/ proactive（opt-in 主动澄清）。 */
     public String intentClarifyPolicy() { return get("intent.clarify.policy", "conservative"); }
+    /** 三批 D4：问题台账去重（默认 true；false 仅记录不去重）。 */
+    public boolean intentLedgerDedupe() { return Boolean.parseBoolean(get("intent.ledger.dedupe", "true")); }
     /** Python/Anaconda 解释器；留空时自动探测 MINION_PYTHON、Conda 和常见安装目录。 */
     public String pythonPath()   { return get("python.path", ""); }
     public String ocrPath() { return get("ocr.path", "tesseract"); }

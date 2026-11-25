@@ -47,6 +47,14 @@ public final class TaskState {
     public StopGate.Decision stopDecision;
     public List<String> referenceContext=new ArrayList<String>();
     public boolean referenceContextTruncated;
+    /** 三批 D4 问题台账：规范化问题 hash → 已答记录；null 兼容旧会话记录，会话级存活（不随新任务清空） */
+    public java.util.LinkedHashMap<String, QaEntry> qaLedger;
+
+    /** 台账条目：问题/回答原文有界裁剪，questionId 关联当次挂起身份 */
+    public static final class QaEntry {
+        public String question, answer, questionId;
+        public long time;
+    }
 
     public static final class Evidence {
         public String id;
@@ -354,6 +362,40 @@ public final class TaskState {
                         "本轮在完成核验前停止；请查看最近错误或从断点继续",1000);
     }
     public synchronized void recordStop(StopGate.Decision decision) {stopDecision=decision;}
+
+    /** D4：answerAskUser 成功后写入；同键覆盖刷新时间，总量有界 64 条（防长会话膨胀） */
+    public synchronized void recordQa(String question, String answer, String questionId) {
+        if (question == null || question.trim().isEmpty() || answer == null || answer.trim().isEmpty()) return;
+        if (qaLedger == null) qaLedger = new java.util.LinkedHashMap<String, QaEntry>();
+        String key = questionKey(question);
+        QaEntry e = new QaEntry();
+        e.question = clip(question, 2000); e.answer = clip(answer, 4000);
+        e.questionId = questionId; e.time = System.currentTimeMillis();
+        qaLedger.remove(key);
+        qaLedger.put(key, e);
+        while (qaLedger.size() > 64) qaLedger.remove(qaLedger.keySet().iterator().next());
+    }
+
+    /** D4：同规范化问题已答 → 返回缓存条目；未答/null 台账返回 null */
+    public synchronized QaEntry findAnswered(String question) {
+        if (qaLedger == null || question == null) return null;
+        return qaLedger.get(questionKey(question));
+    }
+
+    /** 规范化 hash：NFKC + 压缩空白 + 小写 → SHA-256（全角/半角、空白差异视为同一问题） */
+    public static String questionKey(String question) {
+        String s = java.text.Normalizer.normalize(question, java.text.Normalizer.Form.NFKC)
+                .replaceAll("\\s+", " ").trim().toLowerCase(java.util.Locale.ROOT);
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte x : digest) hex.append(Character.forDigit((x >> 4) & 0xF, 16)).append(Character.forDigit(x & 0xF, 16));
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
     /** 有界保留指代所需的最近对话，不把旧任务变成当前指令。 */
     public synchronized void bindReferenceHistory(List<com.minion.core.llm.Message> history) {
         List<String> refs=new ArrayList<String>();boolean clipped=false;
@@ -509,6 +551,14 @@ public final class TaskState {
         }
         if(referenceContext!=null&&!referenceContext.isEmpty())b.append("\n历史指代参考（仅解释当前目标中的‘这个/按方案’，禁止复活旧任务）:\n")
                 .append(clip(String.join("\n",referenceContext),4000));
+        if(qaLedger!=null&&!qaLedger.isEmpty()) {
+            b.append("\n本会话已回答过的问题（不要重复提问，直接采用已有回答）:\n");
+            java.util.List<QaEntry> entries=new ArrayList<QaEntry>(qaLedger.values());
+            for(int i=Math.max(0,entries.size()-8);i<entries.size();i++) {
+                QaEntry e=entries.get(i);
+                b.append("- 问: ").append(clip(e.question,200)).append(" → 答: ").append(clip(e.answer,300)).append('\n');
+            }
+        }
         if (todos != null) b.append("\n主任务清单（子Agent不可修改）:\n").append(clip(todos.render(),6000));
         if (latestProgress != null) b.append("\n最近进度/断点（模型陈述，需工具验证）:\n").append(latestProgress);
         if(stopDecision!=null)b.append("\n最近结束核验 [").append(stopDecision.status).append("] ")
