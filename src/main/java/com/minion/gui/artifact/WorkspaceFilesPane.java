@@ -83,6 +83,36 @@ public final class WorkspaceFilesPane extends VBox implements AutoCloseable {
             }catch(IOException|RuntimeException e){Platform.runLater(()->{if(ticket==revision)message.setText("无法读取此目录："+e.getMessage());});}
         });
     }
+    /** F4 手动扫描：递归 ≤3 层、检查 ≤2000 项、收集 ≤400 个交付扩展名文件；
+     *  排除 .git/.minion/.session、符号链接与越界路径（复用 list 的护栏）。仅用户显式点击调用。 */
+    public static List<Path> scanDeliverables(Path base)throws IOException {
+        Path realBase=base.toRealPath();
+        List<Path> out=new ArrayList<>();
+        scanDeliverables(realBase,realBase,0,new int[]{0},new boolean[]{false},out);
+        out.sort(Comparator.comparing(p->p.getFileName().toString(),String.CASE_INSENSITIVE_ORDER));
+        return out;
+    }
+    private static void scanDeliverables(Path realBase,Path dir,int depth,int[] checked,boolean[] limited,List<Path> out)throws IOException {
+        if(depth>3||limited[0])return;
+        try(DirectoryStream<Path> stream=Files.newDirectoryStream(dir)){
+            for(Path p:stream){
+                if(Thread.currentThread().isInterrupted())throw new IOException("目录读取已取消");
+                if(++checked[0]>2000||out.size()>=LIMIT){limited[0]=true;return;}
+                String name=p.getFileName().toString().toLowerCase(Locale.ROOT);
+                if(INTERNAL.contains(name))continue;
+                try{
+                    if(Files.isSymbolicLink(p)||!p.toRealPath().startsWith(realBase))continue;
+                    if(Files.isDirectory(p,LinkOption.NOFOLLOW_LINKS))scanDeliverables(realBase,p,depth+1,checked,limited,out);
+                    else if(Files.isRegularFile(p,LinkOption.NOFOLLOW_LINKS)&&isDeliverable(name))out.add(p);
+                }catch(NoSuchFileException|AccessDeniedException ignored){/* entries can change during a scan */}
+            }
+        }
+    }
+    private static boolean isDeliverable(String lowerName){
+        for(String suffix:new String[]{".doc",".docx",".xls",".xlsx",".ppt",".pptx",".pdf",".md",".csv",".html",".htm",".png",".jpg",".jpeg"})
+            if(lowerName.endsWith(suffix))return true;
+        return false;
+    }
     static Scan list(Path base,Path directory)throws IOException {
         Path realBase=base.toRealPath(), real=directory.toRealPath();
         if(!real.startsWith(realBase))throw new IOException("不能查看工作区之外的目录");

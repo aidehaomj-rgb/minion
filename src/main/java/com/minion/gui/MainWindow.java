@@ -267,6 +267,31 @@ public class MainWindow {
         },fileLinks);
         artifactPreview.setSelectionListener(path->{SessionHandle h=previewOwner;if(h!=null&&manager.currentSession()==h&&!h.deleted)h.selectedArtifactPath=path.toString();});
         artifactPreview.setFocusAction(this::focusArtifactWorkspace);
+        if (Boolean.parseBoolean(MinionApp.config().get("ui.workspaceScan.enabled", "true"))) {
+            artifactPreview.setWorkspaceScanner(new ArtifactPreviewPane.WorkspaceScanner() {
+                @Override public java.util.List<java.nio.file.Path> scan() throws Exception {
+                    SessionHandle h = manager.currentSession();
+                    if (h == null || h.loop == null) return java.util.Collections.emptyList();
+                    java.util.List<String> roots = new java.util.ArrayList<String>();
+                    roots.add(h.loop.workspace().workDir());
+                    roots.addAll(h.loop.workspace().extraAllowedDirs());
+                    java.util.List<java.nio.file.Path> out = new java.util.ArrayList<java.nio.file.Path>();
+                    java.util.Set<java.nio.file.Path> seen = new java.util.HashSet<java.nio.file.Path>();
+                    for (String root : roots) {
+                        if (root == null || root.trim().isEmpty()) continue;
+                        try {
+                            for (java.nio.file.Path p : com.minion.gui.artifact.WorkspaceFilesPane.scanDeliverables(java.nio.file.Paths.get(root)))
+                                if (seen.add(p.toAbsolutePath().normalize())) out.add(p);
+                        } catch (java.io.IOException unreadable) { /* 单个根目录不可读不影响其余 */ }
+                    }
+                    return out;
+                }
+                @Override public void adopt(java.nio.file.Path path) {
+                    SessionHandle h = manager.currentSession();
+                    if (h != null && h.loop != null) h.loop.adoptScannedArtifact(path);
+                }
+            });
+        }
         stage.addEventHandler(javafx.stage.WindowEvent.WINDOW_HIDDEN,e->{artifactPreview.close();fileLinks.close();if(taskStrip!=null)taskStrip.stop();});
         VBox.setVgrow(workspaceSplit, Priority.ALWAYS);
         // 页签栏（右侧顶部，下带 1px 分隔线；页签为空时整行隐藏）

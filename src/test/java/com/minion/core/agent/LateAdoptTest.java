@@ -138,6 +138,30 @@ public class LateAdoptTest {
         } finally { oldLoop.shutdown(); newLoop.shutdown(); }
     }
 
+    /** F4 手动扫描采纳：late=true、UI 照发、证据计数不变；白名单外拒绝 */
+    @Test public void manualScanAdoptsLateWithoutEvidence() throws Exception {
+        Path root = temp.newFolder().toPath();
+        Path file = root.resolve("扫描.docx");
+        Files.write(file, new byte[]{1});
+        Session s = Session.create(root.toString(), "fixture");
+        Ui ui = new Ui();
+        AgentLoop loop = loop(root, s, ui);
+        try {
+            int before = s.taskState.evidence.size();
+            loop.adoptScannedArtifact(file);
+            GeneratedArtifact a = s.artifactsSnapshot().get(0);
+            assertTrue("手动采纳打 late 标", a.late);
+            assertEquals("WorkspaceScan", a.sourceTool);
+            assertEquals(GeneratedArtifact.DELIVERABLE, a.kind);
+            assertEquals(1, ui.paths.size());
+            assertEquals("证据计数不变", before, s.taskState.evidence.size());
+            Path outside = temp.newFolder().toPath().resolve("外.docx");
+            Files.write(outside, new byte[]{1});
+            loop.adoptScannedArtifact(outside);
+            assertEquals("白名单外不登记", 1, s.artifactsSnapshot().size());
+        } finally { loop.shutdown(); }
+    }
+
     /** late 打标随 SessionStore 快照持久化回环；旧 JSON 无 late 字段缺省 false */
     @Test public void lateFlagSurvivesPersistenceRoundTrip() throws Exception {
         Path root = temp.newFolder().toPath();

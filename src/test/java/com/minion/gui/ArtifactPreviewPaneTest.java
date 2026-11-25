@@ -377,6 +377,44 @@ public class ArtifactPreviewPaneTest {
         }finally{release.countDown();fx(()->{if(p[0]!=null)p[0].close();if(l[0]!=null)l[0].close();});}
     }
 
+    // ---- F4 手动扫描（additive，旧用例上方逐字保留） ----
+
+    /** 未注入扫描器（配置关）按钮隐藏零行为；注入后可见；置空复隐 */
+    @Test public void scanButtonHiddenUntilScannerInjected()throws Exception{
+        Path root=temp.newFolder().toPath();
+        ArtifactPreviewPane[] p={null};LocalFileLinks[] l={null};
+        try{
+            fx(()->{l[0]=new LocalFileLinks(()->root,()->null,f->{},m->{});p[0]=new ArtifactPreviewPane(()->{},l[0]);});
+            fx(()->{try{assertFalse(((javafx.scene.control.Button)field(p[0],"scan")).isVisible());}catch(Exception e){throw new RuntimeException(e);}});
+            fx(()->{try{
+                p[0].setWorkspaceScanner(new ArtifactPreviewPane.WorkspaceScanner(){
+                    public java.util.List<Path> scan(){return java.util.Collections.emptyList();}
+                    public void adopt(Path path){}
+                });
+                assertTrue(((javafx.scene.control.Button)field(p[0],"scan")).isVisible());
+                p[0].setWorkspaceScanner(null);
+                assertFalse(((javafx.scene.control.Button)field(p[0],"scan")).isVisible());
+            }catch(Exception e){throw new RuntimeException(e);}});
+        }finally{fx(()->{if(p[0]!=null)p[0].close();if(l[0]!=null)l[0].close();});}
+    }
+
+    /** unregistered 过滤：已登记路径剔除，未登记保留（规范化比对） */
+    @Test public void unregisteredFiltersRegisteredPaths()throws Exception{
+        Path root=temp.newFolder().toPath(),a=root.resolve("已登记.docx"),b=root.resolve("未登记.docx");
+        Files.write(a,new byte[]{1});Files.write(b,new byte[]{1});
+        GeneratedArtifact item=new GeneratedArtifact();item.path=a.toString();item.kind=GeneratedArtifact.DELIVERABLE;
+        ArtifactPreviewPane[] p={null};LocalFileLinks[] l={null};
+        try{
+            fx(()->{l[0]=new LocalFileLinks(()->root,()->null,f->{},m->{});p[0]=new ArtifactPreviewPane(()->{},l[0]);
+                p[0].setArtifacts(Arrays.asList(item));});
+            fx(()->{try{
+                java.util.List<Path> left=p[0].unregistered(Arrays.asList(a,b));
+                assertEquals(1,left.size());
+                assertEquals(b.toAbsolutePath().normalize(),left.get(0));
+            }catch(Exception e){throw new RuntimeException(e);}});
+        }finally{fx(()->{if(p[0]!=null)p[0].close();if(l[0]!=null)l[0].close();});}
+    }
+
     private static boolean ready(ArtifactPreviewPane pane)throws Exception{
         boolean[] ready={false};fx(()->{try{ready[0]=field(pane,"loaded")!=null;}catch(Exception e){throw new RuntimeException(e);}});return ready[0];
     }

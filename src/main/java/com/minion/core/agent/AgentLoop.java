@@ -4011,6 +4011,20 @@ public class AgentLoop {
                 .fromTool(call,result,cwd,owner.taskId,owner.revision));
     }
 
+    /** F4 手动扫描采纳（用户显式点击）：仅展示登记 late=true，不进证据通道；白名单不放宽。 */
+    public void adoptScannedArtifact(java.nio.file.Path path) {
+        if(path==null)return;
+        java.nio.file.Path normalized=path.toAbsolutePath().normalize();
+        if(!evidencePathAllowed(normalized)||!java.nio.file.Files.isRegularFile(normalized))return;
+        GeneratedArtifact a=new GeneratedArtifact();
+        a.path=normalized.toString();a.title=normalized.getFileName().toString();
+        a.kind=GeneratedArtifact.DELIVERABLE;a.taskId=session.taskState.id;
+        a.revision=session.taskState.revision();a.sourceTool="WorkspaceScan";a.late=true;
+        try{a.size=java.nio.file.Files.size(normalized);}catch(java.io.IOException gone){return;}
+        a.updatedAt=System.currentTimeMillis();
+        adoptArtifacts(new ToolOwner(this),java.util.Collections.singletonList(a));
+    }
+
     private void adoptArtifacts(ToolOwner owner,List<GeneratedArtifact> artifacts) {
         if(owner.sessionChanged(this)){
             DiagnosticLog.info("artifact-late-adopt","drop=session-changed count="+artifacts.size());return;

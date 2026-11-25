@@ -35,6 +35,10 @@ import java.util.function.Consumer;
 /** Offline, bounded, asynchronous artifact workspace. Never executes HTML/macros or modifies source files. */
 final class ArtifactPreviewPane extends VBox implements AutoCloseable {
     interface Loader { DocumentPreviewLoader.Result load(Path path)throws Exception; }
+    /** F4 手动工作区扫描：scan 列出交付文件，adopt 走 late 展示登记通道（MainWindow 注入）。 */
+    interface WorkspaceScanner { java.util.List<Path> scan()throws Exception; void adopt(Path path); }
+    private WorkspaceScanner scanner;
+    private final Button scan=new Button("扫描工作区文件");
     private static final int MAX_TABS=8;
     private final Label fileTitle=new Label();
     private final Hyperlink pathLink=new Hyperlink();
@@ -124,6 +128,8 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         ToggleGroup modes=new ToggleGroup();rendered.setToggleGroup(modes);original.setToggleGroup(modes);source.setToggleGroup(modes);rendered.setSelected(true);
         modes.selectedToggleProperty().addListener((o,a,b)->{if(b==null){if(a!=null)a.setSelected(true);return;}if(!restoring)render();});
         Button open=new Button("打开文件");open.setId("artifact-open");open.setOnAction(e->{if(current!=null)links.open(current.toUri().toString());});
+        scan.setId("artifact-scan");scan.setTooltip(new Tooltip("扫描工作区中尚未登记的交付文件（仅手动触发，不自动扫描）"));
+        scan.setOnAction(e->runWorkspaceScan());scan.setVisible(false);scan.setManaged(false);
         MenuItem refresh=new MenuItem("刷新预览");refresh.setOnAction(e->{rememberView();reload();});
         MenuItem location=new MenuItem("打开文件位置");location.setId("artifact-reveal");location.setOnAction(e->{if(current!=null)links.reveal(current.toUri().toString());});
         MenuItem copy=new MenuItem("复制预览文本");copy.setOnAction(e->{if(loaded!=null){ClipboardContent c=new ClipboardContent();c.putString(previewText());Clipboard.getSystemClipboard().setContent(c);}});
@@ -146,7 +152,7 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
         tabs.getSelectionModel().selectedItemProperty().addListener((o,a,b)->{
                 if(!updating&&b!=null){follow.setSelected(false);activate((Path)b.getUserData());}
         });
-        FlowPane actions=new FlowPane(6,5,rendered,original,source,outline,open,more);actions.getStyleClass().add("artifact-actions");
+        FlowPane actions=new FlowPane(6,5,rendered,original,source,outline,open,scan,more);actions.getStyleClass().add("artifact-actions");
         actions.visibleProperty().bind(fileTitle.textProperty().isNotEmpty());
         actions.managedProperty().bind(actions.visibleProperty());
         outline.visibleProperty().bind(outline.disableProperty().not());
@@ -348,6 +354,58 @@ final class ArtifactPreviewPane extends VBox implements AutoCloseable {
     void setSelectionListener(Consumer<Path> listener){selectionListener=listener==null?p->{}:listener;}
     void setLinkMenus(java.util.function.Function<String,ContextMenu> factory){linkMenus=factory==null?links::menu:factory;}
     void setFocusAction(Consumer<Boolean> action){focusAction=action;}
+    /** F4：注入扫描器才显示按钮（配置关 = 不注入 = 零行为变化）。 */
+    void setWorkspaceScanner(WorkspaceScanner value){
+        scanner=value;scan.setVisible(value!=null);scan.setManaged(value!=null);
+    }
+    private void runWorkspaceScan(){
+        if(scanner==null)return;
+        final WorkspaceScanner active=scanner;
+        notice.setText("正在扫描工作区文件…");
+        submitMerged(reader,"workspace-scan",()->{
+            java.util.List<Path> found;
+            try{found=active.scan();}
+            catch(Exception e){Platform.runLater(()->notice.setText("扫描失败："+(e.getMessage()==null?e.toString():e.getMessage())));return;}
+            Platform.runLater(()->{notice.setText("");showScanResults(unregistered(found));});
+        });
+    }
+    /** 过滤掉已在登记表的文件（纯逻辑，便于测试）。 */
+    java.util.List<Path> unregistered(java.util.List<Path> scanned){
+        java.util.List<Path> out=new ArrayList<Path>();
+        if(scanned==null)return out;
+        for(Path p:scanned){
+            try{Path n=p.toAbsolutePath().normalize();if(!artifacts.containsKey(n))out.add(n);}
+            catch(RuntimeException invalid){/* Old receipts can contain invalid paths. */}
+        }
+        return out;
+    }
+    private void showScanResults(java.util.List<Path> files){
+        Dialog<Void> dialog=new Dialog<Void>();
+        dialog.setTitle("扫描工作区文件");
+        dialog.setHeaderText(files.isEmpty()?"没有未登记的交付文件"
+                :"发现 "+files.size()+" 个未登记文件（登记仅进展示面，不影响任务判定）");
+        ListView<Path> list=new ListView<Path>();
+        list.getItems().setAll(files);
+        list.setPlaceholder(new Label("工作区交付文件均已登记"));
+        list.setCellFactory(v->new ListCell<Path>(){
+            @Override protected void updateItem(Path p,boolean empty){
+                super.updateItem(p,empty);
+                if(empty||p==null){setGraphic(null);setText(null);return;}
+                Label name=new Label(p.getFileName().toString());name.setMinWidth(0);
+                HBox.setHgrow(name,Priority.ALWAYS);name.setMaxWidth(Double.MAX_VALUE);
+                name.setTooltip(new Tooltip(p.toString()));
+                Label badge=new Label("未登记");badge.getStyleClass().add("artifact-meta");
+                Button adopt=new Button("登记并预览");
+                adopt.setOnAction(e->{if(scanner!=null)scanner.adopt(p);dialog.close();open(p.toString());});
+                HBox row=new HBox(8,name,badge,adopt);row.setAlignment(Pos.CENTER_LEFT);
+                setGraphic(row);setText(null);
+            }
+        });
+        list.setPrefSize(460,300);
+        dialog.getDialogPane().setContent(list);
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        dialog.showAndWait();
+    }
     void showArtifactIndex(){if(files.getScene()!=null)files.show();}
     void setFocusedMode(boolean value){focus.setSelected(value);}
     void setArtifacts(List<GeneratedArtifact> entries) {
