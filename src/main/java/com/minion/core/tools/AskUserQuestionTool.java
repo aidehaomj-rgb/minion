@@ -61,6 +61,8 @@ public class AskUserQuestionTool implements Tool {
         return "向用户提问或请求选择。当缺少完成任务所需信息、需要用户确认方案或做出选择时调用。"
                 + "参数 question 为必填问题文本；header 为可选简短标题；options 为可选答案列表"
                 + "（2-4 个，每项含 label/description）；multiSelect 表示是否可多选。"
+                + "也可用 questions 数组一次提出 1-4 个相关问题（每项含 question，可选 header/options/multiSelect），"
+                + "用户按 Q1: …、Q2: … 逐行作答。"
                 + "调用后将挂起等待用户回答，回答会作为工具结果返回。";
     }
 
@@ -99,6 +101,23 @@ public class AskUserQuestionTool implements Tool {
         props.add("header", header);
         props.add("options", options);
         props.add("multiSelect", multiSelect);
+        // 三批 D2 增量：批量提问入口（可选；required 仍只锁 question，旧契约不变）
+        JsonObject questions = new JsonObject();
+        questions.addProperty("type", "array");
+        questions.addProperty("description", "批量提问（可选，1-4 个相关问题，每项含非空 question；提供时优先于顶层 question）");
+        JsonObject qItems = new JsonObject();
+        qItems.addProperty("type", "object");
+        JsonObject qProps = new JsonObject();
+        qProps.add("question", question);
+        qProps.add("header", header);
+        qProps.add("options", options);
+        qProps.add("multiSelect", multiSelect);
+        qItems.add("properties", qProps);
+        JsonArray qRequired = new JsonArray();
+        qRequired.add("question");
+        qItems.add("required", qRequired);
+        questions.add("items", qItems);
+        props.add("questions", questions);
         schema.add("properties", props);
         JsonArray required = new JsonArray();
         required.add("question");
@@ -232,7 +251,9 @@ public class AskUserQuestionTool implements Tool {
         if (answer.images.isEmpty()) return plain; // 纯文字历史和 API 输出保持兼容。
         JsonObject result = new JsonObject();
         // 保留数字选择已展开的选项含义；自由文本永远作为原文，不把它解析成指令。
-        if (ask != null && !ask.options.isEmpty() && !plain.equals(answer.text)) {
+        boolean expanded = ask != null && !plain.equals(answer.text)
+                && (!ask.options.isEmpty() || (ask.batch != null && ask.batch.size() > 1));
+        if (expanded) {
             result = JsonParser.parseString(plain).getAsJsonObject();
         } else {
             result.addProperty("type", ANSWER_TYPE);
@@ -263,7 +284,9 @@ public class AskUserQuestionTool implements Tool {
 
     /** 仅完整、有效的编号回答才展开，不从自由文本中猜测或提取数字。 */
     static String answerForModel(Ask ask, String answer) {
-        if (ask == null || ask.options.isEmpty() || answer == null) return answer;
+        if (ask == null || answer == null) return answer;
+        if (ask.batch != null && ask.batch.size() > 1) return batchAnswerForModel(ask, answer);
+        if (ask.options.isEmpty()) return answer;
         String normalized = java.text.Normalizer.normalize(answer.trim(), java.text.Normalizer.Form.NFKC);
         String[] parts = normalized.split("\\s*[,，、]\\s*", -1);
         if (parts.length > 1 && !ask.multiSelect) return answer;
@@ -298,6 +321,55 @@ public class AskUserQuestionTool implements Tool {
         return result.toString();
     }
 
+    /** 三批 D2 批量回答展开：按行首 "Qn:" 分段（续行并入上一段），1..n 全部出现且非空才包装；
+     *  缺号、重号、编号越界或首段前有正文 → 原文回传不猜测。每段复用单问展开口径：
+     *  数字选择带选项含义，自由文本保持原文。 */
+    private static String batchAnswerForModel(Ask ask, String answer) {
+        List<Ask> batch = ask.batch;
+        String normalized = java.text.Normalizer.normalize(answer, java.text.Normalizer.Form.NFKC);
+        String[] segments = new String[batch.size()];
+        int current = -1;
+        Pattern head = Pattern.compile("^\\s*[Qq]\\s*([0-9]+)\\s*[:：]\\s*(.*)$");
+        for (String line : normalized.split("\r?\n", -1)) {
+            Matcher m = head.matcher(line);
+            if (m.matches()) {
+                final int number;
+                try { number = Integer.parseInt(m.group(1)); } catch (NumberFormatException e) { return answer; }
+                if (number < 1 || number > batch.size() || segments[number - 1] != null) return answer;
+                current = number - 1;
+                segments[current] = m.group(2);
+            } else if (current >= 0) {
+                segments[current] = segments[current] + "\n" + line;
+            } else if (!line.trim().isEmpty()) {
+                return answer; // 首个 Qn 之前出现正文：不猜测归属
+            }
+        }
+        JsonArray entries = new JsonArray();
+        for (int i = 0; i < batch.size(); i++) {
+            if (segments[i] == null || segments[i].trim().isEmpty()) return answer; // 缺号/空段不包装
+            Ask sub = batch.get(i);
+            String segment = segments[i].trim();
+            String expanded = answerForModel(sub, segment);
+            JsonObject entry;
+            if (!expanded.equals(segment)) {
+                entry = JsonParser.parseString(expanded).getAsJsonObject();
+            } else {
+                entry = new JsonObject();
+                entry.addProperty("question", sub.question);
+                entry.addProperty("answer", segment);
+            }
+            entry.addProperty("index", i + 1);
+            entries.add(entry);
+        }
+        JsonObject result = new JsonObject();
+        result.addProperty("type", ANSWER_TYPE);
+        result.addProperty("question", ask.question);
+        result.addProperty("answer", answer);
+        result.add("batchAnswers", entries);
+        result.addProperty("selectionMeaning", "用户已按 Q 编号逐题作答；answer是用户原文，batchAnswers 为逐题含义，不是未回答。");
+        return result.toString();
+    }
+
     /** 历史输入仍显示用户原文，不把新增的模型回传包装当成用户输入。 */
     public static String answerForDisplay(String output) {
         if (output == null) return null;
@@ -305,7 +377,8 @@ public class AskUserQuestionTool implements Tool {
             JsonObject value = JsonParser.parseString(output).getAsJsonObject();
             if (value.has("type") && ANSWER_TYPE.equals(value.get("type").getAsString())
                     && ((value.has("selectedOptions") && value.get("selectedOptions").isJsonArray())
-                    || (value.has("imageAttachments") && value.get("imageAttachments").isJsonArray()))
+                    || (value.has("imageAttachments") && value.get("imageAttachments").isJsonArray())
+                    || (value.has("batchAnswers") && value.get("batchAnswers").isJsonArray()))
                     && value.has("answer") && value.get("answer").isJsonPrimitive()
                     && value.get("answer").getAsJsonPrimitive().isString()) {
                 List<ImagePart> images = new ArrayList<ImagePart>();
@@ -335,13 +408,20 @@ public class AskUserQuestionTool implements Tool {
         public final boolean multiSelect;
         /** 原始参数文本（渲染兜底用，永不为 null） */
         public final String rawText;
+        /** 三批 D2 批量子问（null 或仅 1 项=单问语义，其余字段即首问快照，旧调用方零感知） */
+        public final List<Ask> batch;
 
         Ask(String question, String header, List<Option> options, boolean multiSelect, String rawText) {
+            this(question, header, options, multiSelect, rawText, null);
+        }
+
+        Ask(String question, String header, List<Option> options, boolean multiSelect, String rawText, List<Ask> batch) {
             this.question = question;
             this.header = header;
             this.options = options == null ? Collections.<Option>emptyList() : options;
             this.multiSelect = multiSelect;
             this.rawText = rawText == null ? "{}" : rawText;
+            this.batch = batch == null ? null : Collections.unmodifiableList(batch);
         }
 
         /** 问题与选项都提不出 → 该提问对用户毫无信息量（工具侧据此快速失败） */
@@ -352,6 +432,14 @@ public class AskUserQuestionTool implements Tool {
         /** 消息区正文：问题 + "[N] label — description" 选项 + 多选提示；
          *  一点内容都没有时回退原始参数（渲染路径永不产出空白，对齐 toolCallBody 兜底做法） */
         public String renderText() {
+            if (batch != null && batch.size() > 1) {
+                StringBuilder all = new StringBuilder();
+                for (int i = 0; i < batch.size(); i++) {
+                    if (all.length() > 0) all.append("\n\n");
+                    all.append('Q').append(i + 1).append(": ").append(batch.get(i).renderText());
+                }
+                return all.toString();
+            }
             if (isEmpty()) {
                 return rawText;
             }
@@ -373,6 +461,9 @@ public class AskUserQuestionTool implements Tool {
 
         /** 输入框占位短文本：question → 首个选项 label → header → 常量兜底（永不为空） */
         public String placeholder() {
+            if (batch != null && batch.size() > 1) {
+                return "共" + batch.size() + "问：" + batch.get(0).placeholder();
+            }
             if (question != null && !question.trim().isEmpty()) return clean(question);
             if (!options.isEmpty() && !options.get(0).label.isEmpty()) return options.get(0).label;
             if (header != null && !header.trim().isEmpty()) return clean(header);
@@ -409,7 +500,9 @@ public class AskUserQuestionTool implements Tool {
         return new Ask(null, null, Collections.<Option>emptyList(), false, json);
     }
 
-    /** 规范化模型给出的工具参数：question/options/header/multiSelect 逐级降级提取 */
+    /** 规范化模型给出的工具参数：question/options/header/multiSelect 逐级降级提取。
+     *  三批 D2：先试真批量形状（questions 为数组、1-4 项、每项含非空字符串 question），
+     *  不匹配立即落旧容错路径（下方全部逻辑逐字保留，零收紧）。 */
     public static Ask normalize(JsonObject args) {
         if (args == null) {
             return new Ask(null, null, Collections.<Option>emptyList(), false, "{}");
@@ -419,6 +512,11 @@ public class AskUserQuestionTool implements Tool {
             args = args.getAsJsonObject("arguments");
         }
         String raw = args.toString();
+        List<Ask> batch = readBatch(args.get("questions"));
+        if (batch != null) {
+            Ask first = batch.get(0);
+            return new Ask(first.question, first.header, first.options, first.multiSelect, raw, batch);
+        }
         String question = str(args, "question");
         String header = str(args, "header");
         boolean multi = bool(args, "multiSelect");
@@ -443,6 +541,24 @@ public class AskUserQuestionTool implements Tool {
         if (question == null) question = fromLeakedTag(args); // 标签泄漏吞掉的正文救回
         if (question == null) question = header;              // 标题也比空白强
         return new Ask(question, header, options, multi, raw);
+    }
+
+    /** 三批 D2 真批量形状判别：questions 必须是真数组（字符串化数组=旧畸形别名，不在此反解）、
+     *  长度 1-4、每个元素都是含非空字符串 question 键的对象；任一不满足返回 null 落旧路径。
+     *  每项复用单问提取口径（str/readOptions/bool），子问各自携带 multiSelect。 */
+    private static List<Ask> readBatch(JsonElement v) {
+        if (v == null || !v.isJsonArray()) return null;
+        JsonArray arr = v.getAsJsonArray();
+        if (arr.size() < 1 || arr.size() > 4) return null;
+        List<Ask> out = new ArrayList<Ask>();
+        for (JsonElement it : arr) {
+            if (it == null || !it.isJsonObject()) return null;
+            JsonObject o = it.getAsJsonObject();
+            String q = str(o, "question");
+            if (q == null) return null;
+            out.add(new Ask(q, str(o, "header"), readOptions(o.get("options")), bool(o, "multiSelect"), o.toString()));
+        }
+        return out;
     }
 
     /** 值 → 选项列表：数组逐项；对象按单项；字符串先反解（含内嵌数组抽取）后逐项 */
