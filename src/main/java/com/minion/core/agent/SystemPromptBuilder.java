@@ -15,6 +15,19 @@ import java.util.Comparator;
 /** 系统提示词组装：内置提示 → 项目介绍(project.md) → 技能目录（路由引导，正文经 Skill 工具按需注入） */
 public class SystemPromptBuilder {
 
+    /** 三批 D1 规则 2 保守原文（默认 conservative 逐字保留；proactive 仅在构建时替换本段） */
+    private static final String RULE2_CONSERVATIVE =
+            "2.仅当缺失信息确实阻塞执行、存在重大范围分歧或缺少真实授权时，调用 AskUserQuestion 等待用户回答；"
+          + "已授权范围内可采用合理默认值并简短说明，不因非关键歧义反复停工。提问逐一进行，每次一个问题，选择题优先，最后留其他补充。\n";
+
+    /** 三批 D1 主动澄清文本（opt-in；规则 3/7 不动，ConfirmGate 仍是硬兜底） */
+    private static final String RULE2_PROACTIVE =
+            "2.主动澄清（首个副作用前）：范围歧义多解、多候选目标无法唯一确定、不可逆操作缺具体对象、"
+          + "缺凭证/路径/授权、指令冲突时，先调用 AskUserQuestion 问清再动手。"
+          + "已授权范围内的琐碎默认值直接采用并简短说明；本会话已答过的问题不重复问；"
+          + "定时/子 agent/自动续接等无人可问的场景采用合理默认并记录；只读探索能查到答案就不问。"
+          + "提问用 AskUserQuestion 一次最多 3 个相关问题，选择题优先、推荐项放第一并标注，最后留其他补充；问完等答复再动手。\n";
+
     private static final String BUILTIN =
             "你是运行在用户电脑里的代码开发助手。你可以调用工具读写文件、执行命令、搜索代码。\n"
           + "规则：\n"
@@ -29,8 +42,7 @@ public class SystemPromptBuilder {
           + "1.语言要求(重要):思考和回答使用中文，回答要简洁。\n"
           + "正文只给用户需要的结论、必要证据、错误、确认或交付；不要逐条复述工具登记、Todo状态、内部计划变更、"
           + "“继续执行/正在重试/已保存记录”等过程日志，工具过程由界面单独展示。\n"
-          + "2.仅当缺失信息确实阻塞执行、存在重大范围分歧或缺少真实授权时，调用 AskUserQuestion 等待用户回答；"
-          + "已授权范围内可采用合理默认值并简短说明，不因非关键歧义反复停工。提问逐一进行，每次一个问题，选择题优先，最后留其他补充。\n"
+          + RULE2_CONSERVATIVE
           + "3.用户或已加载技能明确要求审查确认、破坏性操作、重大范围变更仍须真实用户批准；"
           + "内部工作计划和进度登记不等于人类审批，不要求每份内部计划都确认，不得伪造用户或技能要求的批准。\n"
           + "4.使用工具前先想清楚目标，避免无谓调用；Bash 命令在项目工作目录下执行。"
@@ -119,9 +131,18 @@ public class SystemPromptBuilder {
         return this;
     }
 
+    /** 三批 D1 澄清策略：conservative（默认，规则 2 原文逐字）/ proactive（opt-in，仅替换规则 2 段） */
+    private volatile String clarifyPolicy = "conservative";
+
+    public SystemPromptBuilder setClarifyPolicy(String policy) {
+        this.clarifyPolicy = policy == null || policy.trim().isEmpty() ? "conservative" : policy.trim();
+        return this;
+    }
+
     /** Independent of task state, cwd, project.md contents, skill list and discovery order. */
     public String buildStable(ToolSchedulingPolicy policy) {
-        StringBuilder sb = new StringBuilder(BUILTIN);
+        String base = "proactive".equals(clarifyPolicy) ? BUILTIN.replace(RULE2_CONSERVATIVE, RULE2_PROACTIVE) : BUILTIN;
+        StringBuilder sb = new StringBuilder(base);
         sb.append('\n').append((policy == null ? ToolSchedulingPolicy.conservative() : policy).promptRules());
         if (emptyOutputPlaceholder) {
             sb.append("\n12.工具执行成功但无输出时，返回结果将为「输出内容为空」（如 mvn -q 输出重定向、读取空文件）：")

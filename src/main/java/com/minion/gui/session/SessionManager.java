@@ -503,6 +503,7 @@ public class SessionManager {
                         tmpDirOf(h.id).toString(), config.emptyOutputPlaceholder(), projSkills)
                         .setReplicaLayout(config.instructionsEnabled())   // D.2 四段（replica-offline）
                         .setOutputStyleBody(outputStyleBody())           // §10.5 输出样式风格段
+                        .setClarifyPolicy(config.intentClarifyPolicy())  // 三批 D1 澄清策略（默认 conservative）
                         .setToolUsageSection(config.instructionsEnabled()),  // D.4 工具总则（replica）
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入
@@ -924,6 +925,7 @@ public class SessionManager {
                         tmpDirOf(s.id).toString(), config.emptyOutputPlaceholder(), projSkills)
                         .setReplicaLayout(config.instructionsEnabled())
                         .setOutputStyleBody(outputStyleBody())           // §10.5 输出样式风格段
+                        .setClarifyPolicy(config.intentClarifyPolicy())  // 三批 D1 澄清策略（默认 conservative）
                         .setToolUsageSection(config.instructionsEnabled()),  // D.4 工具总则（replica）
                 ctx.confirmGate, controller, cm, ctx.workspace, s);
         loop.emptyOutputPlaceholder = config.emptyOutputPlaceholder(); // 工具空输出占位开关注入

@@ -129,6 +129,8 @@ public class Config {
     public boolean knowledgeSearchIndexEnabled() { return Boolean.parseBoolean(get("knowledge.search.index.enabled", "true")); }
     /** 三批 B3：会话历史主动召回工具 SessionRecall（默认 true；纯只读本地，仅当前项目）。 */
     public boolean sessionRecallEnabled() { return Boolean.parseBoolean(get("session.recall.enabled", "true")); }
+    /** 三批 D1：澄清策略 conservative（默认，零行为变化）/ proactive（opt-in 主动澄清）。 */
+    public String intentClarifyPolicy() { return get("intent.clarify.policy", "conservative"); }
     /** Python/Anaconda 解释器；留空时自动探测 MINION_PYTHON、Conda 和常见安装目录。 */
     public String pythonPath()   { return get("python.path", ""); }
     public String ocrPath() { return get("ocr.path", "tesseract"); }

@@ -757,6 +757,7 @@ public class SettingsDialog {
         private final CheckBox writeOutside;
         private final CheckBox skipConfirm;
         private final CheckBox enterSends;
+        private final CheckBox proactiveClarify;
 
         BasicPane(final Config config, final Window owner, final Consumer<String> themeChanged) {
             this.config = config;
@@ -869,6 +870,14 @@ public class SettingsDialog {
             // 勾选立即生效：直接写回 Config（内存+落盘），InputView 按键时读取 → 下次按键即新键位；无需点「应用」
             enterSends.selectedProperty().addListener((obs, ov, nv) ->
                     config.set("input.enterSends", String.valueOf(nv)));
+            // 三批 D1：主动澄清 opt-in（默认 conservative 零行为变化）；勾选即写配置，新会话生效
+            proactiveClarify = new CheckBox("主动澄清（首个副作用前问清歧义，新会话生效）");
+            proactiveClarify.setSelected("proactive".equals(config.intentClarifyPolicy()));
+            Tooltip clarifyTip = new Tooltip("开启后助手在范围歧义、多候选目标、不可逆操作缺对象、缺凭证/授权、指令冲突时先提问再动手；"
+                    + "已授权琐碎默认值直接采用。关闭（默认）保持原有保守提问策略。破坏性操作确认不受影响。");
+            proactiveClarify.setTooltip(clarifyTip);
+            proactiveClarify.selectedProperty().addListener((obs, ov, nv) ->
+                    config.set("intent.clarify.policy", nv ? "proactive" : "conservative"));
             VBox rows = new VBox(10);
             rows.getChildren().addAll(
                     row("界面主题:", theme),
@@ -880,7 +889,8 @@ public class SettingsDialog {
                     row("空间外读:", allowOutside),
                     row("空间外写:", writeOutside),
                     row("确认开关:", skipConfirm),
-                    row("发送键:", enterSends));
+                    row("发送键:", enterSends),
+                    row("澄清策略:", proactiveClarify));
 
             VBox contentBox = new VBox(10);
             contentBox.getChildren().addAll(rows);
