@@ -259,6 +259,14 @@ public class Config {
     /** v2.4 §8.2 协调器模式（agent.coordinatorMode 默认 false）：system prompt 增补协调器分工段 */
     public boolean agentCoordinatorMode() { return Boolean.parseBoolean(get("agent.coordinatorMode", "false")); }
 
+    /** J 批：协调队列默认并行度（agent.childConcurrency 默认 4，夹 1..16）；运行期仍可用 child_capacity 覆盖 */
+    public int childConcurrency() {
+        int n;
+        try { n = Integer.parseInt(get("agent.childConcurrency", "4").trim()); }
+        catch (NumberFormatException e) { n = 4; }
+        return Math.max(1, Math.min(16, n));
+    }
+
     /** v2.4 §3.2 Monitor（tools.monitor.enabled 默认 false=legacy；replica-offline 开启） */
     public boolean toolsMonitorEnabled() { return Boolean.parseBoolean(get("tools.monitor.enabled", "false")); }
 

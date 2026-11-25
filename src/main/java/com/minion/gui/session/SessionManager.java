@@ -1470,6 +1470,7 @@ public class SessionManager {
         loop.budgetEnabled = config.budgetEnabled();
         loop.toolsParallelMetadataDriven = config.toolsParallelMetadataDriven();
         loop.coordinatorMode = config.agentCoordinatorMode();   // §8.2 协调器分工段（默认 false）
+        loop.childConcurrency = config.childConcurrency();   // J 批协调队列并行度（默认 4）
         loop.sessionMemoryCompactEnabled = config.compactSessionMemoryEnabled();   // §5.7
         loop.toolSummaryEnabled = config.toolSummaryEnabled();   // §5.8
         // §5.1/5.2/5.3 上下文体系（默认值=V68 现状；microcompact 默认关、公式制默认关、恢复默认开）

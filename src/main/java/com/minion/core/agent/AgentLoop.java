@@ -322,6 +322,8 @@ public class AgentLoop {
     public boolean toolsParallelMetadataDriven = false;
     /** §8.2 协调器模式（agent.coordinatorMode 默认 false）：system prompt 增补分工段 */
     public boolean coordinatorMode;
+    /** J 批：协调队列并行度（agent.childConcurrency 默认 4，夹 1..16）；运行期 child_capacity 可覆盖 */
+    public int childConcurrency = 4;
     /** §5.7 会话记忆辅助压缩（compact.sessionMemory.enabled 默认 false=legacy） */
     public boolean sessionMemoryCompactEnabled;
     /** §5.8 工具批摘要（toolSummary.enabled 默认 false=legacy；经 SideQuery 异步） */
@@ -4094,7 +4096,8 @@ public class AgentLoop {
         retireOutdatedCoordination();
         if(childHost==null){
             final ChildTaskHost[] owner=new ChildTaskHost[1];
-            owner[0]=new ChildTaskHost(java.nio.file.Paths.get(workspace.workDir()),session.id,session.taskState,2,
+            owner[0]=new ChildTaskHost(java.nio.file.Paths.get(workspace.workDir()),session.id,session.taskState,
+                    Math.max(1,Math.min(16,childConcurrency)),
                     (assignment,cancellation)->executeCoordinatedChild(owner[0],assignment,cancellation),this::persistSession);
             childHost=owner[0];
         }return childHost;
