@@ -7,6 +7,12 @@ import static org.junit.Assert.*;
 /** 设置窗纯逻辑辅助：MCP 表单解析、模型激活判定（无 JavaFX 环境可用） */
 public class SettingsDialogTest {
 
+    @Test
+    public void aboutShowsReleaseVersion() {
+        java.util.List<String> lines = SettingsDialog.aboutText();
+        assertTrue(lines.get(1).contains("应用版本：2.4.10"));
+    }
+
     // ===== MCP 页表单辅助（纯逻辑，无 JavaFX） =====
 
     /** 参数文本：每行一个，trim 后去空行 */

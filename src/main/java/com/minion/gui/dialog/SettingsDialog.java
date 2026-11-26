@@ -938,9 +938,9 @@ public class SettingsDialog {
     // ===== 关于页 =====
 
     static java.util.List<String> aboutText() {
-        String version = SettingsDialog.class.getPackage().getImplementationVersion();
+        String version = com.minion.core.BuildInfo.VERSION;
         return java.util.Arrays.asList("Minion · 离线桌面工作台",
-                version == null ? "运行环境：Java 8 + JavaFX" : "应用版本：" + version + " · Java 8 + JavaFX");
+                "应用版本：" + version + " · Java 8 + JavaFX");
     }
 
     private static VBox aboutPane() {
